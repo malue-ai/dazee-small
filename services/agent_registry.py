@@ -740,6 +740,11 @@ class AgentRegistry:
                     "max_input_tokens": model_cfg.capabilities.max_input_tokens,
                 }
 
+        # Fill custom data_dir (None means default path is used)
+        from utils.app_paths import get_instance_custom_data_dir
+
+        detail["data_dir"] = get_instance_custom_data_dir(config.name)
+
         return detail
 
     async def get_agent_prompt(self, agent_id: str) -> str:

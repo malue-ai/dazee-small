@@ -336,6 +336,37 @@
               请先在设置页面配置 API Key 以激活模型
             </p>
           </div>
+
+          <!-- 存储路径 -->
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <label class="text-sm font-medium text-foreground">存储路径</label>
+              <span class="text-xs text-muted-foreground">（可选）</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="relative flex-1">
+                <FolderOpen class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50 pointer-events-none" />
+                <input
+                  v-model="form.dataDir"
+                  type="text"
+                  placeholder="使用默认路径"
+                  class="w-full pl-10 pr-4 py-3 text-sm bg-card border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 text-foreground placeholder:text-muted-foreground/50 transition-colors"
+                />
+              </div>
+              <button
+                v-if="form.dataDir"
+                type="button"
+                @click="form.dataDir = ''"
+                class="p-2.5 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors flex-shrink-0"
+                title="清除自定义路径"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              自定义项目文件的存储位置。留空则自动存储到默认路径。
+            </p>
+          </div>
         </div>
 
         <!-- 预览标签 -->
@@ -422,7 +453,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save, FolderOpen } from 'lucide-vue-next'
 import { useAgentStore } from '@/stores/agent'
 import { useGuideStore } from '@/stores/guide'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
@@ -501,7 +532,8 @@ const form = reactive({
   name: '',
   description: '',
   instructions: '',
-  model: ''
+  model: '',
+  dataDir: ''
 })
 
 // ==================== 模型选择 ====================
@@ -939,8 +971,8 @@ const createProgress = reactive({
   message: '',
 })
 
-/** SSE 超时（60 秒） */
-const CREATE_TIMEOUT_MS = 60_000
+/** SSE 超时（180 秒，preload_instance 涉及多次串行 LLM 调用） */
+const CREATE_TIMEOUT_MS = 180_000
 
 /** 重置进度状态 */
 function resetProgress() {
@@ -965,7 +997,8 @@ async function handleCreate() {
         name: form.name.trim(),
         description: form.description.trim(),
         prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`,
-        ...(form.model ? { model: form.model } : {})
+        ...(form.model ? { model: form.model } : {}),
+        ...(form.dataDir.trim() ? { data_dir: form.dataDir.trim() } : {})
       },
       (step, total, message) => {
         createProgress.step = step
@@ -984,10 +1017,11 @@ async function handleCreate() {
     router.replace({ name: 'agent', params: { agentId: detail.agent_id } })
   } catch (error: any) {
     console.error('❌ 创建项目失败:', error)
-    const msg = error?.name === 'AbortError'
-      ? '创建超时，请稍后重试'
+    const isTimeout = error?.name === 'AbortError'
+    const msg = isTimeout
+      ? '连接超时，但创建可能仍在后台进行中。请返回项目列表查看。'
       : (error?.response?.data?.detail || error?.message || '未知错误')
-    showError(`创建失败：${msg}`)
+    showError(isTimeout ? msg : `创建失败：${msg}`)
   } finally {
     clearTimeout(timer)
     isCreating.value = false
@@ -1007,7 +1041,8 @@ async function handleSave() {
       name: form.name.trim(),
       description: form.description.trim(),
       prompt: form.instructions.trim() || undefined,
-      ...(form.model ? { model: form.model } : {})
+      ...(form.model ? { model: form.model } : {}),
+      ...(form.dataDir.trim() ? { data_dir: form.dataDir.trim() } : {})
     })
 
     // 保存成功，跳转到 Agent 对话页
@@ -1033,6 +1068,7 @@ async function loadAgentData() {
     form.name = detail.name || ''
     form.description = detail.description || ''
     form.model = detail.model || ''
+    form.dataDir = detail.data_dir || ''
 
     // 加载 prompt 作为 instructions
     try {

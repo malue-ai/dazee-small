@@ -240,20 +240,14 @@ class HITLTool(BaseTool):
 
         logger.info(f"输入请求已创建: request_id={request.request_id}")
 
-        # HITL 异步模式：立即返回 pending 状态，不等待用户响应
-        logger.info("HITL 异步模式: 立即返回 pending 状态")
+        # 阻塞模式：等待用户通过前端提交表单响应
+        # SSE 流保持打开，broadcaster 在 tool_use content_stop 时
+        # 已发送 hitl_data 事件通知前端渲染表单
+        logger.info(f"HITL 阻塞等待用户响应: session_id={session_id}")
+        result = await manager.wait_for_response(request.request_id, timeout=None)
 
-        return {
-            "type": "hitl_pending",
-            "success": True,
-            "timed_out": False,
-            "status": "pending_user_input",
-            "session_id": session_id,
-            "request_id": request.request_id,
-            "questions": filtered_questions,
-            "response": None,
-            "message": "表单已发送到前端，等待用户响应。对话将在用户提交后自动继续。",
-        }
+        # 处理用户响应
+        return self._process_response(result, timeout, filtered_questions, use_default_on_timeout)
 
     # ==================== 私有方法 ====================
 

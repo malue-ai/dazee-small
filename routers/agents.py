@@ -534,6 +534,12 @@ def _build_config_dict(request: AgentCreateRequest) -> dict:
             "retention_policy": request.memory.retention_policy,
         }
 
+    # Storage (custom data directory)
+    if request.data_dir:
+        config_data["storage"] = {
+            "data_dir": request.data_dir,
+        }
+
     return config_data
 
 
@@ -644,13 +650,44 @@ def _validate_create_request(request: AgentCreateRequest):
 
     instance_dir = get_instances_dir() / agent_id
     if instance_dir.exists():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "DIRECTORY_EXISTS",
-                "message": f"实例目录 '{agent_id}' 已存在，请更换 agent_id",
-            },
-        )
+        if registry.has_agent(agent_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "DIRECTORY_EXISTS",
+                    "message": f"实例目录 '{agent_id}' 已存在，请更换 agent_id",
+                },
+            )
+        else:
+            # Orphan directory from a previous interrupted creation — clean it up
+            logger.warning(f"发现孤儿目录 '{agent_id}'（未加载到注册表），清理后重建")
+            shutil.rmtree(instance_dir, ignore_errors=True)
+
+    # 2. Validate custom data_dir (if provided)
+    if request.data_dir:
+        data_path = Path(request.data_dir).expanduser().resolve()
+        # Must be an absolute path
+        if not data_path.is_absolute():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "INVALID_DATA_DIR",
+                    "message": "存储路径必须是绝对路径",
+                },
+            )
+        # Verify parent directory exists (or can be created)
+        try:
+            data_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "DATA_DIR_NOT_WRITABLE",
+                    "message": f"存储路径无法创建或无写入权限: {e}",
+                },
+            )
+        # Normalize the path back to request for config building
+        request.data_dir = str(data_path)
 
     config_data = _build_config_dict(request)
     return registry, agent_id, instance_dir, config_data
@@ -742,6 +779,8 @@ async def _create_agent_sse(
 ):
     """Create agent with SSE streaming progress events."""
     TOTAL_STEPS = 7
+    # Heartbeat interval to keep SSE connection alive during long LLM calls
+    HEARTBEAT_INTERVAL_S = 10
 
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue()
@@ -793,20 +832,28 @@ async def _create_agent_sse(
                     "message": str(e),
                 })
 
-        # Launch the create task in background
+        # Launch the create task in background.
+        # IMPORTANT: do NOT cancel on SSE disconnect — let creation finish.
         task = asyncio.create_task(do_create())
 
         try:
             while True:
-                event = await queue.get()
+                try:
+                    # Wait for event with heartbeat timeout
+                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_S)
+                except asyncio.TimeoutError:
+                    # No event within interval — send SSE comment as keepalive
+                    yield ": keepalive\n\n"
+                    continue
+
                 yield _sse_event(event)
 
                 if event["type"] in ("complete", "error"):
                     yield "event: done\ndata: {}\n\n"
                     break
-        finally:
-            if not task.done():
-                task.cancel()
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected — let the creation task continue in background
+            logger.info(f"SSE 连接断开，Agent '{agent_id}' 创建任务继续在后台执行")
 
     return StreamingResponse(
         event_generator(),
@@ -861,6 +908,29 @@ async def update_agent(agent_id: str, request: AgentCreateRequest):
                 "message": f"Agent '{agent_id}' 不存在",
             },
         )
+
+    # Validate custom data_dir (if provided)
+    if request.data_dir:
+        data_path = Path(request.data_dir).expanduser().resolve()
+        if not data_path.is_absolute():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "INVALID_DATA_DIR",
+                    "message": "存储路径必须是绝对路径",
+                },
+            )
+        try:
+            data_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "DATA_DIR_NOT_WRITABLE",
+                    "message": f"存储路径无法创建或无写入权限: {e}",
+                },
+            )
+        request.data_dir = str(data_path)
 
     # Build and write
     config_data = _build_config_dict(request)

@@ -1,12 +1,16 @@
 /**
  * HITL (Human-in-the-Loop) Composable
  * 负责人工确认弹窗状态和提交
+ *
+ * 阻塞模式：Agent 执行过程中调用 hitl 工具时会阻塞等待用户响应。
+ * SSE 流保持打开，前端通过 POST /api/v1/human-confirmation/{session_id}
+ * 提交用户响应，唤醒后端 asyncio.Event，Agent 在同一个 SSE 流中继续执行。
  */
 
 import { ref, computed } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { useConversationStore } from '@/stores/conversation'
-import { useSSE } from './useSSE'
+import { submitHITLResponse } from '@/api/session'
 import type { HITLConfirmRequest, HITLResponse, HITLFormQuestion, HITLConfirmationType } from '@/types'
 
 /**
@@ -109,7 +113,6 @@ function formatHITLResponseForDisplay(
 export function useHITL() {
   const sessionStore = useSessionStore()
   const conversationStore = useConversationStore()
-  const sse = useSSE()
 
   // ==================== 状态 ====================
 
@@ -124,9 +127,6 @@ export function useHITL() {
 
   /** 是否正在提交 */
   const isSubmitting = ref(false)
-  
-  /** SSE 事件处理回调（由外部设置） */
-  const onSSEEvent = ref<((event: any, assistantMsg: any) => void) | null>(null)
 
   // ==================== 计算属性 ====================
 
@@ -240,21 +240,19 @@ export function useHITL() {
   }
 
   /**
-   * 提交响应（新版本：通过 SSE 流式接口提交）
+   * 提交响应（阻塞模式：通过 confirmation API 唤醒后端 Event）
+   *
+   * Agent 执行中调用 hitl 工具后会阻塞在 asyncio.Event 上，SSE 流保持打开。
+   * 前端提交表单后调用 POST /api/v1/human-confirmation/{session_id}，
+   * 后端 Event.set() 唤醒 Agent，Agent 在同一个 SSE 流中继续执行。
    */
   async function submit(): Promise<boolean> {
     if (!request.value || isSubmitting.value) return false
 
-    const conversationId = conversationStore.currentId
-    const userId = conversationStore.userId
+    const sessionId = sessionStore.currentSessionId
 
-    if (!conversationId) {
-      console.error('❌ 无法提交 HITL 响应：conversation_id 不存在')
-      return false
-    }
-
-    if (!userId) {
-      console.error('❌ 无法提交 HITL 响应：user_id 不存在')
+    if (!sessionId) {
+      console.error('❌ 无法提交 HITL 响应：session_id 不存在')
       return false
     }
 
@@ -267,77 +265,35 @@ export function useHITL() {
     isSubmitting.value = true
 
     try {
-      // 🆕 格式化用户响应为分号分隔的字符串（发送到后端）
-      const formattedMessage = formatHITLResponse(response.value, confirmationType.value)
-      
-      // 🆕 格式化用户响应为可读的显示文本（界面显示）
-      const displayMessage = formatHITLResponseForDisplay(response.value, confirmationType.value)
-      
-      console.log('📤 提交 HITL 响应:', formattedMessage)
+      // 构造响应数据（直接发送结构化数据，由后端传给 Agent）
+      const userResponse = response.value
 
-      // 🆕 在界面上显示用户的选择
-      conversationStore.addUserMessage(displayMessage)
+      console.log('📤 提交 HITL 响应:', userResponse, 'session:', sessionId)
 
-      // 🆕 添加空的助手消息（用于流式填充）
-      const assistantMsg = conversationStore.addAssistantMessage()
+      // 调用 confirmation API 唤醒后端 asyncio.Event
+      await submitHITLResponse(sessionId, userResponse as string | string[] | Record<string, unknown>)
 
-      // 🆕 通过 SSE 流式接口发送消息
-      const requestBody = {
-        message: formattedMessage,
-        user_id: userId,
-        conversation_id: conversationId,
-        stream: true, // ✅ 启用流式响应
-        variables: {
-          hitlFlag: true // 🔑 标识这是 HITL 响应
-        }
-      }
+      console.log('✅ HITL 响应已提交，Agent 继续执行')
 
-      // 🔑 建立 SSE 连接（不 await，让它在后台运行）
-      sse.connect(requestBody, {
-        onEvent: (event) => {
-          // 如果外部设置了事件处理回调，则使用它
-          if (onSSEEvent.value) {
-            onSSEEvent.value(event, assistantMsg)
-          }
-        },
-        onConnected: () => {
-          console.log('✅ HITL 响应 SSE 已连接')
-          // 🆕 连接成功后立即关闭弹窗
-          hide()
-          isSubmitting.value = false
-        },
-        onDisconnected: () => {
-          console.log('✅ HITL 响应 SSE 已断开')
-        },
-        onError: (error) => {
-          console.error('❌ HITL 响应 SSE 错误:', error)
-          // 错误时也要重置状态
-          isSubmitting.value = false
-        }
-      }).catch((error) => {
-        // 捕获连接错误
-        console.error('❌ 提交 HITL 响应失败:', error)
-        isSubmitting.value = false
-      })
+      // 关闭弹窗
+      hide()
 
-      console.log('📤 HITL 响应已发送，等待 SSE 连接建立...')
-      
-      // 不再等待 SSE 流结束，立即返回
       return true
     } catch (error: unknown) {
       console.error('❌ 提交 HITL 响应失败:', error)
-      isSubmitting.value = false
       return false
+    } finally {
+      isSubmitting.value = false
     }
   }
 
   /**
-   * 取消确认（发送取消响应）
+   * 取消确认（发送取消响应唤醒 Agent）
    */
   async function cancel(): Promise<void> {
     if (request.value) {
       response.value = 'cancel'
-      await submit() // 通过 chat 接口发送 "cancel"
+      await submit() // 通过 confirmation API 发送 "cancel"
     } else {
       hide()
     }
@@ -358,14 +314,6 @@ export function useHITL() {
   function reset(): void {
     hide()
     isSubmitting.value = false
-  }
-
-  /**
-   * 设置 SSE 事件处理回调（由 useChat 调用）
-   * @param handler - 事件处理函数
-   */
-  function setSSEEventHandler(handler: (event: any, assistantMsg: any, convId?: string) => void): void {
-    onSSEEvent.value = handler
   }
 
   return {
@@ -395,6 +343,5 @@ export function useHITL() {
     cancel,
     hide,
     reset,
-    setSSEEventHandler // 🆕 新增方法
   }
 }

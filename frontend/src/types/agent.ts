@@ -46,6 +46,8 @@ export interface AgentDetail {
   updated_at: string | null
   last_used_at: string | null
   loaded_at: string | null
+  /** 自定义数据存储目录（null 表示使用默认路径） */
+  data_dir: string | null
 }
 
 export interface AgentMCPTool {
@@ -77,6 +79,8 @@ export interface AgentCreateRequest {
   prompt: string
   model?: string
   plan_manager_enabled?: boolean
+  /** 自定义数据存储目录（绝对路径），不填则使用默认路径 */
+  data_dir?: string
 }
 
 // ==================== 更新请求 ====================
@@ -86,4 +90,6 @@ export interface AgentUpdateRequest {
   description?: string
   prompt?: string
   model?: string
+  /** 自定义数据存储目录（绝对路径），不填则使用默认路径 */
+  data_dir?: string
 }

@@ -1046,6 +1046,14 @@ async def create_agent_from_instance(
     logger.info(f"   配置: {config.name} v{config.version}")
     logger.info(f"   描述: {config.description}")
 
+    # 2.0.1 注册自定义数据目录（若 config.yaml 配置了 storage.data_dir）
+    storage_cfg = (config.raw_config or {}).get("storage", {})
+    custom_data_dir = storage_cfg.get("data_dir") if isinstance(storage_cfg, dict) else None
+    if custom_data_dir:
+        from utils.app_paths import register_instance_data_dir
+        register_instance_data_dir(instance_name, custom_data_dir)
+        logger.info(f"   自定义存储路径: {custom_data_dir}")
+
     # 2.1 注入实例 LLM Profiles（必须在 InstancePromptCache 加载之前）
     from config.llm_config.loader import set_instance_profiles
 

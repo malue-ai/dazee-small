@@ -52,15 +52,19 @@ user_prompt: ""
 #     model: "qwen3-max"   # 不填则由 provider 自动决定
 agent: {}
 
-# ==================== 存储（自动管理，无需配置） ====================
+# ==================== 存储 ====================
 #
-# 运行时数据自动按 instance.name 隔离，你不需要配置任何路径：
+# 运行时数据默认按 instance.name 隔离到：
 #   data/instances/{name}/db/        → 数据库
 #   data/instances/{name}/memory/    → 记忆文件
 #   data/instances/{name}/store/     → 向量 + 索引
 #   data/instances/{name}/storage/   → 上传文件
 #   data/instances/{name}/playbooks/ → 策略
 #   data/instances/{name}/snapshots/ → 状态快照
+#
+# 如需自定义存储位置，取消下面的注释并填写绝对路径：
+# storage:
+#   data_dir: "/path/to/your/custom/data"
 #
 
 # ==================== 知识库 ====================

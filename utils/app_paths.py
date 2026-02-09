@@ -145,6 +145,40 @@ def get_storage_dir() -> Path:
 
 
 
+# ==================== 自定义实例数据路径注册表 ====================
+
+# instance_name -> custom absolute data_dir path
+_custom_data_dirs: dict[str, Path] = {}
+
+
+def register_instance_data_dir(instance_name: str, data_dir: str) -> None:
+    """
+    Register a custom data directory for a specific instance.
+
+    Called during instance loading when config.yaml contains
+    ``storage.data_dir``. All downstream path helpers
+    (get_instance_db_dir, get_instance_storage_dir, etc.) will
+    automatically use this custom root instead of the default.
+
+    Args:
+        instance_name: Instance name (e.g. "my-agent")
+        data_dir: Absolute path string to the custom data directory
+    """
+    resolved = Path(data_dir).expanduser().resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    _custom_data_dirs[instance_name] = resolved
+
+
+def get_instance_custom_data_dir(instance_name: str) -> Optional[str]:
+    """
+    Return the registered custom data_dir for an instance, or None.
+
+    Used by API responses to expose the current storage path to the frontend.
+    """
+    p = _custom_data_dirs.get(instance_name)
+    return str(p) if p else None
+
+
 # ==================== 实例隔离路径 ====================
 
 
@@ -152,17 +186,25 @@ def get_instance_data_dir(instance_name: str) -> Path:
     """
     Get instance-scoped data directory.
 
-    All per-instance data (DB, memory, storage, playbooks, snapshots)
-    is stored under this directory, fully isolated from other instances.
+    If a custom data_dir was registered via ``register_instance_data_dir``,
+    that path is used. Otherwise falls back to the default:
+    ``{user_data_dir}/data/instances/{instance_name}/``
 
     Args:
         instance_name: Instance name (e.g. "xiaodazi")
 
     Returns:
-        Path like {user_data_dir}/data/instances/{instance_name}/
+        Custom data_dir or default path.
     """
     if not instance_name:
         instance_name = os.getenv("AGENT_INSTANCE", "default")
+
+    # Check custom registry first
+    custom = _custom_data_dirs.get(instance_name)
+    if custom:
+        custom.mkdir(parents=True, exist_ok=True)
+        return custom
+
     d = get_user_data_dir() / "data" / "instances" / instance_name
     d.mkdir(parents=True, exist_ok=True)
     return d

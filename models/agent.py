@@ -96,6 +96,12 @@ class AgentCreateRequest(BaseModel):
     
     # 记忆
     memory: Optional[MemoryConfig] = Field(None, description="记忆配置")
+
+    # 存储
+    data_dir: Optional[str] = Field(
+        None,
+        description="自定义数据存储目录（绝对路径）。不填则使用默认路径 data/instances/{agent_id}/",
+    )
     
     model_config = {
         "json_schema_extra": {
@@ -108,6 +114,7 @@ class AgentCreateRequest(BaseModel):
                     "enabled_capabilities": {
                         "code_execution": False,
                     },
+                    "data_dir": "/Users/me/my-agent-data",
                 }
             ]
         }
@@ -147,6 +154,9 @@ class AgentDetail(BaseModel):
     )
     apis: List[APIDetail] = Field(default_factory=list, description="API 配置列表")
     skills: List[str] = Field(default_factory=list, description="Skill 名称列表")
+    
+    # 存储
+    data_dir: Optional[str] = Field(None, description="自定义数据存储目录（为空时使用默认路径）")
 
     # 模型能力（从 ModelRegistry 自动填充）
     model_capabilities: Optional[Dict] = Field(

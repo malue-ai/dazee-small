@@ -1,0 +1,36 @@
+# ============================================================
+# Skills 配置模板
+# ============================================================
+#
+# 从 xiaodazi 实例的 config/skills.yaml 复制，按需裁剪。
+# 只保留该实例需要的 Skills。
+#
+# 完整 Skills 清单见：instances/xiaodazi/config/skills.yaml
+#
+
+skill_groups:
+  # 示例分组（按需添加）：
+  # writing:
+  #   description: "写作、润色、改写"
+  #   skills: [writing-assistant]
+  _always:
+    description: "始终注入（基础能力）"
+    skills: [local-search, app-recommender]
+
+skills:
+  loading_mode: "lazy"
+  os_aware: true
+
+  common:
+    builtin:
+      # --- 框架核心（系统级，必须保留） ---
+      - { name: plan-todo,       backend_type: tool, tool_name: plan_todo,  system: true, description: "任务规划与进度追踪" }
+      - { name: hitl,            backend_type: tool, tool_name: hitl,       system: true, description: "涉及敏感操作时请求用户确认" }
+      - { name: api-calling,     backend_type: tool, tool_name: api_calling, system: true, description: "通用 HTTP API 调用能力" }
+      - { name: file-manager,    backend_type: local, skill_source: instance, system: true, description: "本地文件管理" }
+      - { name: local-search,    backend_type: local, skill_source: instance, system: true, description: "本地文件搜索" }
+      - { name: app-recommender, backend_type: local, skill_source: instance, system: true, description: "根据任务推荐应用" }
+
+      # --- 按需添加你需要的 Skills ---
+      # - { name: writing-assistant, backend_type: local, skill_source: instance, description: "写作辅助" }
+      # - { name: translator,        backend_type: local, skill_source: instance, description: "多语言翻译" }

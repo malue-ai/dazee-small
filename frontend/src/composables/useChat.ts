@@ -940,9 +940,6 @@ export function useChat() {
     }
   }
 
-  // 设置 HITL 的 SSE 事件处理器
-  hitl.setSSEEventHandler(handleStreamEvent)
-
   return {
     // 状态
     isLoading,
