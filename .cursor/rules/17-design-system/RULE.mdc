@@ -1,0 +1,155 @@
+---
+alwaysApply: true
+---
+
+# 前端设计系统规范（强制）
+
+## 设计风格
+
+**Apple Liquid + 琥珀黄主题色 + 灰度极简**
+
+| 特征 | 规范 |
+|---|---|
+| 风格 | Apple 液态毛玻璃（frosted glass） |
+| 主题色 | 琥珀黄 `#F59E0B`（amber-500） |
+| 基底 | 纯白 + 灰度体系 |
+| 暗色模式 | 不支持，仅亮色 |
+| 图标库 | Lucide Vue Next（线性图标） |
+| 字体 | 系统字体栈（-apple-system） |
+
+## 色板（唯一来源：`frontend/src/style.css` 的 `@theme`）
+
+### 核心色
+
+| Token | 值 | 用途 |
+|---|---|---|
+| `--color-primary` | `#F59E0B` | 主按钮、激活态、强调 |
+| `--color-primary-foreground` | `#ffffff` | 主按钮文字 |
+| `--color-primary-hover` | `#D97706` | 主按钮 hover |
+| `--color-accent` | `#FEF3C7` | 浅黄背景（用户消息、选中态） |
+| `--color-accent-foreground` | `#92400E` | 浅黄背景上的文字 |
+
+### 灰度
+
+| Token | 值 | 用途 |
+|---|---|---|
+| `--color-background` | `#ffffff` | 页面背景 |
+| `--color-foreground` | `#09090b` | 主文字 |
+| `--color-muted` | `#f4f4f5` | 次要背景（代码块、hover） |
+| `--color-muted-foreground` | `#71717a` | 次要文字 |
+| `--color-border` | `rgba(0,0,0,0.06)` | 所有边框 |
+
+### 状态色（仅两个）
+
+| Token | 值 | 用途 |
+|---|---|---|
+| `--color-destructive` | `#EF4444` | 错误、删除 |
+| `--color-success` | `#22C55E` | 成功、运行中 |
+
+## 禁止事项
+
+### ❌ 禁止硬编码颜色
+
+```vue
+<!-- ❌ 错误 -->
+<div style="color: #5f6368">
+<div class="bg-[#f8f9fa]">
+<style scoped>
+.card { background: #f8f9fa; color: #3c4043; }
+</style>
+
+<!-- ✅ 正确：使用 Tailwind token class -->
+<div class="text-muted-foreground">
+<div class="bg-muted">
+```
+
+### ❌ 禁止出现以下颜色
+
+- `#4285f4`（Google Blue）→ 用 `primary`（黄色）
+- `#667eea`（随机紫蓝）→ 用 `primary`
+- `#5f6368` / `#3c4043` / `#9aa0a6`（Google Material 灰）→ 用 `muted-foreground`
+- `#f8f9fa` / `#f1f3f4` / `#f7fafc`（非标准浅灰）→ 用 `muted`
+- `#e8eaed` / `#dadce0` / `#cbd5e0`（非标准边框灰）→ 用 `border`
+
+### ❌ 禁止使用蓝色
+
+本项目没有蓝色。所有蓝色（`blue-*`、`#4285f4`、`#2563eb`）一律替换为 `primary`（黄色）。
+
+## 玻璃效果规范
+
+### 侧边栏
+
+```html
+<nav class="glass-sidebar">
+```
+对应 CSS：`background: rgba(255,255,255,0.72); backdrop-filter: blur(20px) saturate(180%);`
+
+### 顶部栏
+
+```html
+<header class="glass-header">
+```
+对应 CSS：`background: rgba(255,255,255,0.85); backdrop-filter: blur(16px) saturate(180%);`
+
+### 输入区底部
+
+```html
+<div class="glass-footer">
+```
+对应 CSS：`background: rgba(255,255,255,0.9); backdrop-filter: blur(12px);`
+
+## 圆角规范
+
+| 元素 | 圆角 |
+|---|---|
+| 模态框 | `rounded-3xl`（24px） |
+| 卡片/面板 | `rounded-2xl`（16px） |
+| 按钮 | `rounded-xl`（12px） |
+| 输入框 | `rounded-xl`（12px） |
+| 小元素/Badge | `rounded-lg`（8px） |
+| 头像 | `rounded-full` |
+
+## 阴影规范
+
+| 场景 | 值 |
+|---|---|
+| 卡片 | `shadow-sm`（默认），`shadow-lg`（hover） |
+| 模态框 | `shadow-2xl` |
+| 浮动按钮 | `shadow-lg shadow-primary/20` |
+| 禁止 | 自定义 `box-shadow`，统一用 Tailwind |
+
+## 按钮规范
+
+| 类型 | Class |
+|---|---|
+| 主按钮 | `bg-primary text-white hover:bg-primary-hover shadow-lg shadow-primary/20` |
+| 次要按钮 | `bg-muted text-foreground hover:bg-muted/80` |
+| 危险按钮 | `bg-destructive/10 text-destructive hover:bg-destructive/20` |
+| 幽灵按钮 | `text-muted-foreground hover:bg-muted hover:text-foreground` |
+
+## 动画规范
+
+```css
+/* 统一过渡曲线 */
+transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+/* 面板滑入 */
+transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+```
+
+## 滚动条规范
+
+统一使用 `.scrollbar-thin` class，样式在 `style.css` 中全局定义。
+
+## 文件图标颜色（唯一例外）
+
+`FileTreeNode.vue` 和 `FilePreview.vue` 中的文件类型图标颜色**允许**使用 Tailwind 的语义色来区分文件类型（如 `text-amber-500` for JS），这是唯一允许使用非 token 颜色的场景。
+
+## 代码审查检查清单
+
+- [ ] 是否存在硬编码 hex 颜色？（`#` 开头，scoped style 中）
+- [ ] 是否存在 `blue-*` class？（除文件图标外）
+- [ ] 是否存在 `bg-gray-900` 按钮？（应为 `bg-primary`）
+- [ ] 边框是否统一使用 `border-border`？
+- [ ] 玻璃效果是否使用 `glass-*` class？
+- [ ] 圆角是否遵循规范？

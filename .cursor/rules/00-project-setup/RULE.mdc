@@ -1,0 +1,59 @@
+---
+description: "项目环境配置：Python 虚拟环境、运行命令"
+globs:
+  - "**/*.py"
+  - "**/*.sh"
+  - "**/Makefile"
+alwaysApply: true
+---
+
+# 项目环境配置
+
+## Python 虚拟环境
+
+**重要**：本项目使用 Python 虚拟环境，请先创建并始终在虚拟环境中运行代码：
+
+```bash
+# 创建虚拟环境
+python3 -m venv .venv
+
+# 激活命令
+source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+## 运行命令规范
+
+### 运行 Python 脚本
+
+```bash
+# 先激活环境
+source .venv/bin/activate
+python3 scripts/xxx.py
+```
+
+### 运行测试
+
+```bash
+# pytest
+python3 -m pytest tests/xxx.py -v
+
+# 验证脚本
+python3 scripts/verify_probe_optimization.py
+```
+
+### 启动服务
+
+```bash
+# 激活环境后启动
+source .venv/bin/activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## 注意事项
+
+1. **不要使用系统 Python**：系统 Python 可能缺少依赖
+2. **安装依赖**：使用 `pip install -r requirements.txt` 在虚拟环境中安装
+3. **IDE 配置**：确保 IDE 使用此虚拟环境作为 Python 解释器

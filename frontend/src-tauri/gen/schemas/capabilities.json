@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"默认权限配置","local":true,"windows":["main"],"permissions":["core:default","notification:default","updater:default",{"identifier":"shell:allow-spawn","allow":[{"args":true,"name":"binaries/zenflux-backend","sidecar":true}]},{"identifier":"shell:allow-execute","allow":[{"args":true,"name":"binaries/zenflux-backend","sidecar":true}]}]}}

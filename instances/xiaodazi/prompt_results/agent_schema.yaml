@@ -1,0 +1,96 @@
+name: 小搭子
+description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱的本地桌面助手
+intent_analyzer:
+  enabled: true
+  complexity_levels:
+  - simple
+  - medium
+  - complex
+  task_types:
+  - file_operation
+  - writing
+  - data_analysis
+  - translation
+  - app_automation
+  - memory_recall
+  - preference_adaptation
+  output_formats:
+  - natural_language
+  - structured_list
+  - table
+  use_llm: true
+  llm_model: claude-haiku-4-5-20251001
+  fast_mode: false
+  semantic_cache_threshold: null
+  simplified_output: true
+plan_manager:
+  enabled: true
+  trigger_condition: complexity == 'complex' or requires_multiple_skills or involves_ui_operations
+  max_steps: 20
+  granularity: fine
+  allow_dynamic_adjustment: true
+  validation_interval: 3
+  replan_enabled: true
+  max_replan_attempts: 3
+  replan_strategy: incremental
+  failure_threshold: 0.4
+tool_selector:
+  enabled: true
+  available_tools:
+  - nodes
+  - knowledge_search
+  - HITL
+  - plan-todo
+  - desktop_automation
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools:
+  - HITL
+  tool_timeout: 300
+memory_manager:
+  enabled: true
+  retention_policy: user
+  episodic_memory: true
+  working_memory_limit: 50
+  auto_compress: true
+  compress_threshold: 15
+output_formatter:
+  enabled: true
+  default_format: markdown
+  supported_formats:
+  - text
+  - markdown
+  - json
+  - html
+  code_highlighting: false
+  max_output_length: 2000
+  json_model_name: null
+  json_schema: null
+  strict_json_validation: false
+  json_ensure_ascii: false
+  json_indent: 2
+  include_metadata: false
+skills: []
+tools:
+- nodes
+- knowledge_search
+- HITL
+- plan-todo
+- desktop_automation
+model: qwen3-max
+max_turns: 25
+execution_strategy: rvr
+allow_parallel_tools: false
+context_limits:
+  max_context_tokens: 200000
+  warning_threshold: 0.8
+  truncate_threshold: 0.9
+temperature: null
+max_tokens: null
+enable_thinking: null
+enable_caching: null
+thinking_mode: null
+prompts: null
+reasoning: 作为本地桌面 AI 搭子，需支持复杂任务规划（如文件整理+UI操作）、主动记忆用户偏好、安全执行本地操作，并在技能缺失时通过 HITL 引导安装或提供替代方案。强调细粒度规划、用户记忆持久化、人话交互和行动优先原则，因此启用
+  intent_analyzer、plan_manager（细粒度）、memory_manager（user 级别）和关键工具集。

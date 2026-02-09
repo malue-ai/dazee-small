@@ -1,0 +1,69 @@
+---
+description: "Python、FastAPI 核心开发规范"
+alwaysApply: true
+---
+
+# Python/FastAPI 开发规范
+
+你是 Python、FastAPI 和异步编程专家。
+
+## 核心原则
+- 编写简洁、技术性强的代码
+- 优先函数式编程，避免不必要的类
+- 使用有意义的变量名（`is_active`, `has_permission`）
+- 文件/目录用 `snake_case`
+- 所有代码注释和 docstring 使用**英文**
+
+## Python/FastAPI
+- 纯函数用 `def`，异步用 `async def`
+- 所有函数**必须有类型注解**，优先 Pydantic 模型
+- 简洁条件：`if condition: do_something()`
+- **RORO 模式**：使用"接收对象，返回对象"（Receive an Object, Return an Object）模式
+
+## 异步编程（必须遵守）
+- 项目基于 **FastAPI + asyncio**，禁止阻塞操作
+- ❌ `with open()` → ✅ `async with aiofiles.open()`
+- ❌ `time.sleep()` → ✅ `await asyncio.sleep()`
+- ❌ `requests.get()` → ✅ `await httpx.AsyncClient().get()`
+- 并发用 `asyncio.gather()`，超时用 `asyncio.wait_for()`，限流用 `Semaphore`
+
+## 错误处理
+- 函数开头处理错误（Guard Clauses），使用早返回避免嵌套
+- 业务异常直接向上抛，系统异常记录堆栈后包装
+- 所有错误日志必须 `exc_info=True`
+- 实现适当的日志记录和自定义错误类型
+
+## 数据模型
+- 所有 API 输入/输出使用 Pydantic BaseModel
+- 使用 Field 添加描述和约束
+- 枚举用 Enum
+
+## 数据库和 ORM
+- 使用 **PostgreSQL** 作为主数据库
+- 使用 **SQLAlchemy 2.0** 的 ORM 特性（异步模式）
+- 使用清晰的 CRUD 层封装数据库操作
+
+## 性能优化
+- **异步操作**：最小化阻塞 I/O 操作
+- **缓存**：使用 Redis 或内存存储为频繁访问的数据实现缓存策略
+- **懒加载**：对大型数据集和 API 响应使用懒加载技术
+
+## API 设计
+- 遵循 **RESTful API 设计原则**
+- 依赖 **FastAPI 的依赖注入系统**管理状态和共享资源
+- 失败时添加 `"error"` 字段
+
+## 依赖
+- FastAPI、Pydantic v2、httpx、aiofiles、asyncpg、SQLAlchemy 2.0
+
+## 代码风格
+- 4 空格缩进，每行 ≤ 100 字符
+- 导入顺序：标准库 → 第三方库 → 本地模块
+- Google 风格 docstring（英文）
+
+## 禁止事项
+- ❌ 阻塞 I/O
+- ❌ 使用 `print()`
+- ❌ 记录敏感信息（密码、token、API key）
+- ❌ 吞异常：`except: pass`
+- ❌ 返回格式不一致

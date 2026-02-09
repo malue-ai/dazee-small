@@ -1,0 +1,246 @@
+---
+description: "E2E 质量测试驱动规范（强制）"
+globs:
+  - "scripts/run_e2e_*.py"
+  - "evaluation/**/*.py"
+  - "evaluation/**/*.yaml"
+alwaysApply: true
+---
+
+# E2E 质量测试驱动规范（强制）
+
+## 核心理念
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  E2E 测试的目的不只是「跑通流程」，更是「验证质量 + 指导优化」              │
+│                                                                             │
+│  ❌ 错误心态："Agent 完成了任务，评分不通过是评分器的问题"                   │
+│  ✅ 正确心态："评分不通过 = 不通过，必须分析原因并修复"                      │
+│                                                                             │
+│  三层验证，缺一不可：                                                       │
+│  1. 流程验证：能跑完不报错                                                  │
+│  2. 质量验证：评分达标（代码评分 + 模型评分）                               │
+│  3. 根因分析：失败时定位到具体优化方向                                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 一、测试失败分析流程（强制）
+
+E2E 用例失败时，必须按以下顺序排查，**不允许跳过**。
+
+### 步骤 1：读评分报告
+
+```bash
+# 报告位置
+evaluation/reports/e2e_phase1_*.json
+```
+
+检查每个 grader 的结果：
+
+| 字段 | 含义 | 关注点 |
+|---|---|---|
+| `grader_type` | code / model | 哪个评分器失败 |
+| `passed` | true/false | 是否通过 |
+| `score` | 0-1 | 具体分数 |
+| `explanation` | 评分说明 | **最重要：失败原因** |
+| `details.weaknesses` | 弱项列表 | 优化方向 |
+| `needs_human_review` | 是否需人工复核 | mock 评分必须标记 |
+
+### 步骤 2：区分失败类型
+
+| 失败类型 | 特征 | 修复方向 |
+|---|---|---|
+| **基础设施失败** | LLM 未配置、文件找不到、API Key 缺失 | 修配置/环境 |
+| **评分器故障** | `"LLM服务未配置，返回模拟评分"` | 修评分器 LLM 配置 |
+| **Agent 质量不达标** | 评分器正常工作，但给了低分 | 优化提示词/策略 |
+| **工具执行失败** | `check_no_tool_errors` 不通过 | 修工具/回溯策略 |
+
+### 步骤 3：根据类型修复
+
+**基础设施/评分器故障** → 修代码/配置，重跑
+
+**Agent 质量不达标** → 分析后输出优化建议：
+1. 查看 Agent 的完整工具调用链（服务端日志）
+2. 对照评分器的 `weaknesses` 找短板
+3. 定位到具体的优化点（提示词 / Skill / 策略）
+4. 给出可执行的修改建议
+
+---
+
+## 二、禁止行为
+
+### ❌ 禁止：跳过评分分析
+
+```
+# ❌ 错误
+"A1 评分失败，但 Agent 完成了任务，这是评分器的问题"
+"B1/D4/C1 通过了，A1 先不管"
+
+# ✅ 正确
+"A1 模型评分器返回 mock 分数（LLM 未配置），需要修复评分器配置后重新验证"
+"A1 Agent 回答质量得分 2.5/5，weaknesses: 缺少趋势对比图表。优化方向：..."
+```
+
+### ❌ 禁止：不看报告就下结论
+
+```
+# ❌ 错误
+看到 FAIL 就说 "评分问题" 或 "超时问题"
+
+# ✅ 正确
+先读 evaluation/reports/*.json → 找到 grade_results → 分析 explanation 和 details
+```
+
+### ❌ 禁止：只修管道不管质量
+
+```
+# ❌ 错误
+"管道跑通了，3/4 通过率不错"
+
+# ✅ 正确
+"3/4 通过。A1 失败原因：[具体分析]。优化方向：[具体建议]"
+```
+
+---
+
+## 三、E2E 报告解读规范
+
+### 评分报告结构
+
+```json
+{
+  "grade_results": [
+    {
+      "grader_type": "code",        // 代码评分：确定性检查
+      "grader_name": "check_no_tool_errors",
+      "passed": true,
+      "score": 1.0,
+      "details": {
+        "total_calls": 7,
+        "error_count": 0
+      }
+    },
+    {
+      "grader_type": "model",       // 模型评分：LLM 判断质量
+      "grader_name": "grade_response_quality",
+      "passed": false,
+      "score": 0.6,
+      "explanation": "...",         // ← 必读
+      "details": {
+        "weighted_score": 3.0,      // ← 对照 min_score
+        "strengths": [...],
+        "weaknesses": [...]         // ← 优化方向
+      }
+    }
+  ]
+}
+```
+
+### PASS/FAIL 判定规则
+
+**关键原则：Model Grader 是评估者，不是闸门。**
+
+| 评分器类型 | 角色 | 决定 PASS/FAIL？ | 说明 |
+|---|---|---|---|
+| Code Grader | 确定性检查 | **是** | `check_no_tool_errors` 等，硬性标准 |
+| Model Grader | 质量评估 | **否** | 评分供人类审查，指导优化方向 |
+
+Model Grader（LLM-as-Judge）：
+- 独立于 Agent 的执行逻辑（plan-todo、回溯等）
+- 评分只是参考，不触发重试或循环
+- `needs_human_review=true`，人类最终决策
+- 配置在 `evaluation/config/settings.yaml` + `judge_prompts.yaml`
+
+---
+
+## 四、服务端日志分析规范
+
+E2E 测试启动的服务日志保存在临时文件中（脚本会打印路径）。
+
+### 必查日志关键词
+
+| 关键词 | 含义 |
+|---|---|
+| `Turn N` | Agent 执行轮次 |
+| `工具调用参数` | 工具输入详情 |
+| `Agent 执行失败` | 致命错误 |
+| `回溯` / `backtrack` | RVR-B 回溯事件 |
+| `意图分析失败` | 意图识别错误 |
+| `LLM Profiles 已加载` | 配置是否生效 |
+| `上传成功` | 文件是否落盘 |
+
+### 分析命令模板
+
+```bash
+# 查看 Agent 工具调用链
+grep "Turn\|工具调用参数\|error\|失败" /path/to/server.log
+
+# 查看 LLM 配置是否生效
+grep "LLM Profiles\|已合并\|agent.model" /path/to/server.log
+
+# 查看文件处理
+grep "上传成功\|file://\|xlsx" /path/to/server.log
+```
+
+---
+
+## 五、质量优化闭环
+
+```
+E2E 失败
+  │
+  ├─ 基础设施问题 → 修代码/配置 → 重跑 → 验证通过
+  │
+  └─ 质量问题 → 分析 weaknesses
+                  │
+                  ├─ 提示词不够好 → 优化 prompt.md / intent_prompt.md
+                  ├─ 工具选择错误 → 优化 Skill 配置 / 工具裁剪策略
+                  ├─ 回溯不充分 → 调整回溯策略 / 错误分类
+                  ├─ 上下文丢失 → 检查 compaction / injector
+                  └─ 模型能力不足 → 切换更强模型 / 调整 temperature
+                  │
+                  └─ 修改 → 重跑 E2E → 验证分数提升
+```
+
+---
+
+## 六、运行 E2E 的标准流程
+
+```bash
+# 1. 全量运行（推荐首次）
+python scripts/run_e2e_auto.py --clean
+
+# 2. 单用例调试
+python scripts/run_e2e_auto.py --case A1
+
+# 3. 从某个用例恢复
+python scripts/run_e2e_auto.py --from D4
+
+# 4. 使用已运行的服务（开发时）
+python scripts/run_e2e_auto.py --no-start --port 8000
+```
+
+### 运行后必做
+
+1. 查看通过率和失败用例
+2. **打开评分报告** `evaluation/reports/e2e_phase1_*.json`
+3. 对每个 FAIL 用例执行「失败分析流程」（第一节）
+4. 给出修复方案或优化建议
+5. 修复后重跑验证
+
+---
+
+## 七、检查清单
+
+每次 E2E 测试后自检：
+
+- [ ] 是否读了评分报告（不只是看 PASS/FAIL）？
+- [ ] 每个 FAIL 是否区分了失败类型（基础设施 vs 评分器 vs 质量）？
+- [ ] 模型评分器是否正常工作（不是返回 mock 分数）？
+- [ ] 是否给出了可执行的优化方向？
+- [ ] 是否重跑验证了修复效果？

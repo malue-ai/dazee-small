@@ -1,0 +1,370 @@
+# ============================================================
+# ZenFlux Agent 自动化评测数据集 v2.0
+#
+# 设计原则：
+#   1. 分阶段执行，preflight 失败则中止全部
+#   2. SSE 只发 2 次 LLM 调用，对单次响应做深度协议分析
+#   3. 日志分析基于增量快照，仅校验本轮产生的日志
+#
+# 阶段概览：
+#   Phase 0  preflight         3 条  — 服务存活 + Agent 可用
+#   Phase 1  connectivity     18 条  — CRUD / Agent / Chat Sync
+#   Phase 2  sse_integration   2 条  — 正常 + 错误 SSE（深度校验）
+#   Phase 3  log_analysis      8 条  — 增量日志分析
+#   合计                      31 条用例
+# ============================================================
+
+metadata:
+  version: "2.0.0"
+  description: "ZenFlux Agent 评测集 — 连通性 & 日志分析（三阶段流水线）"
+  created_at: "2026-02-07"
+
+defaults:
+  base_url: "http://127.0.0.1:8000"
+  user_id: "eval_user_001"
+  agent_id: "xiaodazi"
+  timeout_s: 30
+  sse_timeout_s: 120
+
+# ============================================================
+# Phase 0: Preflight — 快速失败
+# ============================================================
+phases:
+
+  - id: preflight
+    name: "环境预检"
+    abort_on_fail: true
+    cases:
+      - id: "P01"
+        name: "服务存活"
+        method: "GET"
+        path: "/health"
+        expect:
+          status: 200
+          json_contains:
+            status: "ok"
+
+      - id: "P02"
+        name: "Liveness 探针"
+        method: "GET"
+        path: "/health/live"
+        expect:
+          status: 200
+          json_contains:
+            status: "alive"
+
+      - id: "P03"
+        name: "Agent 注册表可用"
+        method: "GET"
+        path: "/api/v1/agents"
+        expect:
+          status: 200
+
+  # ============================================================
+  # Phase 1: API Connectivity
+  # ============================================================
+
+  - id: connectivity
+    name: "API 连通性"
+    groups:
+
+      # ---- 1a. Conversation CRUD 生命周期 ----
+      - id: conversation_lifecycle
+        name: "Conversation 生命周期"
+        lifecycle: true   # runner 自动编排：create → use → cleanup
+        cases:
+          - id: "C01"
+            name: "创建对话"
+            method: "POST"
+            path: "/api/v1/conversations?user_id={user_id}&title=eval_lifecycle_test"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+              json_has_keys: ["data"]
+            save:
+              conversation_id: "data.id"
+
+          - id: "C02"
+            name: "查询对话详情"
+            method: "GET"
+            path: "/api/v1/conversations/{conversation_id}"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+          - id: "C03"
+            name: "对话列表包含新对话"
+            method: "GET"
+            path: "/api/v1/conversations?user_id={user_id}&limit=10"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+              json_has_keys: ["data"]
+
+          - id: "C04"
+            name: "更新对话标题"
+            method: "PUT"
+            path: "/api/v1/conversations/{conversation_id}?title=updated_eval_title"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+          - id: "C05"
+            name: "获取对话摘要"
+            method: "GET"
+            path: "/api/v1/conversations/{conversation_id}/summary"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+          - id: "C06"
+            name: "获取历史消息（空对话）"
+            method: "GET"
+            path: "/api/v1/conversations/{conversation_id}/messages?limit=50&order=asc"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+          - id: "C07"
+            name: "搜索对话"
+            method: "GET"
+            path: "/api/v1/conversations/search?user_id={user_id}&q=eval_lifecycle"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+      # ---- 1b. Session / Agent 端点 ----
+      - id: session_agent
+        name: "Session & Agent"
+        cases:
+          - id: "S01"
+            name: "Agent 列表"
+            method: "GET"
+            path: "/api/v1/agents"
+            expect:
+              status: 200
+
+          - id: "S02"
+            name: "Agent 详情"
+            method: "GET"
+            path: "/api/v1/agents/{agent_id}"
+            expect:
+              status: [200, 404]
+
+          - id: "S03"
+            name: "Session 列表"
+            method: "GET"
+            path: "/api/v1/sessions"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+          - id: "S04"
+            name: "不存在的 Session 返回 404"
+            method: "GET"
+            path: "/api/v1/session/nonexistent_session_999"
+            expect:
+              status: 404
+
+          - id: "S05"
+            name: "停止不存在的 Session 返回 404"
+            method: "POST"
+            path: "/api/v1/session/nonexistent_session_999/stop"
+            expect:
+              status: 404
+
+      # ---- 1c. Chat Sync 参数校验 ----
+      - id: chat_sync
+        name: "Chat 同步模式"
+        cases:
+          - id: "D01"
+            name: "同步聊天 — 简单问候"
+            method: "POST"
+            path: "/api/v1/chat"
+            body:
+              message: "你好"
+              userId: "{user_id}"
+              agentId: "{agent_id}"
+              stream: false
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+              json_has_keys: ["data"]
+
+          - id: "D02"
+            name: "同步聊天 — 缺少 userId (422)"
+            method: "POST"
+            path: "/api/v1/chat"
+            body:
+              message: "你好"
+              stream: false
+            expect:
+              status: 422
+
+          - id: "D03"
+            name: "同步聊天 — 空消息 (422)"
+            method: "POST"
+            path: "/api/v1/chat"
+            body:
+              message: ""
+              userId: "{user_id}"
+              stream: false
+            expect:
+              status: 422
+
+          - id: "D04"
+            name: "同步聊天 — 不存在的 Agent (400)"
+            method: "POST"
+            path: "/api/v1/chat"
+            body:
+              message: "你好"
+              userId: "{user_id}"
+              agentId: "nonexistent_agent_999"
+              stream: false
+            expect:
+              status: 400
+
+          - id: "D05"
+            name: "同步聊天 — 带 variables"
+            method: "POST"
+            path: "/api/v1/chat"
+            body:
+              message: "现在几点了？"
+              userId: "{user_id}"
+              agentId: "{agent_id}"
+              stream: false
+              variables:
+                location: "北京市朝阳区"
+                timezone: "Asia/Shanghai"
+                locale: "zh-CN"
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+          - id: "D06"
+            name: "同步聊天 — 带 conversationId"
+            method: "POST"
+            path: "/api/v1/chat"
+            body:
+              message: "今天天气怎么样？"
+              userId: "{user_id}"
+              agentId: "{agent_id}"
+              conversationId: "eval_conv_sync_001"
+              stream: false
+            expect:
+              status: 200
+              json_contains: { code: 200 }
+
+  # ============================================================
+  # Phase 2: SSE Integration — 深度协议校验
+  # ============================================================
+
+  - id: sse_integration
+    name: "SSE 流式集成"
+    cases:
+      - id: "SSE01"
+        name: "正常 SSE 流 — 深度协议分析"
+        body:
+          message: "你好，请简短回答"
+          userId: "{user_id}"
+          agentId: "{agent_id}"
+          stream: true
+        checks:
+          - id: "SSE01a"
+            name: "HTTP 200 + event-stream content-type"
+            assert: "status_and_content_type"
+          - id: "SSE01b"
+            name: "首事件为 message_start 且含 session_id"
+            assert: "first_event_is_message_start"
+          - id: "SSE01c"
+            name: "存在 content_start (type=text)"
+            assert: "has_content_start_text"
+          - id: "SSE01d"
+            name: "存在 content_delta 且文本非空"
+            assert: "has_nonempty_content_delta"
+          - id: "SSE01e"
+            name: "content_start / content_stop 数量配对"
+            assert: "content_start_stop_paired"
+          - id: "SSE01f"
+            name: "seq 严格单调递增"
+            assert: "seq_monotonic"
+          - id: "SSE01g"
+            name: "末尾有 message_stop"
+            assert: "ends_with_message_stop"
+          - id: "SSE01h"
+            name: "事件顺序符合生命周期"
+            assert: "lifecycle_order"
+          - id: "SSE01i"
+            name: "总事件数 >= 4"
+            assert: "min_events"
+            value: 4
+
+      - id: "SSE02"
+        name: "错误 SSE 流 — 不存在的 Agent"
+        body:
+          message: "你好"
+          userId: "{user_id}"
+          agentId: "nonexistent_agent_999"
+          stream: true
+        checks:
+          - id: "SSE02a"
+            name: "收到 error 类型的 SSE 事件"
+            assert: "has_error_event"
+
+  # ============================================================
+  # Phase 3: Log Post-Analysis — 增量日志分析
+  # ============================================================
+
+  - id: log_analysis
+    name: "日志分析"
+    incremental: true  # 仅分析 Phase 0 快照之后的增量日志
+    cases:
+      - id: "L01"
+        name: "app.log 文件存在"
+        check: "file_exists"
+        path: "logs/app.log"
+
+      - id: "L02"
+        name: "error.log 文件存在"
+        check: "file_exists"
+        path: "logs/error.log"
+
+      - id: "L03"
+        name: "增量日志 JSON 格式合法率 >= 95%"
+        check: "json_valid"
+        path: "logs/app.log"
+        threshold: 0.95
+
+      - id: "L04"
+        name: "增量日志包含评测用户上下文"
+        check: "contains_field"
+        path: "logs/app.log"
+        field: "user"
+        value: "eval_user_001"
+        min_count: 1
+
+      - id: "L05"
+        name: "增量日志无 CRITICAL 级别"
+        check: "no_level"
+        path: "logs/app.log"
+        level: "CRITICAL"
+
+      - id: "L06"
+        name: "增量日志时间戳单调递增"
+        check: "timestamp_monotonic"
+        path: "logs/app.log"
+
+      - id: "L07"
+        name: "增量日志无敏感信息泄漏"
+        check: "no_sensitive_data"
+        path: "logs/app.log"
+        patterns:
+          - "sk-[a-zA-Z0-9]{20,}"
+          - "api_key.*=.*[a-zA-Z0-9]{20,}"
+          - "Bearer [a-zA-Z0-9._-]{20,}"
+          - "password.*=.*\\S+"
+
+      - id: "L08"
+        name: "错误日志无未捕获异常"
+        check: "no_uncaught_exception"
+        path: "logs/error.log"

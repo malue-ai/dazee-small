@@ -1,0 +1,10 @@
+{
+  "type": "preferences",
+  "version": "2.1",
+  "created": "2024-11-08",
+  "settings": {
+    "key1": "value_b",
+    "key2": 81,
+    "enabled": true
+  }
+}

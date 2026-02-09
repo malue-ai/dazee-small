@@ -1,0 +1,54 @@
+---
+description: "测试开发规范"
+globs:
+  - "tests/**/*.py"
+alwaysApply: false
+---
+
+# 测试开发规范
+
+## 测试组织
+```
+tests/
+├── conftest.py         # 共享 fixtures
+├── test_routers/       # 路由测试
+├── test_core/          # 核心模块测试
+└── integration/        # 集成测试
+```
+
+## 命名规范
+- 测试文件：`test_<module_name>.py`
+- 测试类：`Test<FeatureName>`
+- 测试函数：`test_<scenario>_<expected_result>`
+
+## AAA 模式（Arrange-Act-Assert）
+按顺序组织测试：准备数据 → 执行操作 → 断言结果
+
+## 核心原则
+- 每个测试独立运行
+- 测试函数名清晰描述场景
+- 使用 AAA 模式组织测试
+- Mock 外部依赖（API、数据库）
+- 异步函数用 `@pytest.mark.asyncio`
+
+## Fixtures
+在 `conftest.py` 中定义共享 fixtures，使用 `@pytest.fixture` 装饰器
+
+## Mock
+- Mock 异步函数用 `AsyncMock`
+- Mock 环境变量用 `@patch.dict('os.environ', {...})`
+- 验证调用用 `assert_called_once_with()`
+
+## 运行测试
+```bash
+pytest                          # 所有测试
+pytest tests/test_chat.py       # 特定文件
+pytest -s                       # 显示输出
+pytest -v                       # 详细模式
+```
+
+## 禁止事项
+- ❌ 测试之间有依赖
+- ❌ 测试函数名不清晰
+- ❌ 不用 Mock 直接调用外部服务
+- ❌ 忘记清理测试数据

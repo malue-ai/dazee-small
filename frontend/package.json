@@ -1,0 +1,46 @@
+{
+  "name": "zenflux-agent-frontend",
+  "version": "0.7.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.ts,.jsx,.tsx,.cjs,.mjs --fix --ignore-path .gitignore",
+    "type-check": "vue-tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-updater": "^2.10.0",
+    "@vueuse/core": "^14.1.0",
+    "axios": "^1.6.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-vue-next": "^0.562.0",
+    "markstream-vue": "^0.0.7-beta.6",
+    "mermaid": "^11.12.2",
+    "pinia": "^2.1.0",
+    "radix-vue": "^1.9.17",
+    "tailwind-merge": "^3.4.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@tauri-apps/cli": "^2.10.0",
+    "@types/node": "^25.0.7",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "autoprefixer": "^10.4.23",
+    "eslint": "^8.56.0",
+    "eslint-plugin-vue": "^9.20.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^5.0.0",
+    "vue-tsc": "^3.2.2"
+  }
+}

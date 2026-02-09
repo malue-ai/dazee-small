@@ -1,0 +1,79 @@
+# F3: 内容生成能力 - 小搭子可行性测评
+# 验证：文章写作、PPT 生成、代码生成、论文润色（Skills-First 架构）
+
+id: xiaodazi_feasibility_content_generation
+name: 内容生成能力（F3）
+description: 验证小搭子内容生成能力，包括写作、PPT、代码、润色
+category: xiaodazi_feasibility
+default_trials: 2
+
+metadata:
+  version: "2.0.0"
+  dimension: feasibility
+  capability: F3_content_generation
+
+tasks:
+  - id: F3-01_article_writing
+    description: "文章写作 - 写一篇关于远程办公的文章"
+    category: content
+    input:
+      user_query: "写一篇关于远程办公的短文，约 500 字"
+      conversation_history: []
+      context: {}
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["content", "writing", "F3"]
+
+  - id: F3-02_ppt_generation
+    description: "PPT 生成 - 做一个产品介绍的 PPT（通过 PPT Skill + api_calling）"
+    category: content
+    input:
+      user_query: "做一个简单的产品介绍 PPT，3 页即可"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      behavior: "使用 PPT Skill（如 slidespeak-generator）+ api_calling 生成 PPT"
+    graders:
+      - type: model
+        rubric: grade_skill_usage
+        min_score: 3
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 120
+    tags: ["content", "ppt", "skill", "F3"]
+
+  - id: F3-03_code_generation
+    description: "代码生成 - 写一个 Python 函数计算斐波那契数列"
+    category: content
+    input:
+      user_query: "写一个 Python 函数计算斐波那契数列第 n 项"
+      conversation_history: []
+      context: {}
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 45
+    tags: ["content", "code", "F3"]
+
+  - id: F3-05_polish_abstract
+    description: "论文润色 - 帮我润色这段学术摘要"
+    category: content
+    input:
+      user_query: "帮我润色这段学术摘要，保持学术风格：本研究探讨了机器学习在自然语言处理中的应用。"
+      conversation_history: []
+      context: {}
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 45
+    tags: ["content", "polish", "F3"]

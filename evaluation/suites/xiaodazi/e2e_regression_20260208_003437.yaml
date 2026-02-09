@@ -1,0 +1,32 @@
+id: regression_auto
+name: 自动回归测试 (2026-02-08)
+description: 从测评失败中自动生成的回归套件，共 1 个用例
+category: regression
+default_trials: 2
+metadata:
+  generated_at: '2026-02-08T00:34:37.207592'
+  source: loop_automation
+tasks:
+- id: REG_A1
+  description: '[回归] 格式混乱 Excel 分析 - 销售趋势与最佳产品'
+  category: regression_capability_gap
+  input:
+    user_query: 格式混乱 Excel 分析 - 销售趋势与最佳产品
+    conversation_history: []
+    context:
+      original_suite: E2E Phase1 核心用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: A1
+    original_suite: E2E Phase1 核心用例
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality

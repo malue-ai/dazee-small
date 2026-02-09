@@ -1,0 +1,70 @@
+# FastAPI 核心依赖
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.3,<3.0.0
+
+# Claude API
+anthropic>=0.40.0  # 更新最低版本要求
+# OpenAI SDK（用于千问等兼容接口）
+openai>=1.0.0      # 🆕 千问使用 OpenAI 兼容接口
+
+# Qwen DashScope SDK
+dashscope>=1.25.0
+
+# 配置管理
+pyyaml>=6.0
+
+# 其他工具
+python-multipart>=0.0.6
+aiofiles>=24.1.0          # 异步文件操作
+aiohttp>=3.9.0            # 异步 HTTP 客户端
+httpx>=0.27.0             # HTTP 客户端
+filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
+
+# 本地数据库（SQLite）
+aiosqlite>=0.20.0         # SQLite 异步驱动
+greenlet>=3.0.0           # SQLAlchemy 异步支持
+sqlalchemy[asyncio]>=2.0.0
+
+# Token 计数
+tiktoken>=0.5.0
+
+# 向量计算（意图缓存余弦相似度）
+numpy>=1.26.0
+
+# JSON 解析（宽松模式）
+json5>=0.9.0
+
+
+# Mem0 记忆系统
+mem0ai>=0.1.0
+sqlite-vec>=0.1.1         # SQLite 向量搜索扩展（本地向量存储）
+
+# 文件处理
+Pillow>=10.0.0            # 图片压缩
+PyPDF2>=3.0.0             # PDF 文本提取
+python-docx>=0.8.11       # Word 文档解析（页数估算）
+python-pptx>=0.6.21       # PPT 生成和解析
+openpyxl>=3.0.0           # Excel 表格解析（工作表数量）
+odfpy>=1.4.1              # ODT 文档解析
+unstructured-client>=0.30.6  # 非结构化数据处理客户端
+
+# 定时任务
+apscheduler>=3.10.0
+croniter>=6.0.0               # Cron 表达式解析
+
+# Google Gemini API（图像生成）
+google-genai>=1.0.0       # Gemini 3 Pro Image API
+
+# macOS 本地 OCR（Vision framework）
+pyobjc-core>=12.0; sys_platform == "darwin"
+pyobjc-framework-Vision>=12.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=12.0; sys_platform == "darwin"
+
+# 测试工具
+pytest>=8.0.0             # 测试框架
+pytest-asyncio>=0.23.0    # 异步测试支持
+psutil>=5.9.0
+pyinstaller==6.11.1
+# WebSocket（实时通信）
+websockets>=12.0

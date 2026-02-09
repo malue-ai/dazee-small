@@ -1,0 +1,162 @@
+# ============================================================
+# 提示词配置 (Prompt Config)
+# ============================================================
+#
+# 🆕 V10.0: 将硬编码的提示词相关配置移至配置文件
+#
+# 设计原则：
+# - 配置化: 所有阈值、映射、限制均可配置
+# - 可覆盖: 实例级配置可覆盖全局配置
+# - 向后兼容: 代码中保留默认值作为 fallback
+#
+# ============================================================
+
+# ==================== 提示词大小限制 ====================
+# 不同复杂度任务的提示词大小限制（字符数）
+
+size_limits:
+  # 总提示词大小限制
+  total:
+    simple: 15000      # ~4k tokens
+    medium: 40000      # ~10k tokens  
+    complex: 80000     # ~20k tokens
+  
+  # 各模块大小限制（针对 Simple 和 Medium 复杂度）
+  modules:
+    simple:
+      role_definition: 2000
+      absolute_prohibitions: 1000
+      output_format: 1500
+    medium:
+      role_definition: 3000
+      absolute_prohibitions: 1500
+      output_format: 2000
+      task_complexity: 2000
+      tool_selection: 5000
+      progress_feedback: 2000
+
+# ==================== 模块复杂度映射 ====================
+# 定义每个模块适用于哪些复杂度等级
+# 
+# 类型说明：
+# - core: 所有复杂度都需要，不可排除
+# - medium: Medium 和 Complex 复杂度需要，可被框架组件排除
+# - complex: 仅 Complex 复杂度需要，可被框架组件排除
+
+module_complexity_map:
+  # 核心模块（所有复杂度，不可排除）
+  role_definition:
+    type: core
+    complexities: [simple, medium, complex]
+  
+  absolute_prohibitions:
+    type: core
+    complexities: [simple, medium, complex]
+  
+  output_format:
+    type: core
+    complexities: [simple, medium, complex]
+  
+  # 中等模块（Medium/Complex，可被框架组件排除）
+  intent_recognition:
+    type: medium
+    complexities: [medium, complex]
+  
+  task_complexity:
+    type: medium
+    complexities: [medium, complex]
+  
+  tool_selection:
+    type: medium
+    complexities: [medium, complex]
+  
+  progress_feedback:
+    type: medium
+    complexities: [medium, complex]
+  
+  # 复杂模块（仅 Complex，可被框架组件排除）
+  context_protection:
+    type: complex
+    complexities: [complex]
+  
+  plan_object:
+    type: complex
+    complexities: [complex]
+  
+  data_context:
+    type: complex
+    complexities: [complex]
+  
+  react_validation:
+    type: complex
+    complexities: [complex]
+  
+  quality_gates:
+    type: complex
+    complexities: [complex]
+  
+  final_delivery:
+    type: complex
+    complexities: [complex]
+  
+  hitl:
+    type: complex
+    complexities: [complex]
+
+# ==================== 框架组件排除映射 ====================
+# 当框架组件启用时，对应的提示词模块可以简化或排除
+
+framework_component_exclusions:
+  # IntentAnalyzer 组件启用 → 排除意图识别相关模块
+  intent_analyzer:
+    - intent_recognition
+    - task_complexity
+  
+  # PlanManager 组件启用 → 简化计划相关模块
+  plan_manager:
+    - plan_object
+  
+  # ToolSelector 组件启用 → 简化工具选择模块
+  tool_selector:
+    - tool_selection
+
+# ==================== Simple 模式精简配置 ====================
+# 在 Simple 复杂度下积极排除的模块
+
+simple_aggressive_modules:
+  - tool_selection
+  - progress_feedback
+  - plan_object
+  - data_context
+  - react_validation
+  - quality_gates
+  - final_delivery
+  - hitl
+  - context_protection
+  - intent_recognition
+  - task_complexity
+
+# ==================== LLM 生成参数 ====================
+# 不同场景的 LLM 调用参数
+# 注意：这些值应与 llm_config/profiles.yaml 保持一致
+
+llm_generation:
+  # 意图识别
+  intent_recognition:
+    max_tokens: 8000
+    temperature: 0.3
+  
+  # 简单任务
+  simple_task:
+    max_tokens: 16000
+    temperature: 0.5
+  
+  # 中等任务
+  medium_task:
+    max_tokens: 50000
+    temperature: 0.7
+  
+  # 复杂任务
+  complex_task:
+    max_tokens: 128000
+    temperature: 0.7

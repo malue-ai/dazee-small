@@ -1,0 +1,740 @@
+# Haiku 意图识别准确率测试套件
+#
+# 目标：验证使用 Haiku 模型进行意图识别的准确率
+# 测试维度：
+#   1. 分类准确率（task_type, complexity, needs_multi_agent）
+#   2. 字段一致性（约束遵循）
+#   3. 稳定性（多次运行结果一致性）
+#   4. 追问识别（上下文理解）
+#   5. 任务依赖类型（task_dependency_type: independent/sequential/mixed）
+#   6. 依赖类型与多智能体决策一致性
+#
+# 使用方式：
+#   python tests/test_e2e_intent_accuracy.py
+
+id: intent_haiku_accuracy
+name: "Haiku 意图识别准确率测试"
+description: "合成真实用户场景，验证 IntentAnalyzer 输出准确率"
+default_trials: 3
+
+metadata:
+  version: "1.0.0"
+  author: "ZenFlux Team"
+  created_at: "2026-01-26"
+  model: "haiku"
+  priority: P0
+
+# ============================================================
+# 测试用例
+# ============================================================
+
+tasks:
+  # ==================== 1. 简单单轮（预期准确率 95%+）====================
+  
+  - id: simple_weather
+    description: "简单天气查询"
+    category: simple_single_turn
+    input:
+      user_query: "上海今天天气怎么样？"
+    expected:
+      task_type: information_query
+      complexity: simple
+      needs_plan: false
+      needs_multi_agent: false
+      skip_memory_retrieval: true
+      execution_strategy: rvr
+      suggested_planning_depth: none
+    tags: ["simple", "single_turn", "weather"]
+
+  - id: simple_translate
+    description: "简单翻译"
+    input:
+      user_query: "帮我把'你好世界'翻译成英文"
+    expected:
+      task_type: content_generation
+      complexity: simple
+      needs_plan: false
+      needs_multi_agent: false
+      skip_memory_retrieval: true
+    tags: ["simple", "translate"]
+
+  - id: simple_math
+    description: "简单数学"
+    input:
+      user_query: "1+1等于几？"
+    expected:
+      task_type: information_query
+      complexity: simple
+      needs_plan: false
+      execution_strategy: rvr
+    tags: ["simple", "math"]
+
+  - id: simple_concept
+    description: "简单概念查询"
+    input:
+      user_query: "Python 是什么？"
+    expected:
+      task_type: information_query
+      complexity: simple
+      needs_plan: false
+      skip_memory_retrieval: true
+    tags: ["simple", "concept"]
+
+  - id: simple_time
+    description: "时间查询"
+    input:
+      user_query: "现在几点了？"
+    expected:
+      task_type: information_query
+      complexity: simple
+      needs_plan: false
+      needs_multi_agent: false
+    tags: ["simple", "time"]
+
+  # ==================== 2. 中等复杂度任务 ====================
+
+  - id: medium_code_function
+    description: "中等 - 写一个函数"
+    category: medium_task
+    input:
+      user_query: "帮我写一个 Python 快速排序函数"
+    expected:
+      task_type: code_task
+      needs_multi_agent: false
+    tolerance:
+      task_type: [code_task, other]  # LLM 可能将简单代码任务归为 other
+      complexity: [simple, medium]
+      needs_plan: [true, false]
+    tags: ["medium", "code"]
+
+  - id: medium_search_summarize
+    description: "中等 - 搜索并总结"
+    input:
+      user_query: "搜索一下最新的 AI 新闻并总结"
+    expected:
+      task_type: information_query
+      complexity: medium
+      needs_plan: true
+      needs_multi_agent: false
+      tool_usage_hint: sequential
+    tags: ["medium", "search", "summarize"]
+
+  - id: medium_data_analysis
+    description: "中等 - 数据分析"
+    input:
+      user_query: "分析一下这份销售数据，找出增长点"
+    expected:
+      task_type: data_analysis
+      complexity: medium
+      needs_plan: true
+      needs_multi_agent: false
+    tags: ["medium", "data_analysis"]
+
+  - id: medium_ppt_simple
+    description: "中等 - 简单 PPT"
+    input:
+      user_query: "帮我做一个简单的自我介绍 PPT"
+    expected:
+      task_type: content_generation
+      needs_multi_agent: false
+    tolerance:
+      complexity: [simple, medium]
+      needs_plan: [true, false]  # 简单 PPT 可能不需要规划
+    tags: ["medium", "ppt"]
+
+  # ==================== 3. 复杂任务 ====================
+
+  - id: complex_ppt_research
+    description: "复杂 - 调研并写报告"
+    category: complex_task
+    input:
+      user_query: "调研竞品市场，分析用户需求，制定产品策略，写一份完整的产品规划书"
+    expected:
+      complexity: complex
+      needs_plan: true
+      execution_strategy: rvr-b
+    tolerance:
+      task_type: [content_generation, data_analysis]  # 两种都合理
+      suggested_planning_depth: [full, null]
+    tags: ["complex", "research", "ppt"]
+
+  - id: complex_system_design
+    description: "复杂 - 系统设计"
+    input:
+      user_query: "帮我设计一个完整的电商系统，包括用户模块、商品模块、订单模块和支付模块"
+    expected:
+      complexity: complex
+      needs_plan: true
+      execution_strategy: rvr-b
+    tolerance:
+      task_type: [code_task, content_generation, other]  # 设计可能被归为多种类型
+    tags: ["complex", "system_design"]
+
+  - id: complex_full_stack
+    description: "复杂 - 全栈开发"
+    input:
+      user_query: "帮我开发一个完整的用户注册登录功能，包括前端界面和后端 API"
+    expected:
+      task_type: code_task
+      complexity: complex
+      needs_plan: true
+      execution_strategy: rvr-b
+    tolerance:
+      task_type: [code_task, other]  # 开发任务可能被识别为 other
+      complexity: [medium, complex]
+    tags: ["complex", "fullstack"]
+
+  # ==================== 4. 模糊 Query（预期准确率 70-80%）====================
+
+  - id: vague_process
+    description: "模糊请求 - 处理"
+    category: vague_query
+    input:
+      user_query: "帮我处理一下这个"
+    expected:
+      # 预期：模糊请求，无法明确判断
+      complexity: simple
+    tolerance:
+      task_type: any  # 允许任何 task_type
+      complexity: [simple, medium]  # 模糊请求通常被判断为简单
+      needs_plan: [true, false]  # 两种都可接受
+    tags: ["vague", "ambiguous"]
+
+  - id: vague_help
+    description: "模糊请求 - 帮忙"
+    input:
+      user_query: "你能帮我吗？"
+    expected:
+      complexity: simple
+      needs_plan: false
+    tolerance:
+      task_type: [information_query, other]
+      complexity: [simple, medium]
+    tags: ["vague", "help"]
+
+  - id: vague_look
+    description: "模糊请求 - 看看"
+    input:
+      user_query: "帮我看看这个怎么样"
+    expected:
+      needs_plan: false
+    tolerance:
+      task_type: any
+      complexity: [simple, medium]
+    tags: ["vague"]
+
+  # ==================== 5. 追问识别（预期准确率 80-85%）====================
+
+  - id: followup_continue
+    description: "追问 - 然后呢"
+    category: followup
+    input:
+      conversation_history:
+        - role: user
+          content: "帮我分析这份销售数据"
+        - role: assistant
+          content: "好的，我来分析这份数据。从图表看，Q1 增长了 15%..."
+      user_query: "然后呢？"
+    expected:
+      is_follow_up: true
+      task_type: data_analysis  # 应继承上文的任务类型
+    tolerance:
+      task_type: [data_analysis, other, information_query]  # 容差：短追问可能被归为多种类型
+    tags: ["followup", "continue"]
+
+  - id: followup_pronoun
+    description: "追问 - 代词引用"
+    input:
+      conversation_history:
+        - role: user
+          content: "帮我写个 Python 排序算法"
+        - role: assistant
+          content: "可以用 sorted() 函数或者手写快排..."
+      user_query: "那如果要降序呢？"
+    expected:
+      is_follow_up: true
+    tolerance:
+      task_type: [code_task, other, information_query]  # 追问可能被归为多种类型
+    tags: ["followup", "pronoun"]
+
+  - id: followup_short
+    description: "追问 - 短句"
+    input:
+      conversation_history:
+        - role: user
+          content: "帮我分析竞品 A 的功能"
+        - role: assistant
+          content: "竞品 A 的主要功能包括..."
+      user_query: "B 呢？"
+    expected:
+      is_follow_up: true
+      task_type: data_analysis
+    tolerance:
+      task_type: [data_analysis, information_query]
+    tags: ["followup", "short"]
+
+  - id: followup_polish
+    description: "追问 - 润色"
+    input:
+      conversation_history:
+        - role: user
+          content: "翻译这段话成英文"
+        - role: assistant
+          content: "Here is the translation..."
+      user_query: "再帮我润色一下"
+    expected:
+      is_follow_up: true
+      task_type: content_generation
+    tolerance:
+      complexity: [simple, medium]  # 润色可能被判断为简单或中等
+    tags: ["followup", "polish"]
+
+  - id: followup_topic_switch
+    description: "话题切换（非追问）"
+    input:
+      conversation_history:
+        - role: user
+          content: "帮我写个周报"
+        - role: assistant
+          content: "好的，正在生成周报..."
+      user_query: "上海今天天气怎么样？"
+    expected:
+      is_follow_up: false
+      task_type: information_query
+    tolerance:
+      # 如果 LLM 错误识别为追问，可能会继承上文的 task_type
+      task_type: [information_query, content_generation]
+    tags: ["followup", "topic_switch"]
+
+  - id: followup_new_task
+    description: "新任务（非追问）"
+    input:
+      conversation_history:
+        - role: user
+          content: "帮我查一下明天的航班"
+        - role: assistant
+          content: "明天有以下航班..."
+      user_query: "帮我写一个产品方案"
+    expected:
+      is_follow_up: false
+      task_type: content_generation
+    tags: ["followup", "new_task"]
+
+  # ==================== 6. 多智能体判断（预期准确率 75-85%）====================
+
+  - id: multi_agent_clear
+    description: "明确需要多智能体 - Top N 研究"
+    category: multi_agent
+    input:
+      user_query: "研究 Top 5 云计算公司的 AI 战略，生成分析报告"
+    expected:
+      needs_multi_agent: true
+      task_dependency_type: mixed
+      complexity: complex
+    tags: ["multi_agent", "research", "top_n"]
+
+  - id: multi_agent_compare_3
+    description: "多实体对比 - 3个"
+    input:
+      user_query: "对比 AWS、Azure、GCP 三家云服务商的定价策略"
+    expected:
+      needs_multi_agent: true
+      task_dependency_type: mixed
+    tolerance:
+      task_dependency_type: [mixed, independent]
+    tags: ["multi_agent", "compare"]
+
+  - id: multi_agent_compare_4
+    description: "多实体对比 - 4个"
+    input:
+      user_query: "调研 TensorFlow、PyTorch、Jax、PaddlePaddle 的性能对比"
+    expected:
+      needs_multi_agent: true
+      task_dependency_type: mixed
+    tolerance:
+      task_dependency_type: [mixed, independent]
+    tags: ["multi_agent", "compare", "framework"]
+
+  - id: multi_agent_parallel_query
+    description: "多城市并行查询"
+    input:
+      user_query: "同时查询北京、上海、广州、深圳四个城市的天气"
+    expected:
+      needs_multi_agent: true
+      task_dependency_type: independent
+      tool_usage_hint: parallel
+    tags: ["multi_agent", "parallel"]
+
+  - id: multi_agent_boundary_2
+    description: "边界情况 - 2个实体（不应多智能体）"
+    input:
+      user_query: "对比 Python 和 JavaScript 的性能"
+    expected:
+      needs_multi_agent: false
+      task_dependency_type: independent
+    tags: ["multi_agent", "boundary"]
+
+  - id: single_agent_serial
+    description: "复杂但串行（不应多智能体）"
+    input:
+      user_query: "帮我写一个 Python 排序算法并补充单元测试"
+    expected:
+      needs_multi_agent: false
+      task_dependency_type: sequential
+      complexity: medium
+    tolerance:
+      complexity: [simple, medium]
+    tags: ["single_agent", "serial"]
+
+  - id: single_agent_ppt
+    description: "PPT 生成（不应多智能体）"
+    input:
+      user_query: "帮我生成一个产品介绍 PPT"
+    expected:
+      needs_multi_agent: false
+      task_dependency_type: sequential
+    tags: ["single_agent", "ppt"]
+
+  - id: single_agent_translate
+    description: "长文档翻译（不应多智能体）"
+    input:
+      user_query: "帮我把这篇 10 页的英文论文翻译成中文"
+    expected:
+      needs_multi_agent: false
+      task_dependency_type: sequential
+    tags: ["single_agent", "translate"]
+
+  # ==================== 7. 字段一致性（预期准确率 85-90%）====================
+
+  - id: consistency_simple
+    description: "字段一致性 - 简单任务"
+    category: consistency
+    input:
+      user_query: "1+1等于几？"
+    expected:
+      complexity: simple
+      needs_plan: false
+      suggested_planning_depth: none
+      execution_strategy: rvr
+    consistency_rules:
+      - "complexity == 'simple' implies needs_plan == false"
+      - "complexity == 'simple' implies execution_strategy == 'rvr'"
+      - "complexity == 'simple' implies suggested_planning_depth in [null, 'none']"
+    tags: ["consistency", "simple"]
+
+  - id: consistency_complex
+    description: "字段一致性 - 复杂任务"
+    input:
+      user_query: "调研竞品市场，分析用户需求，制定产品策略，写一份完整的产品规划书"
+    expected:
+      complexity: complex
+      needs_plan: true
+      suggested_planning_depth: full
+      execution_strategy: rvr-b
+    consistency_rules:
+      - "complexity == 'complex' implies needs_plan == true"
+      - "complexity == 'complex' implies execution_strategy == 'rvr-b'"
+      - "complexity == 'complex' implies suggested_planning_depth == 'full'"
+    tags: ["consistency", "complex"]
+
+  - id: consistency_medium
+    description: "字段一致性 - 中等任务"
+    input:
+      user_query: "帮我写一个 Python 函数实现快速排序"
+    expected:
+      complexity: medium
+      needs_plan: true
+    tolerance:
+      complexity: [simple, medium]
+      needs_plan: [true, false]
+      execution_strategy: [rvr, rvr-b]
+    consistency_rules:
+      - "complexity == 'medium' implies needs_plan == true"
+    tags: ["consistency", "medium"]
+
+  # ==================== 8. 记忆检索判断 ====================
+
+  - id: memory_skip_factual
+    description: "事实查询 - 应跳过记忆"
+    category: memory
+    input:
+      user_query: "1美元等于多少人民币？"
+    expected:
+      skip_memory_retrieval: true
+    tags: ["memory", "skip"]
+
+  - id: memory_skip_concept
+    description: "百科知识 - 应跳过记忆"
+    input:
+      user_query: "什么是机器学习？"
+    expected:
+      skip_memory_retrieval: true
+    tags: ["memory", "skip"]
+
+  - id: memory_skip_weather
+    description: "天气查询 - 应跳过记忆"
+    input:
+      user_query: "今天上海天气怎么样？"
+    expected:
+      skip_memory_retrieval: true
+    tags: ["memory", "skip"]
+
+  - id: memory_need_preference
+    description: "个性化任务 - 需要记忆"
+    input:
+      user_query: "按照我之前说的风格，帮我写个邮件"
+    expected:
+      skip_memory_retrieval: false
+    tags: ["memory", "need"]
+
+  - id: memory_need_ppt
+    description: "PPT 生成 - 可能需要记忆"
+    input:
+      user_query: "帮我生成一个产品介绍 PPT"
+    expected:
+      skip_memory_retrieval: false
+    tags: ["memory", "need"]
+
+  - id: memory_need_code
+    description: "代码风格 - 可能需要记忆"
+    input:
+      user_query: "帮我写一段 Python 代码实现排序"
+    expected:
+      skip_memory_retrieval: false
+    tolerance:
+      skip_memory_retrieval: [true, false]  # 两种都可接受
+    tags: ["memory", "optional"]
+
+  # ==================== 9. 执行策略 ====================
+
+  - id: strategy_rvr_simple
+    description: "确定性任务 - RVR"
+    category: execution_strategy
+    input:
+      user_query: "查一下北京现在几点"
+    expected:
+      execution_strategy: rvr
+      complexity: simple
+    tags: ["strategy", "rvr"]
+
+  - id: strategy_rvr_translate
+    description: "翻译任务 - RVR"
+    input:
+      user_query: "翻译这句话：Hello World"
+    expected:
+      execution_strategy: rvr
+    tags: ["strategy", "rvr"]
+
+  - id: strategy_rvrb_explore
+    description: "探索性任务 - RVR-B"
+    input:
+      user_query: "帮我开发一个用户注册功能，包括前后端"
+    expected:
+      execution_strategy: rvr-b
+      needs_plan: true
+    tags: ["strategy", "rvr-b"]
+
+  - id: strategy_rvrb_research
+    description: "调研任务 - RVR-B"
+    input:
+      user_query: "调研并写一份行业分析报告"
+    expected:
+      execution_strategy: rvr-b
+      needs_plan: true
+    tags: ["strategy", "rvr-b"]
+
+  # ==================== 10. 边缘情况 ====================
+
+  - id: edge_empty
+    description: "边缘 - 极短输入"
+    category: edge_case
+    input:
+      user_query: "?"
+    expected:
+      complexity: simple
+      needs_plan: false
+    tolerance:
+      task_type: any
+    tags: ["edge", "short"]
+
+  - id: edge_emoji
+    description: "边缘 - 纯 emoji"
+    input:
+      user_query: "👍"
+    expected:
+      # 纯 emoji 是极端边缘情况，LLM 可能无法正确解析
+      needs_multi_agent: false
+    tolerance:
+      task_type: any
+      complexity: [simple, medium]  # LLM 可能返回默认值
+      needs_plan: [true, false]
+    tags: ["edge", "emoji"]
+
+  - id: edge_mixed_lang
+    description: "边缘 - 中英混合"
+    input:
+      user_query: "帮我 write a Python function 来实现 quick sort"
+    expected:
+      task_type: code_task
+    tolerance:
+      task_type: [code_task, other]  # 中英混合可能被误识别
+      complexity: [simple, medium]
+    tags: ["edge", "mixed_lang"]
+
+  - id: edge_long_context
+    description: "边缘 - 长上下文"
+    input:
+      conversation_history:
+        - role: user
+          content: "我们来讨论一下机器学习"
+        - role: assistant
+          content: "好的，机器学习是人工智能的一个分支..."
+        - role: user
+          content: "那深度学习呢"
+        - role: assistant
+          content: "深度学习是机器学习的一个子领域..."
+        - role: user
+          content: "Transformer 架构呢"
+        - role: assistant
+          content: "Transformer 是一种注意力机制..."
+      user_query: "总结一下我们刚才讨论的内容"
+    expected:
+      is_follow_up: true
+      task_type: content_generation
+    tolerance:
+      task_type: [content_generation, information_query]
+    tags: ["edge", "long_context"]
+
+  # ==================== 11. 任务依赖类型（V9.2 新增）====================
+
+  - id: dependency_independent_weather
+    description: "完全独立 - 多城市天气"
+    category: task_dependency
+    input:
+      user_query: "同时查询北京、上海、广州、深圳四个城市的天气"
+    expected:
+      task_dependency_type: independent
+      needs_multi_agent: true
+    tags: ["dependency", "independent"]
+
+  - id: dependency_independent_research
+    description: "完全独立 - 多公司研究"
+    input:
+      user_query: "分别研究 AWS、Azure、GCP 的云服务架构"
+    expected:
+      task_dependency_type: independent
+      needs_multi_agent: true
+    tolerance:
+      task_dependency_type: [independent, mixed]
+    tags: ["dependency", "independent"]
+
+  - id: dependency_sequential_code
+    description: "串行依赖 - 代码开发"
+    input:
+      user_query: "帮我写一个 Python 排序函数并补充单元测试"
+    expected:
+      task_dependency_type: sequential
+      needs_multi_agent: false
+    tags: ["dependency", "sequential"]
+
+  - id: dependency_sequential_fullstack
+    description: "串行依赖 - 全栈开发"
+    input:
+      user_query: "帮我开发一个用户注册功能，包括前端界面、后端 API 和数据库设计"
+    expected:
+      task_dependency_type: sequential
+      needs_multi_agent: false
+      execution_strategy: rvr-b
+    tags: ["dependency", "sequential"]
+
+  - id: dependency_sequential_workflow
+    description: "串行依赖 - 分析报告工作流"
+    input:
+      user_query: "分析销售数据，生成图表，然后写一份分析报告"
+    expected:
+      task_dependency_type: sequential
+      needs_multi_agent: false
+    tags: ["dependency", "sequential"]
+
+  - id: dependency_mixed_research_report
+    description: "混合依赖 - 调研+汇总"
+    input:
+      user_query: "分别调研 AWS、Azure、GCP 的定价策略，然后写一份对比报告"
+    expected:
+      task_dependency_type: mixed
+      needs_multi_agent: true
+      execution_strategy: rvr-b
+    tags: ["dependency", "mixed"]
+
+  - id: dependency_mixed_top5
+    description: "混合依赖 - Top N 分析"
+    input:
+      user_query: "研究 Top 5 云计算公司的 AI 战略，生成分析报告"
+    expected:
+      task_dependency_type: mixed
+      needs_multi_agent: true
+    tolerance:
+      task_dependency_type: [mixed, independent]
+    tags: ["dependency", "mixed"]
+
+  - id: dependency_sequential_translate
+    description: "串行依赖 - 长文档翻译"
+    input:
+      user_query: "帮我把这篇 10 页的英文论文翻译成中文"
+    expected:
+      task_dependency_type: sequential
+      needs_multi_agent: false
+    tags: ["dependency", "sequential"]
+
+  - id: dependency_sequential_ppt
+    description: "串行依赖 - PPT 生成"
+    input:
+      user_query: "帮我生成一个产品介绍 PPT"
+    expected:
+      task_dependency_type: sequential
+      needs_multi_agent: false
+    tags: ["dependency", "sequential"]
+
+  - id: dependency_boundary_2_entities
+    description: "边界 - 2个实体（独立但不触发多智能体）"
+    input:
+      user_query: "对比 Python 和 JavaScript 的性能"
+    expected:
+      task_dependency_type: independent
+      needs_multi_agent: false
+    tags: ["dependency", "boundary"]
+
+  # ==================== 12. 依赖类型与多智能体一致性 ====================
+
+  - id: consistency_dependency_multi_agent
+    description: "一致性 - independent/mixed 可触发多智能体"
+    category: dependency_consistency
+    input:
+      user_query: "对比 AWS、Azure、GCP 三家云服务商的 AI 战略"
+    expected:
+      task_dependency_type: mixed
+      needs_multi_agent: true
+    consistency_rules:
+      - "needs_multi_agent == true implies task_dependency_type in ['independent', 'mixed']"
+    tags: ["consistency", "dependency"]
+
+  - id: consistency_dependency_single_agent
+    description: "一致性 - sequential 不触发多智能体"
+    input:
+      user_query: "帮我写一个用户注册功能，先写后端 API，然后写前端界面，最后写测试"
+    expected:
+      task_dependency_type: sequential
+      needs_multi_agent: false
+    consistency_rules:
+      - "task_dependency_type == 'sequential' implies needs_multi_agent == false"
+    tags: ["consistency", "dependency"]
+
+  - id: consistency_2_entity_no_multi
+    description: "一致性 - 2个实体不触发多智能体"
+    input:
+      user_query: "对比 React 和 Vue 的优缺点"
+    expected:
+      needs_multi_agent: false
+    consistency_rules:
+      - "entity_count < 3 implies needs_multi_agent == false"
+    tags: ["consistency", "entity_count"]

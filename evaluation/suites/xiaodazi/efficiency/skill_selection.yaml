@@ -1,0 +1,114 @@
+# E1: Skill 选择准确性 - 小搭子效率性测评
+# 验证：是否选择最优 Skill 而非兜底方案（Skills-First 架构）
+
+id: xiaodazi_efficiency_skill_selection
+name: Skill 选择准确性（E1）
+description: 评估小搭子是否选择最合适的 Skill/工具完成任务
+category: xiaodazi_efficiency
+default_trials: 2
+
+metadata:
+  version: "2.0.0"
+  dimension: efficiency
+  capability: E1_skill_selection
+
+tasks:
+  - id: E1-01_open_finder
+    description: "打开访达 - 应使用 macos-open/peekaboo 而非通用 shell"
+    category: skill_selection
+    input:
+      user_query: "帮我打开访达"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_tools: ["nodes", "peekaboo"]
+      suboptimal_tools: ["code_execution"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('nodes')"
+      - type: model
+        rubric: grade_skill_selection
+        min_score: 4
+    trials: 2
+    timeout_seconds: 30
+    tags: ["efficiency", "skill_selection", "E1"]
+
+  - id: E1-02_make_ppt
+    description: "做一个 PPT - 应使用 PPT Skill（如 slidespeak-generator）+ api_calling"
+    category: skill_selection
+    input:
+      user_query: "做一个简单的产品介绍 PPT，3 页"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_tools: ["api_calling"]
+      optimal_skills: ["slidespeak-generator"]
+      suboptimal_tools: ["code_execution"]
+    graders:
+      - type: model
+        rubric: grade_skill_selection
+        min_score: 4
+    trials: 2
+    timeout_seconds: 90
+    tags: ["efficiency", "skill_selection", "E1"]
+
+  - id: E1-03_search_papers
+    description: "搜索 AI 论文 - 应使用学术搜索 Skill（如 arxiv-search/paper-search）"
+    category: skill_selection
+    input:
+      user_query: "找关于 LLM Agent 的最新论文"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_skills: ["arxiv-search", "paper-search"]
+      suboptimal_tools: ["code_execution"]
+    graders:
+      - type: model
+        rubric: grade_skill_selection
+        min_score: 4
+    trials: 2
+    timeout_seconds: 45
+    tags: ["efficiency", "skill_selection", "E1"]
+
+  - id: E1-04_simple_weather
+    description: "今天天气 - 应直接回答或简单搜索，不应启动 plan+多工具"
+    category: skill_selection
+    input:
+      user_query: "今天天气怎么样？"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_behavior: "simple_response_or_single_search"
+      over_engineering: "plan_tool_multiple_steps"
+    graders:
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 4
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 30
+    tags: ["efficiency", "skill_selection", "simple", "E1"]
+
+  - id: E1-05_analyze_excel
+    description: "分析 Excel 数据 - 应使用 code_execution(pandas) 而非纯文本猜测"
+    category: skill_selection
+    input:
+      user_query: "分析这个 Excel 表格的数据趋势"
+      conversation_history: []
+      context: {}
+      files: []
+    metadata:
+      optimal_tools: ["code_execution"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('code_execution')"
+      - type: model
+        rubric: grade_skill_selection
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "skill_selection", "E1"]

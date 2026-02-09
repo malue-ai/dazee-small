@@ -1,0 +1,71 @@
+# 容错与弹性配置
+
+timeout:
+  # LLM 调用超时（秒）
+  llm_timeout: 60.0
+  
+  # 工具执行超时（秒）
+  tool_timeout: 30.0
+  
+  # 数据库操作超时（秒）
+  database_timeout: 5.0
+  
+  # 缓存操作超时（秒）
+  cache_timeout: 2.0
+  
+  # 默认超时（秒）
+  default_timeout: 30.0
+
+retry:
+  # 最大重试次数
+  max_retries: 3
+  
+  # 基础延迟（秒）
+  base_delay: 0.5
+  
+  # 最大延迟（秒）
+  max_delay: 60.0
+  
+  # 指数退避基数
+  exponential_base: 2.0
+  
+  # 可重试的 HTTP 状态码
+  retryable_status_codes:
+    - 429  # Too Many Requests
+    - 502  # Bad Gateway
+    - 503  # Service Unavailable
+    - 504  # Gateway Timeout
+
+circuit_breaker:
+  # 失败次数阈值（触发熔断）
+  failure_threshold: 5
+  
+  # 成功次数阈值（半开 → 关闭）
+  success_threshold: 2
+  
+  # 熔断超时时间（秒）
+  timeout: 30.0
+  
+  # 滑动窗口大小
+  window_size: 10
+  
+  # 半开状态最大并发调用数
+  half_open_max_calls: 1
+
+# 各服务的熔断器配置
+circuit_breakers:
+  llm_service:
+    failure_threshold: 5
+    timeout: 60.0
+  
+  database_service:
+    failure_threshold: 10
+    timeout: 20.0
+
+# 降级策略
+fallback:
+  # LLM 服务降级
+  llm_service:
+    enabled: true
+    type: cached_response  # cached_response / default_response / skip
+    message: "AI 服务暂时不可用，请稍后重试"

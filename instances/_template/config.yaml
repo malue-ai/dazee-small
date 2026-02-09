@@ -1,0 +1,137 @@
+# ============================================================
+# 实例配置模板
+# ============================================================
+#
+# 创建新实例时复制此目录，修改以下配置即可。
+#
+# 文件结构：
+#   config.yaml              ← 你在看的这个文件（用户配置）
+#   config/skills.yaml       ← Skills 管理（按需修改）
+#   config/llm_profiles.yaml ← 框架 LLM 路由（高级，通常不改）
+#   prompt.md                ← 人格提示词
+#   .env                     ← API Keys（从 .env.example 复制）
+#   skills/                  ← Skill 目录（每个 Skill 一个 SKILL.md）
+#
+
+# ==================== 基础信息 ====================
+
+instance:
+  name: "my-agent"                  # 改为你的实例名（与目录名一致）
+  description: "我的 AI 搭子"        # 一句话描述
+  version: "1.0.0"
+
+# ==================== 个性化配置（可选） ====================
+
+persona:
+  nickname: ""                      # 小搭子怎么称呼你
+  tone: ""                          # 说话风格："简洁干练" / "幽默轻松" / "专业严谨"
+  language: "中文"
+  detail_level: "适中"              # "简洁" / "适中" / "详细"
+  work_dirs: []                     # 常用工作目录：["~/Documents/工作"]
+  custom_rules: []                  # 额外规则
+
+# ==================== 用户提示词（可选） ====================
+
+user_prompt: ""
+# 示例：
+#   user_prompt: |
+#     我是一名产品经理，帮我写文档时默认用 Markdown 格式。
+
+# ==================== 大模型配置 ====================
+#
+# provider: 一键切换所有模型
+#   "qwen"  - 通义千问（qwen3-max + qwen-plus）
+#   "claude" - Anthropic（claude-sonnet-4-5 + claude-haiku-4-5）
+#
+
+# provider 和 model 不预设，从用户配置的 API Key 自动获取
+# 用户在设置页面填写 API Key 后，会自动激活对应厂商的模型
+# 也可手动指定：
+#   agent:
+#     provider: "qwen"     # 一键切换：qwen / claude
+#     model: "qwen3-max"   # 不填则由 provider 自动决定
+agent: {}
+
+# ==================== 存储 ====================
+#
+# 运行时数据默认按 instance.name 隔离到：
+#   data/instances/{name}/db/        → 数据库
+#   data/instances/{name}/memory/    → 记忆文件
+#   data/instances/{name}/store/     → 向量 + 索引
+#   data/instances/{name}/storage/   → 上传文件
+#   data/instances/{name}/playbooks/ → 策略
+#   data/instances/{name}/snapshots/ → 状态快照
+#
+# 如需自定义存储位置，取消下面的注释并填写绝对路径：
+# storage:
+#   data_dir: "/path/to/your/custom/data"
+#
+
+# ==================== 状态一致性（文件快照与回滚） ====================
+#
+# Agent 执行文件操作前自动创建快照，异常时可自动或手动回滚。
+# 快照存储在：data/instances/{name}/snapshots/
+#
+
+state_consistency:
+  enabled: true
+  snapshot:
+    retention_hours: 24          # 快照保留时长（小时）
+    max_size_mb: 500             # 单次快照最大体积
+    capture_cwd: true            # 捕获工作目录
+    capture_files: true          # 捕获文件内容
+    capture_clipboard: true      # 捕获剪贴板（仅 macOS）
+  rollback:
+    auto_rollback_on_consecutive_failures: 3   # 连续失败 N 次自动回滚
+    auto_rollback_on_critical_error: true       # 严重错误自动回滚
+    rollback_timeout_seconds: 60               # 回滚超时
+  consistency_check:
+    pre_task_disk_space_mb: 100        # 前置检查：最低磁盘空间（MB）
+    pre_task_check_permissions: true   # 前置检查：文件权限
+    post_task_check_integrity: true    # 后置检查：文件完整性
+
+# ==================== 知识库 ====================
+
+knowledge:
+  enabled: true
+  directories: []                   # 要索引的本地目录
+
+  # --- 语义搜索（可选，不配置则只用关键词搜索） ---
+  #
+  # 开启后搜索能理解意思（如搜"天气"也能匹配"气候"相关文档）。
+  # 不开启也完全可用——关键词搜索已支持中英文。
+  #
+  # semantic_search:
+  #   enabled: false                # true 开启语义搜索
+  #   provider: "auto"              # "auto" 自动选择 | "local" 本地模型 | "openai" 云端
+  #   model: ""                     # 留空使用默认值
+  #
+  # 💡 推荐安装本地向量模型（离线可用，无需 API Key）：
+  #    pip install llama-cpp-python
+  #    首次使用自动下载 BGE-M3 Q4 模型（424MB，中英文双语）
+  #    模型存储位置：~/.xiaodazi/models/
+  # 语义搜索（可选，需要 OpenAI API 或本地模型）
+  semantic_enabled: false           # true 开启向量搜索（FTS5 + 语义混合）
+  embedding_provider: "auto"        # "auto" / "openai" / "local"
+  # embedding_model: ""             # 覆盖默认模型（通常不需要）
+
+# ==================== 记忆配置 ====================
+
+memory:
+  enabled: true
+  smart_retrieval: true
+  retention_policy: "user"
+
+# ==================== 规划系统 ====================
+
+planning:
+  mode: "implicit"
+
+# ==================== Playbook 持续学习 ====================
+
+playbook:
+  enabled: true
+  auto_extract: true
+  min_reward_threshold: 0.7
+  require_user_confirm: true
+  storage_backend: "file"

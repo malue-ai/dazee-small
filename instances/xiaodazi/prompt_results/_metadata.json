@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-02-09T16:17:41.532986",
+  "source_hashes": {
+    "prompt.md": "8e2bc85d2b115581576284c50e7a3781",
+    "config.yaml": "35387396f0da7da804831cc4d9cb9017"
+  },
+  "result_hashes": {
+    "agent_schema": "301337b743388ec752fd6b9a826fc277",
+    "simple_prompt": "256dd1d8d5b133dfc6e038bfa8cd5812"
+  },
+  "manually_edited": [
+    "intent_prompt",
+    "complex_prompt",
+    "medium_prompt"
+  ]
+}

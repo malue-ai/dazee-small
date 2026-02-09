@@ -1,0 +1,70 @@
+# F6: 错误恢复能力 - 小搭子可行性测评
+# 验证：工具失败恢复、参数调整回溯、连续错误上限
+
+id: xiaodazi_feasibility_error_recovery
+name: 错误恢复能力（F6）
+description: 验证小搭子 RVR-B 回溯与错误恢复能力
+category: xiaodazi_feasibility
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: feasibility
+  capability: F6_error_recovery
+
+tasks:
+  - id: F6-01_tool_failure_recovery
+    description: "工具失败恢复 - PDF 部分页无法解析时跳过/标注"
+    category: error_recovery
+    input:
+      user_query: "把这个 PDF 转成 Word，无法解析的页请标注"
+      conversation_history: []
+      context: {}
+      files: []
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 90
+    tags: ["error_recovery", "backtrack", "F6"]
+
+  - id: F6-02_param_adjust_backtrack
+    description: "参数调整回溯 - 分析格式混乱的 Excel"
+    category: error_recovery
+    input:
+      user_query: "分析这个 Excel 的销售趋势（数据可能格式不统一）"
+      conversation_history: []
+      context: {}
+      files: []
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+    trials: 2
+    timeout_seconds: 90
+    tags: ["error_recovery", "PARAM_ADJUST", "F6"]
+
+  - id: F6-03_continuous_error_limit
+    description: "连续错误上限 - 优雅终止不死循环"
+    category: error_recovery
+    input:
+      user_query: "读取不存在的文件 /tmp/nonexistent_xyz_123.csv 并分析"
+      conversation_history: []
+      context: {}
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+      - type: code
+        name: check_execution_time
+        check: "check_execution_time(60000)"
+    trials: 2
+    timeout_seconds: 60
+    tags: ["error_recovery", "graceful_fail", "F6"]

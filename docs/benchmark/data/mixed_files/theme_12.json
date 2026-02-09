@@ -1,0 +1,10 @@
+{
+  "type": "theme",
+  "version": "3.3",
+  "created": "2024-11-05",
+  "settings": {
+    "key1": "value_b",
+    "key2": 19,
+    "enabled": true
+  }
+}

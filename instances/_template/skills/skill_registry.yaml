@@ -1,0 +1,46 @@
+# ============================================================
+# Skills 注册表
+# ============================================================
+#
+# 声明本实例启用的 Claude Skills
+# 启动时 instance_loader.py 会自动注册 enabled: true 的 Skills
+#
+# ============================================================
+
+# Skills 列表
+skills:
+  # 示例 Skill（默认禁用）
+  # - name: example-skill           # Skill 目录名
+  #   enabled: false                # 是否启用
+  #   description: "示例技能"        # 描述（可选）
+  #   skill_id: null                # 注册后自动回写，勿手动修改
+  #   registered_at: null           # 注册时间，自动回写
+
+
+# ==================== 配置说明 ====================
+#
+# 每个 Skill 条目支持以下字段：
+#
+# | 字段          | 必填 | 说明                                    |
+# |---------------|------|-----------------------------------------|
+# | name          | ✅   | Skill 目录名，需与 skills/ 下目录匹配   |
+# | enabled       | ✅   | true 启用，false 禁用                   |
+# | description   | ⬜   | 简短描述（供运营参考）                   |
+# | skill_id      | ❌   | 注册成功后自动回写，勿手动修改          |
+# | registered_at | ❌   | 注册时间戳，自动回写                    |
+#
+# ==================== 使用示例 ====================
+#
+# skills:
+#   - name: data-analyzer
+#     enabled: true
+#     description: "数据分析技能，支持 pandas 操作"
+#
+#   - name: report-generator
+#     enabled: true
+#     description: "报告生成技能"
+#
+#   - name: deprecated-skill
+#     enabled: false
+#     description: "已废弃，保留配置以备恢复"
+#     skill_id: "sk_abc123"  # 保留历史 ID

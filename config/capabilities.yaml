@@ -1,0 +1,638 @@
+# ==================== 任务类型 → 能力映射 ====================
+#
+# 📌 小搭子：桌面端 AI 搭子
+#   - 面向普通用户的本地桌面助手
+#   - 所有能力通过 Skills 提供，工具层只做执行
+#   - 优先本地执行，减少外部依赖
+#
+task_type_mappings:
+
+  # 写作类任务（邮件、文案、翻译、润色）
+  writing:
+    - document_creation
+
+  # 内容生成类任务（PPT、文档、图片）
+  content_generation:
+    - ppt_generation
+    - document_creation
+    - image_generation
+
+  # 数据处理类任务（表格分析、文件整理）
+  data_processing:
+    - data_analysis
+    - file_operations
+
+  # 系统操作类任务（截图、通知、定时提醒、命令执行）
+  system_operation:
+    - system_control
+    - screen_observation
+    - task_scheduling
+
+  # 信息查询类任务（天气、搜索、知识问答）
+  information_query:
+    - knowledge_base
+
+  # 通用/其他
+  other: []
+
+# ==================== 工具分类配置 ====================
+#
+# 📌 仅包含实际存在的工具模块（tools/ 目录下）
+#
+tool_classification:
+  # 常用工具（不延迟加载）
+  frequent_tools:
+    - plan
+
+  # 工具类别（简写展开）
+  categories:
+    # 文档生成能力由 xiaodazi Skills 提供，不使用 Pre-built Skills
+
+# ==================== 能力类别定义 ====================
+#
+# 📌 小搭子能力分类（精简版）
+#   - business: 面向用户的业务能力
+#   - internal: 框架内部能力
+#
+capability_categories:
+
+# ========== 业务能力类别 ==========
+
+- id: ppt_generation
+  category_type: business
+  description: PPT/演示文稿生成
+  use_when: 需要创建 PPT、Slides
+  examples:
+    - 制作产品 PPT
+    - 生成培训材料
+
+- id: document_creation
+  category_type: business
+  description: 文档生成（Word/PDF/报告）
+  use_when: 需要创建文字文档、报告
+  examples:
+    - 写一份报告
+    - 生成 PDF 文档
+
+- id: image_generation
+  category_type: business
+  description: 图片生成
+  use_when: 需要 AI 生成图片、插图
+  examples:
+    - 生成配图
+    - 设计 logo
+
+- id: data_analysis
+  category_type: business
+  description: 数据分析/统计
+  use_when: 需要处理 Excel、分析数据
+  examples:
+    - 分析表格数据
+    - 生成统计报表
+
+# ========== 框架内部类别 ==========
+
+- id: knowledge_base
+  category_type: internal
+  description: 知识检索（FTS5 + 语义混合搜索）
+  use_when: 需要查找用户本地文档、知识库检索
+  examples:
+    - 查找我的文档
+    - 搜索本地资料
+
+- id: task_planning
+  category_type: internal
+  description: 任务规划
+  internal: true
+  use_when: 复杂任务的步骤拆解和进度跟踪
+
+- id: file_operations
+  category_type: internal
+  description: 文件读写操作
+  internal: true
+  use_when: 需要读取或保存文件
+  examples:
+    - 文件管理
+    - 整理文件夹
+
+- id: system_control
+  category_type: internal
+  description: 系统操作（命令执行、通知）
+  internal: true
+  use_when: 需要执行系统命令或发送通知
+
+- id: screen_observation
+  category_type: internal
+  description: 屏幕观察
+  internal: true
+  use_when: 需要查看屏幕内容
+
+- id: task_scheduling
+  category_type: internal
+  description: 定时任务/提醒
+  internal: true
+  use_when: 设置提醒或定时任务
+
+- id: api_calling
+  category_type: internal
+  description: API 调用（框架内部通用实现）
+  internal: true
+
+# ==================== 能力定义 ====================
+#
+# 📌 分层说明：
+#   level 1: 核心工具，始终启用
+#   level 2: 动态工具，按需加载
+#
+# invocation_hint:
+#   SKILL_CONTAINER: Anthropic Pre-built Skills
+#   DIRECT: 标准 tool_use 调用
+#
+
+capabilities:
+
+# Anthropic Pre-built Skills（pptx/xlsx/docx/pdf）已移除，效果差。
+# PPT/Excel/Word/PDF 能力全部由 xiaodazi Skills 提供。
+
+# ========== 核心工具（Level 1，始终加载）==========
+
+- name: api_calling
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  implementation:
+    module: tools.api_calling
+    class: APICallingTool
+  capabilities:
+    - api_calling
+  priority: 75
+  cost:
+    time: variable
+    money: variable
+  constraints:
+    requires_api: false
+    requires_network: true
+  metadata:
+    description: |
+      通用 HTTP API 调用工具，配合 Skills 文档使用。
+      LLM 从 Skill 文档中了解 API 用法，用本工具发起实际请求。
+  input_schema:
+    type: object
+    properties:
+      api_name:
+        type: string
+        description: 预配置的 API 名称，自动注入 base_url 和认证
+      path:
+        type: string
+        description: API 路径（与 api_name 配合使用）
+      url:
+        type: string
+        description: 完整的 API URL（与 api_name 二选一）
+      method:
+        type: string
+        enum: [GET, POST, PUT, DELETE, PATCH]
+        description: HTTP 方法（默认 POST）
+      headers:
+        type: object
+        description: 额外的请求头
+      body:
+        type: object
+        description: 请求体（将自动转为 JSON）
+      mode:
+        type: string
+        enum: [sync, stream, async_poll]
+        description: 请求模式 - sync(同步,默认)、stream(SSE流式)、async_poll(异步轮询)
+      poll_config:
+        type: object
+        description: 轮询配置（仅 mode=async_poll 时有效）
+    required: []
+
+- name: knowledge_search
+  type: TOOL
+  subtype: NATIVE
+  provider: user
+  level: 1
+  implementation:
+    module: tools.knowledge_search
+    class: KnowledgeSearchTool
+  capabilities:
+    - knowledge_base
+  priority: 60
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_network: false
+  metadata:
+    description: |
+      从用户本地知识库检索信息（FTS5 全文 + 可选向量语义搜索）。
+      适用于用户提到"我的文档"、"我上传的资料"、个人知识回忆场景。
+    cache_stable: true
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 搜索查询（自然语言）
+      limit:
+        type: integer
+        description: 返回结果数量（默认 5）
+        default: 5
+      file_type:
+        type: string
+        description: 过滤文件类型（如 .md, .txt, .pdf）
+    required: [query]
+
+- name: hitl
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  implementation:
+    module: tools.request_human_confirmation
+    class: HITLTool
+  capabilities:
+    - human_interaction
+    - confirmation
+  priority: 100
+  cost:
+    time: variable
+    money: free
+  constraints:
+    requires_api: false
+    requires_user_interaction: true
+  metadata:
+    description: |
+      请求用户确认操作。适用于：
+      - 删除文件或数据等危险操作
+      - 修改重要配置
+      - 执行不可逆操作
+      - 需要用户选择方案
+  input_schema:
+    type: object
+    properties:
+      type:
+        type: string
+        enum: [form]
+        description: HITL 交互类型
+        default: form
+      title:
+        type: string
+        description: 表单标题
+      description:
+        type: string
+        description: 表单描述
+      questions:
+        type: array
+        description: 问题数组（single_choice / multiple_choice）
+        items:
+          type: object
+          properties:
+            id:
+              type: string
+              description: 问题唯一标识
+            label:
+              type: string
+              description: 问题标签
+            type:
+              type: string
+              enum: [single_choice, multiple_choice]
+            options:
+              type: array
+              items:
+                type: string
+              description: 选项列表
+            default:
+              type: string
+            required:
+              type: boolean
+              default: true
+          required: [id, label, type]
+      timeout:
+        type: integer
+        description: 超时时间（秒）
+        default: 120
+    required: [title, questions]
+
+- name: plan
+  type: TOOL
+  subtype: SESSION
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  cache_stable: true
+  implementation:
+    module: tools.plan_todo_tool
+    class: PlanTool
+  capabilities:
+    - task_planning
+    - progress_tracking
+  priority: 95
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    session_scoped: true
+  metadata:
+    description: |
+      任务计划管理工具。
+
+      数据结构：
+      - 顶层：name, overview, plan, todos
+      - todo：id, title, content, status, result
+
+      action：
+      - create: 创建新计划
+      - update: 更新步骤状态
+      - rewrite: 重写整个计划
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [create, update, rewrite]
+      name:
+        type: string
+        description: 计划名称（create/rewrite 时必需）
+      overview:
+        type: string
+        description: 一句话目标摘要
+      plan:
+        type: string
+        description: 详细计划文档
+      todos:
+        type: array
+        description: 步骤列表（create/rewrite 时必需）
+        items:
+          type: object
+          properties:
+            id:
+              type: string
+            title:
+              type: string
+            content:
+              type: string
+            status:
+              type: string
+              default: pending
+              enum: [pending, in_progress, completed, failed]
+          required: [title]
+      todo_id:
+        type: string
+        description: 步骤 ID（update 时必需）
+      status:
+        type: string
+        enum: [pending, in_progress, completed, failed]
+      result:
+        type: string
+    required: [action]
+
+- name: nodes
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  cache_stable: true
+  implementation:
+    module: tools.nodes_tool
+    class: NodesTool
+  capabilities:
+    - system_control
+    - command_execution
+    - notification
+  priority: 80
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      发现和操作本地/远程节点。
+
+      Actions:
+      - status: 列出所有节点状态
+      - describe: 获取节点详细信息
+      - run: 在节点上执行 shell 命令
+      - notify: 发送系统通知到节点
+      - which: 检查可执行文件是否存在
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [status, describe, run, notify, which]
+      node:
+        type: string
+        description: 目标节点 ID（默认 local）
+        default: local
+      command:
+        type: array
+        items:
+          type: string
+        description: 要执行的命令（run action）
+      cwd:
+        type: string
+        description: 工作目录（run action）
+      env:
+        type: object
+        description: 环境变量（run action）
+      timeout_ms:
+        type: integer
+        default: 30000
+      title:
+        type: string
+        description: 通知标题（notify action）
+      message:
+        type: string
+        description: 通知内容（notify action）
+      subtitle:
+        type: string
+        description: 通知副标题（notify action）
+      executable:
+        type: string
+        description: 可执行文件名（which action）
+    required: [action]
+
+- name: browser
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: false
+  implementation:
+    module: tools.browser
+    class: BrowserTool
+  capabilities:
+    - web_interaction
+    - browser_automation
+  priority: 80
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      Playwright browser automation: navigate, text snapshot, click/type by ref.
+      For web pages. Desktop apps use observe_screen + peekaboo instead.
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [navigate, snapshot, click, type, select, screenshot, tabs, close]
+        description: Browser action to perform
+      url:
+        type: string
+        description: URL to navigate to (navigate action)
+      ref:
+        type: string
+        description: Element ref from snapshot, e.g. 'e3' (click/type/select)
+      text:
+        type: string
+        description: Text to type or option to select
+      clear:
+        type: boolean
+        description: Clear field before typing (type action, default false)
+      tab_id:
+        type: string
+        description: Tab ID to switch to (tabs action)
+    required: [action]
+
+- name: observe_screen
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  cache_stable: false
+  implementation:
+    module: tools.observe_screen
+    class: ObserveScreenTool
+  capabilities:
+    - screen_observation
+    - ui_understanding
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      截取当前屏幕或指定应用窗口的截图，使模型能直接「看到」屏幕内容。
+      适用：查看桌面/应用界面、在窗口中查找信息、根据用户描述定位内容。
+  input_schema:
+    type: object
+    properties:
+      app:
+        type: string
+        description: 应用名称（如 Safari），用于定位窗口
+      window_title:
+        type: string
+        description: 窗口标题关键词
+      mode:
+        type: string
+        enum: [screen, window, frontmost]
+        default: screen
+        description: 截屏范围
+      description:
+        type: string
+        description: 简短说明本次截屏目的
+    required: []
+
+- name: scheduled_task
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  cache_stable: false
+  implementation:
+    module: tools.scheduled_task_tool
+    class: ScheduledTaskTool
+  capabilities:
+    - task_scheduling
+    - reminder
+  priority: 90
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      定时任务管理工具。
+
+      触发类型：
+      - once: 单次执行（指定具体时间）
+      - cron: Cron 表达式
+      - interval: 固定间隔
+
+      动作类型：
+      - send_message: 发送提醒消息
+      - agent_task: 让 AI 执行任务
+  input_schema:
+    type: object
+    properties:
+      operation:
+        type: string
+        enum: [create, list, cancel, update]
+      task_id:
+        type: string
+        description: 任务 ID（更新/取消时必填）
+      title:
+        type: string
+      trigger_type:
+        type: string
+        enum: [once, cron, interval]
+      trigger_config:
+        type: object
+        properties:
+          run_at:
+            type: string
+            description: ISO 格式时间（once 时使用）
+          cron:
+            type: string
+            description: Cron 表达式
+          interval_seconds:
+            type: integer
+      action:
+        type: object
+        properties:
+          type:
+            type: string
+            enum: [send_message, agent_task]
+          content:
+            type: string
+            description: 提醒内容（send_message）
+          prompt:
+            type: string
+            description: 任务描述（agent_task）
+    required: [operation]
+
+# ========== 动态工具（Level 2，按需加载）==========
+
+# ========== 内置代码执行 ==========
+
+- name: code_execution
+  type: CODE
+  subtype: DYNAMIC
+  provider: anthropic
+  capabilities:
+    - dynamic_execution
+    - custom_logic
+  priority: 40
+  cost:
+    time: variable
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: Execute Python code dynamically via code_execution

@@ -1,0 +1,110 @@
+# F5: 记忆与上下文能力 - 小搭子可行性测评
+# 验证：追问理解、代词消解、跨会话记忆、长对话稳定
+
+id: xiaodazi_feasibility_memory_context
+name: 记忆与上下文能力（F5）
+description: 验证小搭子记忆与多轮/跨会话上下文能力
+category: xiaodazi_feasibility
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: feasibility
+  capability: F5_memory_context
+
+tasks:
+  - id: F5-01_follow_up
+    description: "追问理解 - 轮次2 改短一点"
+    category: memory
+    input:
+      user_query: "改短一点"
+      conversation_history:
+        - role: user
+          content: "写一篇关于咖啡的短文"
+        - role: assistant
+          content: "（已生成一篇约 800 字的咖啡短文）"
+      context: {}
+    expected_outcome:
+      intent: follow_up
+    graders:
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 4
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 45
+    tags: ["memory", "follow_up", "F5"]
+
+  - id: F5-02_pronoun_resolution
+    description: "代词消解 - 把它改成红色的"
+    category: memory
+    input:
+      user_query: "把它改成红色的"
+      conversation_history:
+        - role: user
+          content: "帮我设计一个网页按钮"
+        - role: assistant
+          content: "好的，我设计了一个蓝色的圆角按钮..."
+      context: {}
+    expected_outcome:
+      response_contains: ["红色"]
+    graders:
+      - type: code
+        name: check_response
+        check: "check_response_contains(['红色'])"
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 4
+    trials: 2
+    timeout_seconds: 45
+    tags: ["memory", "context", "F5"]
+
+  - id: F5-03_cross_session_memory
+    description: "跨会话记忆 - 会话2 验证是否应用偏好"
+    category: memory
+    input:
+      user_query: "写一篇关于茶文化的短文"
+      conversation_history: []
+      context:
+        previous_session_preference: "用户曾在上一会话中表示喜欢毒舌+干货风格"
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 60
+    tags: ["memory", "cross_session", "F5"]
+
+  - id: F5-04_long_conversation
+    description: "长对话稳定 - 多轮对话后仍能正确回答"
+    category: memory
+    input:
+      user_query: "那第一个问题的答案是什么？"
+      conversation_history:
+        - role: user
+          content: "1+1 等于几？"
+        - role: assistant
+          content: "1+1 等于 2。"
+        - role: user
+          content: "2+2 呢？"
+        - role: assistant
+          content: "2+2 等于 4。"
+        - role: user
+          content: "3+3 呢？"
+        - role: assistant
+          content: "3+3 等于 6。"
+      context: {}
+    expected_outcome:
+      response_contains: ["2"]
+    graders:
+      - type: code
+        name: check_response
+        check: "check_response_contains(['2'])"
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 4
+    trials: 2
+    timeout_seconds: 30
+    tags: ["memory", "long_turn", "F5"]

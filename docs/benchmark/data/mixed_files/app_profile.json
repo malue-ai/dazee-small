@@ -1,0 +1,10 @@
+{
+  "type": "profile",
+  "version": "2.7",
+  "created": "2024-05-28",
+  "settings": {
+    "key1": "value_c",
+    "key2": 55,
+    "enabled": false
+  }
+}

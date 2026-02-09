@@ -1,0 +1,39 @@
+# ============================================================
+# xiaodazi 实例配置
+# ============================================================
+# 
+# Agent ID: xiaodazi
+# 养在电脑里的 AI 小搭子
+#
+# ============================================================
+
+instance:
+  name: xiaodazi
+  description: 养在电脑里的 AI 小搭子
+  version: 1.0.0
+# provider 和 model 不预设，首次启动时从用户配置的 API Key 自动获取
+# 用户在设置页面填写 API Key 并验证后，会自动激活对应厂商的模型
+agent: {}
+
+# ==================== 状态一致性（文件快照与回滚） ====================
+#
+# Agent 执行文件操作前自动创建快照，异常时可自动或手动回滚。
+# 快照存储在：data/instances/xiaodazi/snapshots/
+#
+
+state_consistency:
+  enabled: true
+  snapshot:
+    retention_hours: 24
+    max_size_mb: 500
+    capture_cwd: true
+    capture_files: true
+    capture_clipboard: true
+  rollback:
+    auto_rollback_on_consecutive_failures: 3
+    auto_rollback_on_critical_error: true
+    rollback_timeout_seconds: 60
+  consistency_check:
+    pre_task_disk_space_mb: 100
+    pre_task_check_permissions: true
+    post_task_check_integrity: true
