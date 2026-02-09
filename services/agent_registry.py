@@ -636,6 +636,11 @@ class AgentRegistry:
         """
         instance_start = datetime.now()
 
+        # 0. 确保 AGENT_INSTANCE 环境变量与当前实例一致
+        # 所有存储组件（DB/Memory/Scheduler）通过此变量定位实例数据
+        import os
+        os.environ["AGENT_INSTANCE"] = agent_id
+
         # 1. 加载实例环境变量（从 config.yaml 的 env_vars 段）
         load_instance_env_from_config(agent_id)
 

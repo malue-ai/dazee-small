@@ -1742,8 +1742,9 @@ class ChatService:
         )
 
         try:
-            # 获取默认 Agent
-            agent_id = "xiaodazi"  # 使用默认 Agent
+            # 动态获取当前实例的 Agent（优先 AGENT_INSTANCE 环境变量）
+            import os
+            agent_id = os.getenv("AGENT_INSTANCE", "default")
             agent_config = await self.agent_registry.get_agent(agent_id)
 
             if not agent_config:

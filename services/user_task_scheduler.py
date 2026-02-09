@@ -87,13 +87,17 @@ class UserTaskScheduler:
         from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
 
         if event.code == EVENT_JOB_ERROR:
+            # event.traceback 是格式化后的字符串，不能直接传给 exc_info
+            tb_str = event.traceback if hasattr(event, 'traceback') else ''
             logger.error(
                 f"❌ [Scheduler] Job 执行异常: job_id={event.job_id}, "
-                f"error={event.exception}",
-                exc_info=event.traceback,
+                f"error={event.exception}\n{tb_str}"
             )
         elif event.code == EVENT_JOB_MISSED:
-            logger.warning(f"⚠️ [Scheduler] Job 被跳过（错过执行时间）: job_id={event.job_id}")
+            logger.warning(
+                f"⚠️ [Scheduler] Job 被跳过（错过执行时间）: "
+                f"job_id={event.job_id}, scheduled_run_time={event.scheduled_run_time}"
+            )
         else:
             logger.info(f"✅ [Scheduler] Job 执行完成: job_id={event.job_id}")
 
@@ -274,7 +278,14 @@ class UserTaskScheduler:
     # ==================== 任务执行 ====================
 
     async def _execute_and_reschedule(self, task_id: str):
-        """执行任务，然后根据 trigger_type 决定是否重新调度"""
+        """
+        执行任务，然后根据 trigger_type 决定是否重新调度。
+
+        关键设计：分段式 session 管理，避免 SQLite pool_size=1 的连接竞争。
+        1. Session A: 加载任务数据 → 关闭
+        2. 执行任务（可自由打开新 session）
+        3. Session B: 标记任务完成 → 关闭
+        """
         logger.info(f"🔔 [Scheduler] 任务触发: task_id={task_id}")
 
         if not self._workspace or not self._workspace.is_running:
@@ -290,6 +301,8 @@ class UserTaskScheduler:
             mark_task_executed,
         )
 
+        # ---- Phase 1: 加载任务（短暂持有 session，立即释放） ----
+        task_snapshot = None
         async with self._workspace._session_factory() as session:
             task = await get_scheduled_task(session, task_id)
 
@@ -301,112 +314,167 @@ class UserTaskScheduler:
                 logger.info(f"⏭️ [Scheduler] 任务非活跃状态，跳过: task_id={task_id}, status={task.status}")
                 return
 
-            try:
-                logger.info(
-                    f"🚀 [Scheduler] 开始执行任务: id={task.id}, "
-                    f"title={task.title}, trigger={task.trigger_type}"
-                )
+            # 提取执行所需数据（脱离 session 后 lazy-load 不可用）
+            task_snapshot = {
+                "id": task.id,
+                "title": task.title,
+                "trigger_type": task.trigger_type,
+                "user_id": task.user_id,
+                "conversation_id": task.conversation_id,
+                "action": task.action,  # property，JSON 反序列化
+            }
+        # ---- session 已释放 ----
 
-                await self._execute_task(task)
+        if not task_snapshot:
+            return
 
-                # 更新数据库（run_count++, 计算 next_run_at, 单次任务标记完成）
-                await mark_task_executed(session, task.id)
+        # ---- Phase 2: 执行任务（无 session 持有，可自由操作数据库） ----
+        execution_success = True
+        execution_error = None
+        try:
+            logger.info(
+                f"🚀 [Scheduler] 开始执行任务: id={task_snapshot['id']}, "
+                f"title={task_snapshot['title']}, trigger={task_snapshot['trigger_type']}"
+            )
 
-                # 刷新任务状态
-                await session.refresh(task)
+            await self._execute_task(task_snapshot)
 
-                logger.info(
-                    f"✅ [Scheduler] 任务执行完成: id={task.id}, "
-                    f"run_count={task.run_count}, status={task.status}"
-                )
+        except Exception as e:
+            execution_success = False
+            execution_error = str(e)
+            logger.error(
+                f"❌ [Scheduler] 执行任务失败: task_id={task_id}, error={e}",
+                exc_info=True,
+            )
+            # 执行失败也要标记（避免死循环重试）
 
-                # cron / interval 任务需要重新调度
-                if task.status == "active" and task.next_run_at:
-                    logger.info(f"🔄 [Scheduler] 重新调度: id={task.id}, next_run={task.next_run_at}")
-                    self._register_job(task)
+        # ---- Phase 2.5: 广播通知到前端（通过 WebSocket ConnectionManager） ----
+        await self._broadcast_task_notification(task_snapshot, execution_success, execution_error)
 
-            except Exception as e:
-                logger.error(
-                    f"❌ [Scheduler] 执行任务失败: task_id={task_id}, error={e}",
-                    exc_info=True,
-                )
+        # ---- Phase 3: 标记执行完成（短暂持有 session） ----
+        try:
+            async with self._workspace._session_factory() as session:
+                updated_task = await mark_task_executed(session, task_id)
 
-    async def _execute_task(self, task):
-        """执行单个任务"""
-        action = task.action
+                if updated_task:
+                    logger.info(
+                        f"✅ [Scheduler] 任务执行完成: id={task_id}, "
+                        f"run_count={updated_task.run_count}, status={updated_task.status}"
+                    )
+
+                    # cron / interval 任务需要重新调度
+                    if updated_task.status == "active" and updated_task.next_run_at:
+                        logger.info(f"🔄 [Scheduler] 重新调度: id={task_id}, next_run={updated_task.next_run_at}")
+                        self._register_job(updated_task)
+
+        except Exception as e:
+            logger.error(
+                f"❌ [Scheduler] 标记任务完成失败: task_id={task_id}, error={e}",
+                exc_info=True,
+            )
+
+    async def _execute_task(self, task_data: Dict[str, Any]):
+        """
+        执行单个任务。
+
+        Args:
+            task_data: 任务快照 dict（已脱离 session，无连接池竞争风险）
+        """
+        action = task_data["action"]
         action_type = action.get("type", "send_message")
+        task_id = task_data["id"]
+        title = task_data["title"]
 
-        logger.info(f"执行用户任务: id={task.id}, title={task.title}, action={action_type}")
+        logger.info(f"执行用户任务: id={task_id}, title={title}, action={action_type}")
 
         if action_type == "send_message":
-            await self._action_send_message(task, action)
+            await self._action_send_message(task_data, action)
         elif action_type == "agent_task":
-            await self._action_agent_task(task, action)
+            await self._action_agent_task(task_data, action)
         else:
             logger.warning(f"未知的动作类型: {action_type}")
 
-    async def _action_send_message(self, task, action: Dict[str, Any]):
+    async def _action_send_message(self, task_data: Dict[str, Any], action: Dict[str, Any]):
         """发送消息动作：将提醒消息存储到数据库"""
         content = action.get("content", "定时提醒")
-        user_id = task.user_id
-        conversation_id = task.conversation_id
+        user_id = task_data["user_id"]
+        conversation_id = task_data["conversation_id"]
+        task_id = task_data["id"]
+        title = task_data["title"]
 
         try:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            message_content = [
+                {
+                    "type": "text",
+                    "text": (
+                        f"⏰ **定时提醒** ({now_str})\n\n"
+                        f"**{title}**\n\n"
+                        f"{content}"
+                    ),
+                }
+            ]
+            message_metadata = {
+                "type": "scheduled_reminder",
+                "task_id": task_id,
+                "task_title": title,
+                "triggered_at": now_str,
+            }
+
             if conversation_id and self._workspace:
+                # 此时没有外层 session 持有连接，可以安全调用 workspace 方法
                 await self._workspace.create_message(
                     conversation_id=conversation_id,
                     role="assistant",
-                    content=[
-                        {
-                            "type": "text",
-                            "text": f"⏰ **定时提醒**\n\n{content}",
-                        }
-                    ],
-                    metadata={
-                        "type": "scheduled_reminder",
-                        "task_id": task.id,
-                        "task_title": task.title,
-                    },
+                    content=message_content,
+                    metadata=message_metadata,
                 )
-                logger.info(f"提醒消息已存储: task_id={task.id}")
+                logger.info(
+                    f"✅ [Scheduler] 提醒消息已存储: "
+                    f"task_id={task_id}, conv_id={conversation_id}"
+                )
             elif self._workspace:
                 # 没有关联会话，创建新会话
                 conv = await self._workspace.create_conversation(
                     user_id=user_id,
-                    title=f"定时提醒: {task.title}",
-                    metadata={"source": "scheduled_task", "task_id": task.id},
+                    title=f"定时提醒: {title}",
+                    metadata={"source": "scheduled_task", "task_id": task_id},
                 )
                 await self._workspace.create_message(
                     conversation_id=conv.id,
                     role="assistant",
-                    content=[
-                        {
-                            "type": "text",
-                            "text": f"⏰ **定时提醒**\n\n{content}",
-                        }
-                    ],
-                    metadata={
-                        "type": "scheduled_reminder",
-                        "task_id": task.id,
-                        "task_title": task.title,
-                    },
+                    content=message_content,
+                    metadata=message_metadata,
                 )
-                logger.info(f"提醒消息已存储到新会话: task_id={task.id}, conv_id={conv.id}")
+                logger.info(
+                    f"✅ [Scheduler] 提醒消息已存储到新会话: "
+                    f"task_id={task_id}, conv_id={conv.id}"
+                )
+            else:
+                logger.error(
+                    f"❌ [Scheduler] Workspace 不可用，无法存储提醒消息: "
+                    f"task_id={task_id}"
+                )
 
         except Exception as e:
-            logger.warning(f"存储提醒消息失败: {e}")
+            logger.error(
+                f"❌ [Scheduler] 存储提醒消息失败: task_id={task_id}, error={e}",
+                exc_info=True,
+            )
 
-    async def _action_agent_task(self, task, action: Dict[str, Any]):
+    async def _action_agent_task(self, task_data: Dict[str, Any], action: Dict[str, Any]):
         """执行 Agent 任务动作"""
         prompt = action.get("prompt", "")
-        user_id = task.user_id
-        conversation_id = task.conversation_id
+        user_id = task_data["user_id"]
+        conversation_id = task_data["conversation_id"]
+        task_id = task_data["id"]
+        title = task_data["title"]
 
         if not prompt:
-            logger.warning(f"Agent 任务缺少 prompt: task_id={task.id}")
+            logger.warning(f"Agent 任务缺少 prompt: task_id={task_id}")
             return
 
-        logger.info(f"执行 Agent 任务: task_id={task.id}, prompt={prompt[:50]}...")
+        logger.info(f"执行 Agent 任务: task_id={task_id}, prompt={prompt[:50]}...")
 
         try:
             from services.chat_service import get_chat_service
@@ -416,8 +484,8 @@ class UserTaskScheduler:
             if not conversation_id and self._workspace:
                 conv = await self._workspace.create_conversation(
                     user_id=user_id,
-                    title=f"定时任务: {task.title}",
-                    metadata={"source": "scheduled_task", "task_id": task.id},
+                    title=f"定时任务: {title}",
+                    metadata={"source": "scheduled_task", "task_id": task_id},
                 )
                 conversation_id = conv.id
 
@@ -425,15 +493,73 @@ class UserTaskScheduler:
                 user_id=user_id,
                 conversation_id=conversation_id,
                 prompt=prompt,
-                task_id=task.id,
+                task_id=task_id,
             )
 
-            logger.info(f"Agent 任务执行完成: task_id={task.id}")
+            logger.info(f"Agent 任务执行完成: task_id={task_id}")
 
         except Exception as e:
             logger.error(
-                f"Agent 任务执行失败: task_id={task.id}, error={e}",
+                f"Agent 任务执行失败: task_id={task_id}, error={e}",
                 exc_info=True,
+            )
+
+    async def _broadcast_task_notification(
+        self,
+        task_data: Dict[str, Any],
+        success: bool,
+        error: Optional[str] = None,
+    ):
+        """
+        通过 WebSocket 向前端广播定时任务执行通知。
+
+        Args:
+            task_data: 任务快照
+            success: 是否执行成功
+            error: 失败时的错误信息
+        """
+        try:
+            from routers.websocket import get_connection_manager
+
+            manager = get_connection_manager()
+
+            action_type = task_data["action"].get("type", "send_message")
+            now_str = datetime.now().strftime("%H:%M")
+
+            if success:
+                if action_type == "send_message":
+                    title = f"定时提醒: {task_data['title']}"
+                    message = task_data["action"].get("content", "定时提醒")
+                    ntype = "message"
+                else:
+                    title = f"定时任务完成: {task_data['title']}"
+                    message = f"Agent 已执行: {task_data['action'].get('prompt', '')[:60]}"
+                    ntype = "success"
+            else:
+                title = f"定时任务失败: {task_data['title']}"
+                message = error or "未知错误"
+                ntype = "error"
+
+            payload = {
+                "notification_type": ntype,
+                "title": title,
+                "message": message[:200],
+                "task_id": task_data["id"],
+                "conversation_id": task_data.get("conversation_id"),
+                "triggered_at": now_str,
+            }
+
+            await manager.broadcast_notification("notification", payload)
+
+            logger.info(
+                f"📢 [Scheduler] 通知已广播: task_id={task_data['id']}, "
+                f"type={ntype}, connections={manager.active_count}"
+            )
+
+        except Exception as e:
+            # 通知失败不应影响任务本身的执行流程
+            logger.warning(
+                f"⚠️ [Scheduler] 广播通知失败: task_id={task_data['id']}, error={e}"
             )
 
 
