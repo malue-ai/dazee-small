@@ -192,7 +192,7 @@ excludes = [
     # pkg_resources 依赖 jaraco.text（setuptools 80.x），项目代码不使用，直接排除
     # 注意：保留 setuptools（Python 3.12 的 distutils 来自 setuptools）
     'pkg_resources', 'jaraco',
-    'pip', 'wheel', '_distutils_hack',
+    'pip', '_distutils_hack',
     'ensurepip', 'venv',
     # GUI 工具包（服务端不需要）
     'tkinter', '_tkinter', 'tcl', 'tk',
