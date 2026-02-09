@@ -344,13 +344,17 @@
               <span class="text-xs text-muted-foreground">（可选）</span>
             </div>
             <div class="flex items-center gap-2">
-              <div class="relative flex-1">
+              <div
+                class="relative flex-1 cursor-pointer"
+                @click="openFolderPicker"
+              >
                 <FolderOpen class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50 pointer-events-none" />
                 <input
-                  v-model="form.dataDir"
+                  :value="form.dataDir"
                   type="text"
-                  placeholder="使用默认路径"
-                  class="w-full pl-10 pr-4 py-3 text-sm bg-card border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 text-foreground placeholder:text-muted-foreground/50 transition-colors"
+                  readonly
+                  placeholder="点击选择文件夹"
+                  class="w-full pl-10 pr-4 py-3 text-sm bg-card border border-border rounded-xl cursor-pointer text-foreground placeholder:text-muted-foreground/50 transition-colors hover:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40"
                 />
               </div>
               <button
@@ -421,26 +425,37 @@
           <!-- 弹窗 -->
           <div class="relative bg-card rounded-2xl shadow-xl border border-border p-6 w-[360px] space-y-4">
             <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
-                <AlertCircle class="w-5 h-5 text-amber-500" />
+              <div class="w-9 h-9 rounded-xl flex items-center justify-center"
+                :class="isCreating ? 'bg-primary/10' : 'bg-amber-500/10'"
+              >
+                <Loader2 v-if="isCreating" class="w-5 h-5 text-primary animate-spin" />
+                <AlertCircle v-else class="w-5 h-5 text-amber-500" />
               </div>
-              <h3 class="text-base font-semibold text-foreground">确认离开？</h3>
+              <h3 class="text-base font-semibold text-foreground">
+                {{ isCreating ? '项目正在创建中' : '确认离开？' }}
+              </h3>
             </div>
             <p class="text-sm text-muted-foreground leading-relaxed">
-              {{ isEditMode ? '你有未保存的修改，离开后更改将丢失。' : '项目尚未创建，离开后当前内容将丢失。' }}
+              {{ isCreating
+                ? '项目仍在后台创建中，离开后创建不会中断。你可以稍后在项目列表中查看。'
+                : (isEditMode ? '你有未保存的修改，离开后更改将丢失。' : '项目尚未创建，离开后当前内容将丢失。')
+              }}
             </p>
             <div class="flex justify-end gap-2 pt-1">
               <button
                 class="px-4 py-2 text-sm font-medium rounded-xl text-muted-foreground hover:bg-muted transition-colors"
                 @click="showBackConfirm = false"
               >
-                继续编辑
+                {{ isCreating ? '继续等待' : '继续编辑' }}
               </button>
               <button
-                class="px-4 py-2 text-sm font-medium rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                class="px-4 py-2 text-sm font-medium rounded-xl transition-colors"
+                :class="isCreating
+                  ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                  : 'bg-destructive/10 text-destructive hover:bg-destructive/20'"
                 @click="doBack"
               >
-                确认离开
+                {{ isCreating ? '返回列表' : '确认离开' }}
               </button>
             </div>
           </div>
@@ -459,6 +474,7 @@ import { useGuideStore } from '@/stores/guide'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
 import { modelApi, type ModelInfo } from '@/api/models'
 import { getAgentDetail } from '@/api/agent'
+import { runCommand, isTauriEnv } from '@/api/tauri'
 import api from '@/api/index'
 import type { ChatRequest } from '@/types'
 
@@ -535,6 +551,51 @@ const form = reactive({
   model: '',
   dataDir: ''
 })
+
+// ==================== 文件夹选择 ====================
+
+/** 调用系统原生文件夹选择对话框 */
+async function openFolderPicker() {
+  if (!isTauriEnv()) {
+    // 非 Tauri 环境（浏览器开发时）回退为手动输入
+    const path = prompt('请输入文件夹路径：')
+    if (path) form.dataDir = path
+    return
+  }
+
+  try {
+    // 检测平台，调用对应的系统文件夹选择器
+    const isWin = navigator.userAgent.includes('Windows') || navigator.platform.startsWith('Win')
+
+    let result
+    if (isWin) {
+      // Windows：使用 PowerShell 弹出 FolderBrowserDialog
+      result = await runCommand([
+        'powershell', '-NoProfile', '-Command',
+        `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '选择项目存储路径'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }`
+      ], { timeout_ms: 120000 })
+    } else {
+      // macOS / Linux：使用 osascript / zenity
+      const isMac = navigator.userAgent.includes('Mac')
+      if (isMac) {
+        result = await runCommand([
+          'osascript', '-e',
+          'set theFolder to choose folder with prompt "选择项目存储路径"\nreturn POSIX path of theFolder'
+        ], { timeout_ms: 120000 })
+      } else {
+        result = await runCommand([
+          'zenity', '--file-selection', '--directory', '--title=选择项目存储路径'
+        ], { timeout_ms: 120000 })
+      }
+    }
+
+    if (result.success && result.stdout.trim()) {
+      form.dataDir = result.stdout.trim()
+    }
+  } catch (e) {
+    console.error('打开文件夹选择器失败:', e)
+  }
+}
 
 // ==================== 模型选择 ====================
 
@@ -647,6 +708,11 @@ const showBackConfirm = ref(false)
 
 /** 返回上一页（有内容时先确认） */
 function handleBack() {
+  if (isCreating.value) {
+    // 创建中：弹出特殊提示
+    showBackConfirm.value = true
+    return
+  }
   if (hasUnsavedContent.value) {
     showBackConfirm.value = true
     return
@@ -971,8 +1037,8 @@ const createProgress = reactive({
   message: '',
 })
 
-/** SSE 超时（180 秒，preload_instance 涉及多次串行 LLM 调用） */
-const CREATE_TIMEOUT_MS = 180_000
+/** SSE 超时（300 秒，preload_instance 涉及多次串行 LLM 调用，通常需要 3~4 分钟） */
+const CREATE_TIMEOUT_MS = 300_000
 
 /** 重置进度状态 */
 function resetProgress() {

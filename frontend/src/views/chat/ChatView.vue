@@ -22,8 +22,26 @@
 
     <!-- 右侧主区域 -->
     <div class="flex-1 flex min-w-0 relative z-10 overflow-hidden">
+
+      <!-- 无项目空状态：引导用户创建第一个项目 -->
+      <div v-if="showEmptyProjectState" class="flex-1 flex flex-col items-center justify-center text-center px-8">
+        <div class="w-20 h-20 bg-card rounded-3xl shadow-lg border border-border flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
+          <Rocket class="w-10 h-10 text-primary" />
+        </div>
+        <h1 class="text-2xl font-bold mb-3 text-foreground">创建你的第一个项目</h1>
+        <p class="text-muted-foreground mb-8 max-w-md text-sm leading-relaxed">项目是你和 AI 协作的空间。创建一个项目，开始智能对话吧。</p>
+        <button
+          @click="router.push('/create-project')"
+          class="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-xl font-medium text-sm hover:bg-primary/90 transition-colors shadow-md hover:shadow-lg"
+        >
+          <Plus class="w-4 h-4" />
+          新建项目
+        </button>
+      </div>
+
       <!-- 聊天内容区域 -->
       <div 
+        v-else
         class="flex flex-col min-w-0 overflow-hidden transition-all duration-300"
         :class="showRightSidebar ? 'w-1/2' : 'flex-1'"
       >
@@ -335,7 +353,7 @@ import { useGuideStore } from '@/stores/guide'
 // Composables
 import { useChat } from '@/composables/useChat'
 import { useFileUpload } from '@/composables/useFileUpload'
-import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2 } from 'lucide-vue-next'
+import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2, Rocket } from 'lucide-vue-next'
 
 // Components
 import ConversationSidebar from '@/components/chat/ConversationSidebar.vue'
@@ -478,6 +496,11 @@ const currentPlan = computed<PlanData | null>(() => {
     }
   }
   return null
+})
+
+/** 是否显示"无项目"空状态（无 Agent 且未在 Agent 路由中） */
+const showEmptyProjectState = computed(() => {
+  return !isAgentMode.value && agentStore.agents.length === 0
 })
 
 /** 当前会话是否正在加载 */
@@ -778,7 +801,15 @@ async function handleDeleteAgent(targetAgentId: string): Promise<void> {
       await agentStore.removeAgent(targetAgentId)
       if (wasCurrentAgent) {
         conversationStore.reset()
-        router.push({ name: 'chat' })
+        // 自动选中第一个剩余项目，若无则回到首页
+        if (agentStore.agents.length > 0) {
+          const firstAgent = agentStore.agents[0]
+          await agentStore.selectAgent(firstAgent.agent_id)
+          router.push({ name: 'agent', params: { agentId: firstAgent.agent_id } })
+        } else {
+          agentStore.reset()
+          router.push({ name: 'chat' })
+        }
       }
     } catch (error) {
       console.error('❌ 删除项目失败:', error)

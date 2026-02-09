@@ -282,6 +282,10 @@ class AgentRegistry:
 
         config = self._configs[agent_id]
 
+        # 切换 AGENT_INSTANCE 环境变量，确保下游存储组件
+        # （Memory/Store/DB/Playbook）使用正确的实例隔离路径
+        os.environ["AGENT_INSTANCE"] = agent_id
+
         # 如果未提供 event_manager，创建一个
         if event_manager is None:
             storage = get_memory_storage()
@@ -574,6 +578,14 @@ class AgentRegistry:
 
         # 2. 加载实例配置
         config = await load_instance_config(agent_id)
+
+        # 2.0.1 注册自定义数据目录（若 config.yaml 配置了 storage.data_dir）
+        storage_cfg = (config.raw_config or {}).get("storage", {})
+        custom_data_dir = storage_cfg.get("data_dir") if isinstance(storage_cfg, dict) else None
+        if custom_data_dir:
+            from utils.app_paths import register_instance_data_dir
+            register_instance_data_dir(agent_id, custom_data_dir)
+            logger.info(f"   自定义存储路径: {custom_data_dir}")
 
         # 2.1 注入实例 LLM Profiles（必须在 InstancePromptCache 之前）
         from config.llm_config.loader import set_instance_profiles
