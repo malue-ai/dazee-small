@@ -156,6 +156,51 @@ dlg.set_focus()
 dlg.close()
 ```
 
+### 滚动
+
+```python
+from pywinauto import mouse
+
+# 向下滚动 3 格（在指定坐标位置）
+mouse.scroll(coords=(500, 400), wheel_dist=-3)
+
+# 向上滚动 5 格
+mouse.scroll(coords=(500, 400), wheel_dist=5)
+
+# 在控件内滚动（先获取控件位置）
+rect = dlg.child_window(control_type="List").rectangle()
+mouse.scroll(coords=(rect.mid_point()), wheel_dist=-3)
+```
+
+### 鼠标坐标操作
+
+```python
+from pywinauto import mouse
+
+# 移动鼠标到坐标
+mouse.move(coords=(500, 300))
+
+# 在指定坐标左键点击
+mouse.click(coords=(500, 300))
+
+# 右键点击
+mouse.right_click(coords=(500, 300))
+
+# 双击
+mouse.double_click(coords=(500, 300))
+```
+
+### 拖拽
+
+```python
+from pywinauto import mouse
+
+# 拖拽：从 (100,200) 到 (300,400)
+mouse.press(coords=(100, 200))
+mouse.move(coords=(300, 400))
+mouse.release(coords=(300, 400))
+```
+
 ## 典型工作流
 
 ```
@@ -163,7 +208,7 @@ dlg.close()
 2. 用 app.connect() 连接到目标应用
 3. 用 dlg.print_control_identifiers() 查看控件树
 4. 根据控件类型和属性定位目标元素
-5. 执行操作（click / set_text / type_keys）
+5. 执行操作（click / set_text / type_keys / scroll）
 6. 读取结果或等待操作完成
 ```
 

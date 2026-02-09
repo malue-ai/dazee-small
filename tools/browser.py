@@ -210,6 +210,7 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                     "enum": [
                         "navigate", "snapshot", "click", "type",
                         "select", "screenshot", "tabs", "close",
+                        "scroll", "hover", "drag", "fill",
                     ],
                     "description": "Browser action to perform",
                 },
@@ -219,11 +220,11 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                 },
                 "ref": {
                     "type": "string",
-                    "description": "Element ref from snapshot, e.g. 'e3' (click/type/select)",
+                    "description": "Element ref from snapshot, e.g. 'e3' (click/type/select/hover/fill)",
                 },
                 "text": {
                     "type": "string",
-                    "description": "Text to type (type action) or option to select (select action)",
+                    "description": "Text to type (type action), option to select (select action), or text to fill (fill action)",
                 },
                 "clear": {
                     "type": "boolean",
@@ -232,6 +233,22 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                 "tab_id": {
                     "type": "string",
                     "description": "Tab ID to switch to (tabs action)",
+                },
+                "scroll_x": {
+                    "type": "number",
+                    "description": "Horizontal scroll pixels (scroll action, default 0)",
+                },
+                "scroll_y": {
+                    "type": "number",
+                    "description": "Vertical scroll pixels (scroll action, positive=down negative=up, default 300)",
+                },
+                "source_ref": {
+                    "type": "string",
+                    "description": "Source element ref for drag action",
+                },
+                "target_ref": {
+                    "type": "string",
+                    "description": "Target element ref for drag action",
                 },
             },
             "required": ["action"],
@@ -679,6 +696,62 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         await self._cleanup()
         return {"success": True, "message": "Browser closed"}
 
+    # ==================== Extended Actions ====================
+
+    async def _scroll(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Scroll the page or a specific element."""
+        page = await self._get_page()
+        ref = params.get("ref")
+        scroll_x = params.get("scroll_x", 0)
+        scroll_y = params.get("scroll_y", 300)
+
+        if ref:
+            locator = self._resolve_ref(page, ref)
+            await locator.scroll_into_view_if_needed(timeout=DEFAULT_TIMEOUT_MS)
+            bbox = await locator.bounding_box()
+            if bbox:
+                # Move mouse to element center before scrolling
+                cx = bbox["x"] + bbox["width"] / 2
+                cy = bbox["y"] + bbox["height"] / 2
+                await page.mouse.move(cx, cy)
+
+        await page.mouse.wheel(scroll_x, scroll_y)
+        await page.wait_for_timeout(300)
+        return {"success": True, "scrolled": {"x": scroll_x, "y": scroll_y}, "ref": ref}
+
+    async def _hover(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Hover over an element (triggers dropdowns, tooltips, etc.)."""
+        page = await self._get_page()
+        ref = params.get("ref")
+        if not ref:
+            return {"success": False, "error": "ref is required for hover"}
+        locator = self._resolve_ref(page, ref)
+        await locator.hover(timeout=DEFAULT_TIMEOUT_MS)
+        return {"success": True, "hovered": ref}
+
+    async def _drag(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Drag an element to another element."""
+        page = await self._get_page()
+        source_ref = params.get("source_ref")
+        target_ref = params.get("target_ref")
+        if not source_ref or not target_ref:
+            return {"success": False, "error": "source_ref and target_ref are required for drag"}
+        source = self._resolve_ref(page, source_ref)
+        target = self._resolve_ref(page, target_ref)
+        await source.drag_to(target, timeout=DEFAULT_TIMEOUT_MS)
+        return {"success": True, "dragged": source_ref, "to": target_ref}
+
+    async def _fill(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Clear field and fill with text (more reliable than type for forms)."""
+        page = await self._get_page()
+        ref = params.get("ref")
+        text = params.get("text", "")
+        if not ref:
+            return {"success": False, "error": "ref is required for fill"}
+        locator = self._resolve_ref(page, ref)
+        await locator.fill(text, timeout=DEFAULT_TIMEOUT_MS)
+        return {"success": True, "filled": ref, "text": text}
+
     # ==================== Main Dispatch ====================
 
     async def execute(
@@ -695,6 +768,10 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
             "screenshot": self._screenshot,
             "tabs": self._tabs,
             "close": self._close,
+            "scroll": self._scroll,
+            "hover": self._hover,
+            "drag": self._drag,
+            "fill": self._fill,
         }
 
         handler = dispatch.get(action)

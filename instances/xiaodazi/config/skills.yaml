@@ -76,8 +76,8 @@ skill_groups:
     description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项/Microsoft To Do）、日历、邮件、Google 全家桶、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
     skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks, microsoft-todo]
   app_automation:
-    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化（macOS peekaboo / Windows pywinauto）、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化、Windows Terminal 管理"
-    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, windows-open, windows-terminal, pywinauto, openhue, goplaces, cross-app-workflow]
+    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化（macOS peekaboo / Windows pywinauto / Claude Computer Use 终极方案）、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化、Windows Terminal 管理"
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, windows-open, windows-terminal, pywinauto, openhue, goplaces, cross-app-workflow, claude-computer-use]
   system_maintenance:
     description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查、软件安装与升级（winget）、定时任务管理、WSL 管理"
     skills: [disk-health-monitor, winget, task-scheduler, wsl]
@@ -215,6 +215,9 @@ skills:
       - { name: remotion,              backend_type: local, skill_source: library, description: "React 编程式视频生成：动态图表、数据可视化视频（需 Node.js + Remotion 项目）" }
 
     cloud_api:
+      # --- Claude Computer Use（终极 UI 自动化：截屏+视觉理解+坐标操作） ---
+      - { name: claude-computer-use, backend_type: local, skill_source: instance, description: "Claude Computer Use - 截屏+视觉理解操作任意桌面应用（坐标点击/滚动/拖拽/键盘）" }
+
       # --- MCP Skills（连接细节内聚在 Skill 条目内，用户只看到 Skill 名称） ---
       - name: deep-doc-reader
         backend_type: mcp

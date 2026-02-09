@@ -102,6 +102,48 @@ browser(action="tabs", tab_id="tab_2")
 → {active_tab: "tab_2", title: "Settings"}
 ```
 
+### scroll — Scroll the page
+
+```
+# Scroll down 500 pixels
+browser(action="scroll", scroll_y=500)
+
+# Scroll up 300 pixels
+browser(action="scroll", scroll_y=-300)
+
+# Scroll within a specific element
+browser(action="scroll", ref="e5", scroll_y=200)
+
+# Horizontal scroll
+browser(action="scroll", scroll_x=300, scroll_y=0)
+```
+
+### hover — Hover over an element
+
+```
+# Hover to trigger dropdown menu or tooltip
+browser(action="hover", ref="e3")
+→ {hovered: "e3"}
+```
+
+### drag — Drag element to another
+
+```
+# Drag source element to target element
+browser(action="drag", source_ref="e2", target_ref="e7")
+→ {dragged: "e2", to: "e7"}
+```
+
+### fill — Clear and fill text (reliable form filling)
+
+```
+# Clear existing text and fill new value (better than type for forms)
+browser(action="fill", ref="e1", text="2026-02-09")
+→ {filled: "e1", text: "2026-02-09"}
+```
+
+Use `fill` instead of `type` when you need to replace existing field content.
+
 ### close — Close browser
 
 ```
