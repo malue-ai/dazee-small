@@ -478,6 +478,9 @@ class GenericFTS5:
             "total_docs": total,
         }
 
+    # FTS5 查询最大 token 数（超出截断，避免超长系统上下文/文件内容传入 FTS5）
+    _MAX_QUERY_TOKENS: int = 30
+
     @staticmethod
     def _sanitize_query(query: str) -> str:
         """
@@ -487,10 +490,11 @@ class GenericFTS5:
         对于面向小白用户的桌面应用需要主动防御。
 
         策略：
-        1. CJK 字符级分割（与索引时一致）
-        2. 移除 FTS5 特殊字符
-        3. 保留用户显式使用的 AND/OR/NOT
-        4. 多词用 OR 连接（提高召回率）
+        1. 截断超长查询（防止系统上下文/完整文件内容灌入 FTS5）
+        2. 无条件移除所有 FTS5 特殊字符（安全第一）
+        3. CJK 字符级分割（与索引时一致）
+        4. 保留用户显式使用的 AND/OR/NOT
+        5. 多词用 OR 连接（提高召回率）
 
         Args:
             query: 原始查询（用户输入的自然语言）
@@ -504,17 +508,13 @@ class GenericFTS5:
         if not query:
             return query
 
-        # 如果用户使用了引号短语搜索，保留原样
-        if '"' in query and query.count('"') % 2 == 0:
-            return query
-
         # 检测用户是否显式使用了 FTS5 布尔操作符
         has_bool_op = any(
             op in query.upper()
             for op in (" AND ", " OR ", " NOT ")
         )
 
-        # 移除 FTS5 特殊字符
+        # 无条件移除 FTS5 特殊字符（安全第一，不做短语搜索猜测）
         # - * ^ ( ) [ ] { } : " + \ 是 FTS5 查询语法的保留字符
         # - `-` 在 FTS5 中等价于 NOT，必须移除
         # - `/` 不是 FTS5 语法字符但会产生无意义 token（如 Asia/Shanghai → Asia Shanghai）
@@ -540,6 +540,12 @@ class GenericFTS5:
         terms = [t for t in query.split() if t and re.search(r"\w", t)]
         if not terms:
             return ""
+
+        # 截断超长查询（取前 N 个有效 token）
+        # 防止系统上下文、完整文件内容等超长文本灌入 FTS5
+        if len(terms) > GenericFTS5._MAX_QUERY_TOKENS:
+            terms = terms[:GenericFTS5._MAX_QUERY_TOKENS]
+
         if len(terms) == 1:
             return terms[0]
 

@@ -1,0 +1,78 @@
+name: VisualCreativeAssistant
+description: 专业视觉创意助手，将产品概念转化为多风格视觉方案与AI绘画提示词
+intent_analyzer:
+  enabled: true
+  complexity_levels:
+  - medium
+  - high
+  task_types:
+  - product_visualization
+  - creative_briefing
+  - prompt_engineering
+  output_formats:
+  - structured_description
+  - ai_prompt
+  use_llm: true
+  llm_model: claude-haiku-4-5-20251001
+  fast_mode: false
+  semantic_cache_threshold: null
+  simplified_output: true
+plan_manager:
+  enabled: true
+  trigger_condition: complexity == 'high' or step_count > 3
+  max_steps: 12
+  granularity: fine
+  allow_dynamic_adjustment: true
+  validation_interval: 3
+  replan_enabled: true
+  max_replan_attempts: 2
+  replan_strategy: incremental
+  failure_threshold: 0.3
+tool_selector:
+  enabled: false
+  available_tools: []
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools: []
+  tool_timeout: 300
+memory_manager:
+  enabled: true
+  retention_policy: session
+  episodic_memory: true
+  working_memory_limit: 40
+  auto_compress: true
+  compress_threshold: 15
+output_formatter:
+  enabled: true
+  default_format: markdown
+  supported_formats:
+  - text
+  - markdown
+  - json
+  - html
+  code_highlighting: false
+  max_output_length: 3000
+  json_model_name: null
+  json_schema: null
+  strict_json_validation: false
+  json_ensure_ascii: false
+  json_indent: 2
+  include_metadata: false
+skills: []
+tools: []
+model: qwen3-max
+max_turns: 18
+execution_strategy: rvr
+allow_parallel_tools: false
+context_limits:
+  max_context_tokens: 200000
+  warning_threshold: 0.8
+  truncate_threshold: 0.9
+temperature: null
+max_tokens: null
+enable_thinking: null
+enable_caching: null
+thinking_mode: null
+prompts: null
+reasoning: 任务涉及多轮澄清、结构化创意生成和精细提示词编写，需启用意图分析、细粒度规划和会话记忆；无需外部工具，但需强推理与输出控制能力

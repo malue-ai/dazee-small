@@ -238,6 +238,7 @@ export function useChat() {
         ],
         files: files?.map(f => ({
           file_url: f.file_url,
+          local_path: f.local_path,
           file_name: f.file_name,
           file_type: f.file_type,
           file_size: f.file_size
@@ -564,7 +565,19 @@ export function useChat() {
          const routeTarget = agentId
            ? { name: 'agent-conversation', params: { agentId, conversationId: convId } }
            : { name: 'conversation', params: { conversationId: convId } }
-         notifStore.chatMessage(title, preview, routeTarget)
+         
+         // 判断是否为定时任务提醒（内容以 ⏰ **定时提醒** 开头）
+         const isReminder = msg.content?.trim().startsWith('⏰ **定时提醒**')
+         
+         if (isReminder) {
+           // 提取提醒标题和内容
+           const lines = msg.content.split('\n').filter(l => l.trim())
+           const reminderTitle = lines[1]?.replace(/\*\*/g, '').trim() || '定时提醒'
+           const reminderContent = lines.slice(3).join('\n').trim().slice(0, 80)
+           notifStore.reminder(reminderTitle, reminderContent, routeTarget)
+         } else {
+           notifStore.chatMessage(title, preview, routeTarget)
+         }
        }
     }
 

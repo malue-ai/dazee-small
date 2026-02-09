@@ -69,37 +69,43 @@
               <div>
                 <p class="text-sm font-semibold text-accent-foreground">开启语义搜索</p>
                 <p class="text-xs text-accent-foreground/70 mt-1">
-                  安装本地模型后，搜索不再只是匹配文字——能真正理解你要找什么。
+                  下载本地模型后，搜索不再只是匹配文字——能真正理解你要找什么。
                   离线可用，无需 API Key，数据不出本机。
                 </p>
               </div>
 
               <div class="bg-white rounded-xl border border-border p-3 space-y-2">
-                <p class="text-xs font-medium text-muted-foreground">安装命令</p>
                 <div class="flex items-center gap-2">
-                  <code class="flex-1 px-3 py-1.5 bg-muted rounded-lg text-xs font-mono text-foreground">
-                    pip install llama-cpp-python
-                  </code>
-                  <button
-                    @click="copyCommand"
-                    class="px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors flex-shrink-0"
-                  >
-                    {{ copied ? '已复制' : '复制' }}
-                  </button>
+                  <Download class="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <p class="text-xs text-foreground">
+                    <span class="font-medium">BGE-M3 Q4</span>
+                    <span class="text-muted-foreground ml-1">中英文双语 · 438MB · 离线可用</span>
+                  </p>
                 </div>
-                <p class="text-xs text-muted-foreground">
-                  默认模型：<span class="font-medium">BGE-M3 Q4</span>（中英文双语，424MB，首次使用自动下载到 data/shared/models/）
+                <!-- 下载进度条 -->
+                <div v-if="downloadState === 'downloading'" class="space-y-1.5">
+                  <div class="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div class="h-full rounded-full bg-primary animate-pulse" style="width: 100%" />
+                  </div>
+                  <p class="text-xs text-muted-foreground">正在下载模型，请稍候…</p>
+                </div>
+                <!-- 下载失败 -->
+                <p v-if="downloadState === 'error'" class="text-xs text-destructive">
+                  {{ downloadError }}
                 </p>
               </div>
 
               <div class="flex items-center gap-3">
-                <router-link
-                  to="/settings"
-                  class="px-4 py-2 bg-primary text-white text-xs font-medium rounded-xl hover:bg-primary-hover transition-colors shadow-lg shadow-primary/20"
-                >
-                  去设置页开启
-                </router-link>
                 <button
+                  v-if="downloadState !== 'downloading'"
+                  @click="handleDownload"
+                  class="px-4 py-2 bg-primary text-white text-xs font-medium rounded-xl hover:bg-primary-hover transition-colors shadow-lg shadow-primary/20 flex items-center gap-1.5"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                  一键下载并启用
+                </button>
+                <button
+                  v-if="downloadState !== 'downloading'"
                   @click="dismissed = true"
                   class="px-4 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
@@ -128,20 +134,59 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { BookOpen, Check, Search, Sparkles, FolderOpen } from 'lucide-vue-next'
-import { getEmbeddingStatus, type EmbeddingStatus } from '@/api/settings'
+import { BookOpen, Check, Search, Sparkles, FolderOpen, Download } from 'lucide-vue-next'
+import { getEmbeddingStatus, setupSemanticSearch, type EmbeddingStatus } from '@/api/settings'
+import { useNotificationStore } from '@/stores/notification'
+
+const notify = useNotificationStore()
 
 const embeddingStatus = ref<EmbeddingStatus | null>(null)
 const dismissed = ref(false)
-const copied = ref(false)
 
-async function copyCommand() {
+type DownloadState = 'idle' | 'downloading' | 'done' | 'error'
+const downloadState = ref<DownloadState>('idle')
+const downloadError = ref('')
+
+async function handleDownload() {
+  downloadState.value = 'downloading'
+  downloadError.value = ''
+
+  const notifId = notify.push({
+    type: 'progress',
+    title: '正在下载语义模型',
+    message: 'BGE-M3 Q4（438MB），请稍候…',
+    progress: { step: 0, total: 1 },
+  })
+
   try {
-    await navigator.clipboard.writeText('pip install llama-cpp-python')
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
-  } catch {
-    // Fallback
+    const result = await setupSemanticSearch('local')
+
+    if (result.success) {
+      downloadState.value = 'done'
+      notify.update(notifId, {
+        type: 'success',
+        title: '语义搜索已启用',
+        message: '本地模型下载完成，重启后生效',
+      })
+      // Refresh status
+      embeddingStatus.value = await getEmbeddingStatus()
+    } else {
+      downloadState.value = 'error'
+      downloadError.value = result.error || '下载失败，请检查网络后重试'
+      notify.update(notifId, {
+        type: 'error',
+        title: '模型下载失败',
+        message: result.error || '请检查网络连接',
+      })
+    }
+  } catch (e: any) {
+    downloadState.value = 'error'
+    downloadError.value = e?.message || '网络异常，请稍后重试'
+    notify.update(notifId, {
+      type: 'error',
+      title: '模型下载失败',
+      message: e?.message || '网络异常',
+    })
   }
 }
 

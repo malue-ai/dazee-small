@@ -201,6 +201,7 @@ export type ToolStatusMap = Record<string, ToolStatus>
  */
 export interface AttachedFile {
   file_url: string
+  local_path?: string
   file_name: string
   file_type: string
   file_size?: number

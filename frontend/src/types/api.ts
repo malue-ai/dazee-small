@@ -72,6 +72,7 @@ export interface MessageMetadata {
   recommended?: string[]
   files?: Array<{
     file_url: string
+    local_path?: string
     file_name: string
     file_type: string
     file_size?: number
@@ -200,6 +201,7 @@ export interface KnowledgeStats {
  */
 export interface FileUploadResponse {
   file_url: string
+  local_path: string
   file_name: string
   file_type: string
   file_size: number
@@ -220,6 +222,7 @@ export interface ChatRequest {
   background_tasks?: string[]
   files?: Array<{
     file_url: string
+    local_path?: string
     file_name: string
     file_type: string
     file_size?: number

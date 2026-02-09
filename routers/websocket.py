@@ -47,6 +47,85 @@ HEARTBEAT_INTERVAL_S = 30
 DELTA_THROTTLE_MS = 150
 
 
+# ==================== 全局连接管理器 ====================
+
+
+class _ConnectionManager:
+    """
+    WebSocket 全局连接管理器
+
+    跟踪所有活跃的 WebSocket 连接，支持向所有连接广播通知事件。
+    用于定时任务完成通知等不依赖特定 chat session 的场景。
+    """
+
+    def __init__(self):
+        # conn_id -> safe_send 函数
+        self._connections: Dict[str, Any] = {}
+
+    def register(self, conn_id: str, send_fn):
+        """注册连接"""
+        self._connections[conn_id] = send_fn
+
+    def unregister(self, conn_id: str):
+        """注销连接"""
+        self._connections.pop(conn_id, None)
+
+    @property
+    def active_count(self) -> int:
+        return len(self._connections)
+
+    async def broadcast_notification(
+        self,
+        event_name: str,
+        payload: Dict[str, Any],
+    ):
+        """
+        向所有活跃连接广播通知事件。
+
+        Args:
+            event_name: 事件名（如 "notification"）
+            payload: 事件数据
+        """
+        if not self._connections:
+            logger.debug(f"无活跃连接，跳过广播: event={event_name}")
+            return
+
+        frame = {
+            "type": "event",
+            "event": event_name,
+            "payload": payload,
+            "seq": 0,  # 通知事件不参与 chat seq 计数
+        }
+
+        failed = []
+        for conn_id, send_fn in list(self._connections.items()):
+            try:
+                ok = await send_fn(frame)
+                if not ok:
+                    failed.append(conn_id)
+            except Exception:
+                failed.append(conn_id)
+
+        # 清理失败连接
+        for conn_id in failed:
+            self._connections.pop(conn_id, None)
+
+        sent_count = len(self._connections) + len(failed) - len(failed)
+        logger.info(
+            f"📢 广播通知: event={event_name}, "
+            f"sent={sent_count}, failed={len(failed)}"
+        )
+
+
+# 模块级单例
+_connection_manager = _ConnectionManager()
+
+
+def get_connection_manager() -> _ConnectionManager:
+    """获取全局 WebSocket 连接管理器"""
+    return _connection_manager
+
+
 # ==================== Delta 节流器 ====================
 
 
@@ -235,6 +314,10 @@ async def websocket_chat(websocket: WebSocket):
             "seq": seq,
         })
 
+    # ==================== 注册到全局连接管理器 ====================
+
+    _connection_manager.register(conn_id, safe_send)
+
     # ==================== 启动心跳 ====================
 
     heartbeat_task = asyncio.create_task(
@@ -304,6 +387,9 @@ async def websocket_chat(websocket: WebSocket):
     finally:
         closed = True
         heartbeat_task.cancel()
+
+        # 从连接管理器注销
+        _connection_manager.unregister(conn_id)
 
         # 取消活跃的流任务
         if active_stream_task and not active_stream_task.done():

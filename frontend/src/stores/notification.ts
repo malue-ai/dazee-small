@@ -7,6 +7,7 @@
  * - error:    错误提示
  * - message:  聊天消息提醒（不在当前会话时收到新消息）
  * - info:     普通信息
+ * - reminder: 定时任务提醒（不自动消失）
  *
  * 任何模块都可以通过 push/update/dismiss 管理通知，
  * NotificationCenter.vue 统一渲染。
@@ -18,7 +19,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 // ==================== 类型 ====================
 
-export type NotificationType = 'progress' | 'success' | 'error' | 'message' | 'info'
+export type NotificationType = 'progress' | 'success' | 'error' | 'message' | 'info' | 'reminder'
 
 export interface NotificationAction {
   /** 按钮文字 */
@@ -68,10 +69,11 @@ export type NotificationUpdate = Partial<Omit<NotificationItem, 'id' | 'createdA
 /** 默认自动消失延迟（用于 success/error/info） */
 const DEFAULT_AUTO_DISMISS_MS: Record<NotificationType, number> = {
   progress: 0,       // progress 不自动消失，由调用方控制
-  success: 6000,
-  error: 8000,
-  message: 5000,
-  info: 5000,
+  success: 10000,
+  error: 15000,
+  message: 30000,    // 聊天消息提醒
+  info: 10000,
+  reminder: 0,       // 定时任务提醒，不自动消失
 }
 
 /** 最大同时显示通知数 */
@@ -214,6 +216,22 @@ export const useNotificationStore = defineStore('notification', () => {
     })
   }
 
+  /**
+   * 推送定时提醒通知（不自动消失）
+   *
+   * @param title  - 提醒标题
+   * @param content - 提醒内容
+   * @param route  - 点击后跳转的路由
+   */
+  function reminder(title: string, content: string, route: RouteLocationRaw): string {
+    return push({
+      type: 'reminder',
+      title,
+      message: content,
+      action: { label: '查看', route },
+    })
+  }
+
   // ==================== 内部方法 ====================
 
   function _scheduleAutoDismiss(id: string, ms: number): void {
@@ -246,5 +264,6 @@ export const useNotificationStore = defineStore('notification', () => {
     error,
     info,
     chatMessage,
+    reminder,
   }
 })

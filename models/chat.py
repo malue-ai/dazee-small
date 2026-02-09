@@ -10,40 +10,34 @@ from datetime import datetime
 class FileReference(BaseModel):
     """
     文件引用
-    
-    支持两种方式引用文件：
-    
-    方式1：通过 file_id 引用（使用上传接口返回的 ID）
-    ```json
-    { "file_id": "file_abc123" }
-    ```
-    
-    方式2：直接传文件信息（外部文件）
-    ```json
-    {
-        "file_url": "https://example.com/doc.pdf",
-        "file_name": "报告.pdf",
-        "file_size": 102400,
-        "file_type": "application/pdf"
-    }
-    ```
-    
-    注意：file_id 和 file_url 二选一，不能同时为空
+
+    支持三种方式引用文件（优先级从高到低）：
+
+    1. local_path：本地文件系统绝对路径（上传接口返回，Agent 直接读取）
+    2. file_url：API URL 或远程 HTTP URL（前端预览/远程文件）
+    3. file_id：文件 ID（预留）
+
+    本地桌面模式下，优先使用 local_path。
     """
-    # 方式1：通过 file_id 引用
+    # 本地文件系统路径（优先，桌面模式上传后返回）
+    local_path: Optional[str] = Field(None, description="本地文件系统绝对路径")
+
+    # API URL 或远程 URL
+    file_url: Optional[str] = Field(None, description="文件访问 URL（API 路径或远程 HTTP）")
+
+    # 文件 ID（预留）
     file_id: Optional[str] = Field(None, description="文件 ID（通过上传接口获取）")
-    
-    # 方式2：直接传文件信息
-    file_url: Optional[str] = Field(None, description="文件访问 URL")
+
+    # 元数据
     file_name: Optional[str] = Field(None, description="文件名")
     file_size: Optional[int] = Field(None, description="文件大小（字节）")
     file_type: Optional[str] = Field(None, description="文件类型（MIME）")
-    
+
     @model_validator(mode='after')
     def check_file_reference(self):
-        """验证 file_id 和 file_url 至少有一个"""
-        if not self.file_id and not self.file_url:
-            raise ValueError("file_id 和 file_url 至少需要提供一个")
+        """验证至少有一种文件来源"""
+        if not self.local_path and not self.file_url and not self.file_id:
+            raise ValueError("local_path、file_url、file_id 至少需要提供一个")
         return self
 
 
@@ -184,7 +178,7 @@ class ChatRequest(BaseModel):
     )
     files: Optional[List[FileReference]] = Field(
         None, 
-        description="文件引用列表（可选），支持 file_id 或 file_url"
+        description="文件引用列表（可选），支持 local_path / file_url / file_id"
     )
     variables: Optional[Dict[str, Any]] = Field(
         None,

@@ -93,19 +93,21 @@ async def upload_file(
         content_type=content_type,
     )
 
-    # Build access URL (local API route)
+    # local_path: 真实文件系统路径（Agent 直接读取）
+    # file_url: API URL（前端预览/下载用）
+    local_path = str(full_path)
     file_url = f"/api/v1/files/{storage_path}"
 
-    logger.info(f"✅ 文件上传成功: {filename} -> {storage_path} ({file_size} bytes)")
+    logger.info(f"✅ 文件上传成功: {filename} -> {local_path} ({file_size} bytes)")
 
     return {
         "success": True,
         "data": {
             "file_url": file_url,
+            "local_path": local_path,
             "file_name": filename,
             "file_type": content_type,
             "file_size": file_size,
-            "storage_path": storage_path,
         },
     }
 

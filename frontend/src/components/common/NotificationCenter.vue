@@ -34,6 +34,7 @@
               <CheckCircle v-else-if="item.type === 'success'" class="w-4 h-4" />
               <AlertCircle v-else-if="item.type === 'error'" class="w-4 h-4" />
               <MessageSquare v-else-if="item.type === 'message'" class="w-4 h-4" />
+              <Bell v-else-if="item.type === 'reminder'" class="w-4 h-4" />
               <Info v-else class="w-4 h-4" />
             </div>
 
@@ -97,6 +98,7 @@ import {
   MessageSquare,
   Info,
   X,
+  Bell,
 } from 'lucide-vue-next'
 import {
   useNotificationStore,
@@ -193,6 +195,8 @@ function iconBgClass(type: NotificationType): string {
       return 'bg-destructive/10 text-destructive'
     case 'message':
       return 'bg-primary/10 text-primary'
+    case 'reminder':
+      return 'bg-primary/15 text-primary'
     case 'info':
       return 'bg-muted text-muted-foreground'
   }

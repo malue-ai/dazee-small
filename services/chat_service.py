@@ -737,6 +737,7 @@ class ChatService:
                                 "file_size": pf.file_size,
                             }
                             for pf in processed_files
+                            if pf.file_url or pf.filename
                         ]
                         original_text = (
                             raw_message if isinstance(raw_message, str) else str(raw_message)

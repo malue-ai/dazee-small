@@ -112,6 +112,7 @@ export function useFileUpload() {
 
       return {
         file_url: result.data.file_url,
+        local_path: result.data.local_path,
         file_name: result.data.file_name || file.name,
         file_type: result.data.file_type || file.type,
         file_size: result.data.file_size || file.size

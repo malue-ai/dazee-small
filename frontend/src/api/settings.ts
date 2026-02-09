@@ -93,3 +93,38 @@ export async function getEmbeddingStatus(): Promise<EmbeddingStatus> {
   const { data } = await api.get('/v1/settings/embedding-status')
   return data.data
 }
+
+export interface EmbeddingDownloadResult {
+  success: boolean
+  model_path?: string
+  source?: string
+  error?: string | null
+}
+
+export interface SemanticSearchSetupResult {
+  success: boolean
+  mode: string
+  needs_download: boolean
+  download_result?: EmbeddingDownloadResult | null
+  error?: string | null
+}
+
+/**
+ * 一键配置语义搜索（本地模型模式）
+ *
+ * 自动下载 GGUF 模型 + 启用语义搜索，无需手动 pip install
+ */
+export async function setupSemanticSearch(mode: 'disabled' | 'local' | 'cloud'): Promise<SemanticSearchSetupResult> {
+  const { data } = await api.post('/v1/settings/semantic-search/setup', { mode })
+  return data.data
+}
+
+/**
+ * 单独触发 embedding 模型下载
+ *
+ * 适用于：之前选了 disabled，现在想补装本地模型
+ */
+export async function downloadEmbeddingModel(): Promise<EmbeddingDownloadResult> {
+  const { data } = await api.post('/v1/settings/embedding-model/download')
+  return data.data
+}

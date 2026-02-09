@@ -145,8 +145,16 @@ async def _preload_agent_registry() -> int:
             loaded_count = await agent_registry.preload_all()
             if loaded_count > 0:
                 print(f"✅ 已加载 {loaded_count} 个 Agent 配置")
-                for agent in agent_registry.list_agents():
+                agents = agent_registry.list_agents()
+                for agent in agents:
                     print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
+
+                # 本地桌面模式自动设置 AGENT_INSTANCE
+                # 确保后续组件（调度器、存储）能正确定位实例数据库
+                if not os.getenv("AGENT_INSTANCE") and agents:
+                    auto_instance = agents[0]["agent_id"]
+                    os.environ["AGENT_INSTANCE"] = auto_instance
+                    print(f"🎯 自动设置 AGENT_INSTANCE={auto_instance}")
             else:
                 print("⚠️ 未发现任何可用实例（instances/ 目录为空或无有效配置）")
             return loaded_count

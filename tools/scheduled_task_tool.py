@@ -218,8 +218,20 @@ class ScheduledTaskTool(BaseTool):
                 from services.user_task_scheduler import get_user_task_scheduler
 
                 scheduler = get_user_task_scheduler()
+                scheduler_registered = False
+
                 if scheduler.is_running():
-                    await scheduler.register_task(task)
+                    scheduler_registered = await scheduler.register_task(task)
+                    if not scheduler_registered:
+                        logger.warning(
+                            f"⚠️ 任务已创建到数据库但注册到调度器失败: "
+                            f"task_id={task.id}"
+                        )
+                else:
+                    logger.warning(
+                        f"⚠️ 用户任务调度器未运行！任务仅保存到数据库: "
+                        f"task_id={task.id}, scheduler_running={scheduler.is_running()}"
+                    )
 
                 # 格式化下次执行时间
                 next_run_str = (
@@ -228,14 +240,26 @@ class ScheduledTaskTool(BaseTool):
                     else "未知"
                 )
 
-                return {
+                result = {
                     "success": True,
                     "task_id": task.id,
                     "message": f"✅ 定时任务已创建: {title}",
                     "next_run_at": next_run_str,
                     "trigger_type": trigger_type,
                     "trigger_config": trigger_config,
+                    "scheduler_registered": scheduler_registered,
                 }
+
+                # 如果调度器未运行，添加警告信息
+                if not scheduler.is_running():
+                    result["warning"] = (
+                        "调度器未运行，任务可能不会按时触发。"
+                        "请检查服务日志。"
+                    )
+                elif not scheduler_registered:
+                    result["warning"] = "任务已保存但注册到调度器失败，请检查服务日志。"
+
+                return result
 
         except Exception as e:
             logger.error(f"❌ 创建定时任务失败: {e}", exc_info=True)

@@ -89,7 +89,7 @@ class FileProcessor:
     MAX_TEXT_SIZE = 50 * 1024
 
     # 预览文本最大字符数
-    MAX_PREVIEW_CHARS = 200
+    MAX_PREVIEW_CHARS = 500
 
     def _is_local_file(self, url: str) -> bool:
         """Check if the URL points to a local file."""
@@ -126,10 +126,12 @@ class FileProcessor:
 
         for file_ref in files:
             try:
+                # 优先使用 local_path（真实文件系统路径），其次 file_url
+                local_path = file_ref.get("local_path")
                 file_url = file_ref.get("file_url")
 
-                if not file_url:
-                    logger.warning("文件引用无效：缺少 file_url")
+                if not local_path and not file_url:
+                    logger.warning("文件引用无效：缺少 local_path 和 file_url")
                     continue
 
                 # 从文件引用中获取元数据（前端已传递）
@@ -137,8 +139,12 @@ class FileProcessor:
                 file_type = file_ref.get("file_type") or file_ref.get("mime_type")
                 file_size = file_ref.get("file_size")
 
-                result = await self._process_by_url(
-                    url=file_url, filename=file_name, mime_type=file_type, file_size=file_size
+                result = await self._process_file(
+                    local_path=local_path,
+                    url=file_url,
+                    filename=file_name,
+                    mime_type=file_type,
+                    file_size=file_size,
                 )
 
                 if result:
@@ -151,36 +157,43 @@ class FileProcessor:
 
         return processed
 
-    async def _process_by_url(
+    async def _process_file(
         self,
-        url: str,
+        local_path: Optional[str] = None,
+        url: Optional[str] = None,
         filename: Optional[str] = None,
         mime_type: Optional[str] = None,
         file_size: Optional[int] = None,
     ) -> Optional[ProcessedFile]:
         """
-        Process a file by URL (supports both local and remote).
-
-        For local files (/api/v1/files/...), reads directly from filesystem.
-        For remote files (http/https), downloads via HTTP.
+        Process a file. Prefers local_path (direct filesystem read),
+        falls back to url (API path or remote HTTP).
 
         Args:
-            url: File URL (local path or remote URL).
+            local_path: Absolute filesystem path (preferred, from upload response).
+            url: File URL (API path like /api/v1/files/... or remote HTTP URL).
             filename: Filename (optional, from frontend).
             mime_type: MIME type (optional, from frontend).
             file_size: File size in bytes (optional, from frontend).
         """
-        is_local = self._is_local_file(url)
+        resolved_path: Optional[Path] = None
+
+        # Resolve to a local Path if possible
+        if local_path:
+            resolved_path = Path(local_path)
+        elif url and self._is_local_file(url):
+            resolved_path = self._resolve_local_path(url)
+
+        is_local = resolved_path is not None
 
         # Resolve metadata
         if is_local:
-            local_path = self._resolve_local_path(url)
             if not filename:
-                filename = local_path.name
+                filename = resolved_path.name
             if not mime_type:
                 mime_type = self._guess_mime_type_from_filename(filename)
-            if not file_size and local_path.exists():
-                file_size = local_path.stat().st_size
+            if not file_size and resolved_path.exists():
+                file_size = resolved_path.stat().st_size
         else:
             if not mime_type or not filename:
                 detected_mime, detected_size, detected_name = await self._get_url_file_info(url)
@@ -188,9 +201,12 @@ class FileProcessor:
                 file_size = file_size or detected_size
                 filename = filename or detected_name
 
+        # Display path for logging and agent reference
+        display_path = str(resolved_path) if resolved_path else url
+
         logger.info(
             f"📎 处理文件: {filename}, MIME={mime_type}, "
-            f"size={file_size}, local={is_local}"
+            f"size={file_size}, local={is_local}, path={display_path}"
         )
 
         # Categorize by MIME type
@@ -200,7 +216,7 @@ class FileProcessor:
             if is_local:
                 # Local image: use base64 encoding for LLM
                 try:
-                    content = await self._read_local_file(self._resolve_local_path(url))
+                    content = await self._read_local_file(resolved_path)
                     b64_data = base64.standard_b64encode(content).decode("utf-8")
                     content_block = {
                         "type": "image",
@@ -217,7 +233,7 @@ class FileProcessor:
                         category=FileCategory.DOCUMENT,
                         filename=filename,
                         mime_type=mime_type,
-                        file_url=url,
+                        file_url=display_path,
                         file_size=file_size,
                     )
             else:
@@ -231,17 +247,21 @@ class FileProcessor:
                 mime_type=mime_type,
                 content_block=content_block,
                 file_size=file_size,
-                file_url=url,
+                file_url=display_path,
             )
 
         if category == FileCategory.TEXT:
-            # Text files: read content
+            # Text files: read full content
             if file_size and file_size > self.MAX_TEXT_SIZE:
                 logger.warning(f"文本过大，降级为文档处理: {file_size} bytes")
                 category = FileCategory.DOCUMENT
             else:
                 try:
-                    content = await self._read_file_content(url)
+                    if is_local:
+                        content = await self._read_local_file(resolved_path)
+                    else:
+                        content = await self._download_from_url(url)
+
                     # Try multiple encodings
                     try:
                         text_content = content.decode("utf-8-sig")
@@ -257,18 +277,18 @@ class FileProcessor:
                         mime_type=mime_type,
                         text_content=text_content,
                         file_size=file_size,
-                        file_url=url,
+                        file_url=display_path,
                     )
                 except Exception as e:
                     logger.warning(f"读取文本失败，降级为文档处理: {str(e)}")
                     category = FileCategory.DOCUMENT
 
-        # Document: provide URL/path reference
+        # Document: provide local path reference for agent
         return ProcessedFile(
             category=FileCategory.DOCUMENT,
             filename=filename,
             mime_type=mime_type,
-            file_url=url,
+            file_url=display_path,
             file_size=file_size,
         )
 
@@ -280,17 +300,6 @@ class FileProcessor:
             return FileCategory.TEXT
         # 其他都当作复杂文档
         return FileCategory.DOCUMENT
-
-    async def _read_file_content(self, url: str) -> bytes:
-        """
-        Read file content from local path or remote URL.
-
-        Automatically routes to local read or HTTP download.
-        """
-        if self._is_local_file(url):
-            local_path = self._resolve_local_path(url)
-            return await self._read_local_file(local_path)
-        return await self._download_from_url(url)
 
     async def _download_from_url(self, url: str) -> bytes:
         """Download file content from a remote URL."""
@@ -404,19 +413,18 @@ class FileProcessor:
                     attachment_texts.append(f"🖼️ {pf.filename} ({pf.mime_type}): {pf.file_url}")
 
             elif pf.category == FileCategory.TEXT:
-                # 纯文本：拼进附件说明，同时保留原始元数据
+                # 纯文本：完整内容拼进消息（已通过 MAX_TEXT_SIZE 50KB 上限过滤）
                 if pf.text_content:
                     # 构建元数据行（文件名 | MIME类型 | 大小）
                     meta_parts = [pf.filename]
                     if pf.mime_type:
                         meta_parts.append(pf.mime_type)
                     if pf.file_size:
-                        # 格式化文件大小
                         size_str = self._format_file_size(pf.file_size)
                         meta_parts.append(size_str)
                     meta_line = " | ".join(meta_parts)
 
-                    # 构建附件文本
+                    # 截断预览
                     content_preview = pf.text_content
                     if len(content_preview) > self.MAX_PREVIEW_CHARS:
                         content_preview = (
@@ -425,29 +433,16 @@ class FileProcessor:
 
                     attachment_text = f"📄 {meta_line}:\n```\n{content_preview}\n```"
 
-                    # 保留原始文件路径（如果有）
+                    # 保留文件路径（如果有）
                     if pf.file_url:
-                        if self._is_local_file(pf.file_url):
-                            resolved_path = str(self._resolve_local_path(pf.file_url))
-                            attachment_text += f"\n   原始文件: {resolved_path}"
-                        else:
-                            attachment_text += f"\n   原始文件: {pf.file_url}"
+                        attachment_text += f"\n   文件路径: {pf.file_url}"
 
                     attachment_texts.append(attachment_text)
 
             elif pf.category == FileCategory.DOCUMENT:
-                # 复杂文档：提供路径，让 Agent 用工具处理
+                # 复杂文档：提供 URL，让 Agent 决定
                 if pf.file_url:
-                    # 本地文件：解析为绝对路径，Agent 的工具才能直接读取
-                    if self._is_local_file(pf.file_url):
-                        resolved_path = str(self._resolve_local_path(pf.file_url))
-                        attachment_texts.append(
-                            f"📎 {pf.filename} ({pf.mime_type}): {resolved_path}"
-                        )
-                    else:
-                        attachment_texts.append(
-                            f"📎 {pf.filename} ({pf.mime_type}): {pf.file_url}"
-                        )
+                    attachment_texts.append(f"📎 {pf.filename} ({pf.mime_type}): {pf.file_url}")
 
         # 构建最终的文本消息
         final_text = user_message

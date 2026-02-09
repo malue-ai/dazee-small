@@ -18,6 +18,7 @@
 
 import { ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
+import { useNotificationStore } from '@/stores/notification'
 import { getApiBaseUrl } from '@/api'
 import { isTauriEnv } from '@/api/tauri'
 import { wsLog } from '@/utils/logger'
@@ -70,6 +71,7 @@ const REQUEST_TIMEOUT_MS = 30000
  */
 export function useWebSocketChat() {
   const sessionStore = useSessionStore()
+  const notificationStore = useNotificationStore()
 
   // ==================== 响应式状态 ====================
 
@@ -250,6 +252,12 @@ export function useWebSocketChat() {
       return
     }
 
+    // 全局通知事件（定时任务完成等，不依赖 chat session）
+    if (eventName === 'notification' && payload) {
+      _handleNotificationEvent(payload)
+      return
+    }
+
     // 转发事件到当前业务处理器
     if (currentEventHandler && payload) {
       currentEventHandler(payload)
@@ -278,6 +286,48 @@ export function useWebSocketChat() {
         streamCompleteResolve(fullResponse)
         streamCompleteResolve = null
       }
+    }
+  }
+
+  // ==================== 全局通知处理 ====================
+
+  /**
+   * 处理后端推送的通知事件（定时任务完成、系统通知等）
+   *
+   * payload 格式：
+   * {
+   *   notification_type: 'success' | 'error' | 'message' | 'info',
+   *   title: string,
+   *   message: string,
+   *   task_id?: string,
+   *   conversation_id?: string,
+   *   triggered_at?: string,
+   * }
+   */
+  function _handleNotificationEvent(payload: any): void {
+    const ntype = payload.notification_type || 'info'
+    const title = payload.title || '系统通知'
+    const message = payload.message || ''
+    const conversationId = payload.conversation_id
+
+    wsLog.info(`收到通知: type=${ntype}, title=${title}`)
+
+    if (ntype === 'message' && conversationId) {
+      // 聊天消息类通知（带跳转按钮）
+      notificationStore.chatMessage(
+        title,
+        message,
+        { name: 'conversation', params: { conversationId } }
+      )
+    } else if (ntype === 'success') {
+      const action = conversationId
+        ? { label: '查看', route: { name: 'conversation', params: { conversationId } } as any }
+        : undefined
+      notificationStore.success(title, message, action)
+    } else if (ntype === 'error') {
+      notificationStore.error(title, message)
+    } else {
+      notificationStore.info(title, message)
     }
   }
 
