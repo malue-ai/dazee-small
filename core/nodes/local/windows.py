@@ -182,7 +182,11 @@ class WindowsLocalNode(LocalNodeBase):
 
     async def _do_initialize(self) -> None:
         """Windows-specific initialization."""
-        # Check if PowerShell is available
+        # Resolve PowerShell path — clawdbot pattern: use %SystemRoot% path
+        self._powershell_path = self._resolve_powershell_path()
+        logger.info(f"PowerShell 路径: {self._powershell_path}")
+
+        # Verify PowerShell is actually callable
         result = await self.shell_executor.which("powershell")
         if not result:
             logger.warning("PowerShell 不可用，部分功能将受限")
@@ -193,9 +197,32 @@ class WindowsLocalNode(LocalNodeBase):
         if self._has_powershell7:
             logger.info("检测到 PowerShell 7 (pwsh)，启用增强功能")
 
+    @staticmethod
+    def _resolve_powershell_path() -> str:
+        """
+        Resolve PowerShell executable path from %SystemRoot%.
+
+        clawdbot pattern: check SystemRoot/WINDIR environment variable
+        to build the full path, falling back to bare 'powershell.exe'.
+        """
+        system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+        if system_root:
+            candidate = os.path.join(
+                system_root,
+                "System32",
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe",
+            )
+            if os.path.isfile(candidate):
+                return candidate
+        return "powershell.exe"
+
     def _get_powershell_cmd(self) -> str:
         """Get the best available PowerShell executable."""
-        return "pwsh" if self._has_powershell7 else "powershell"
+        if self._has_powershell7:
+            return "pwsh"
+        return getattr(self, "_powershell_path", "powershell")
 
     async def _handle_system_notify(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -353,13 +380,37 @@ class WindowsLocalNode(LocalNodeBase):
         }
 
     async def clipboard_set(self, content: str) -> Dict[str, Any]:
-        """Set clipboard content via PowerShell."""
+        """
+        Set clipboard content with fallback chain (clawdbot pattern).
+
+        Attempts: clip.exe → PowerShell Set-Clipboard
+        """
+        # Attempt 1: clip.exe (fastest, works in WSL and native Windows)
+        clip_result = await self.shell_executor.execute(
+            ["cmd", "/c", f"echo {self._cmd_escape(content)}| clip"],
+            timeout=5.0,
+        )
+        if clip_result.success:
+            return {"success": True, "length": len(content), "method": "clip.exe"}
+
+        # Attempt 2: PowerShell Set-Clipboard (fallback)
         escaped = content.replace("'", "''")
-        result = await self.execute_powershell(f"Set-Clipboard -Value '{escaped}'")
+        ps_result = await self.execute_powershell(
+            f"Set-Clipboard -Value '{escaped}'"
+        )
         return {
-            "success": result.get("success", False),
+            "success": ps_result.get("success", False),
             "length": len(content),
+            "method": "powershell",
         }
+
+    @staticmethod
+    def _cmd_escape(text: str) -> str:
+        """Escape text for cmd.exe echo command."""
+        # Escape special cmd characters
+        for ch in ("^", "&", "|", "<", ">", "(", ")", "%"):
+            text = text.replace(ch, f"^{ch}")
+        return text
 
     async def say(self, text: str, voice: Optional[str] = None) -> Dict[str, Any]:
         """

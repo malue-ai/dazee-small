@@ -46,8 +46,8 @@ skill_groups:
     description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
     skills: [translator, locale-aware-formatter, multi-lang-ocr]
   research:
-    description: "学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研"
-    skills: [literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research]
+    description: "学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研、高性能网页爬取(Crawl4AI)"
+    skills: [literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research, web-scraper]
   meeting:
     description: "会议记录分析、提取行动项、参与度评估"
     skills: [meeting-insights-analyzer, meeting-notes-to-action-items]
@@ -181,6 +181,7 @@ skills:
       - { name: privacy-auditor,         backend_type: local, skill_source: instance, description: "隐私审计：扫描敏感文件、检查权限、风险报告" }
 
     lightweight:
+      - { name: web-scraper,         backend_type: local, skill_source: instance, python_packages: ["crawl4ai"], auto_install: true, post_install: "crawl4ai-setup", description: "Crawl4AI 高性能爬虫：Playwright 反爬 + 异步并发 + LLM 优化 Markdown (59k Stars, 完全免费)" }
       - { name: browser,             backend_type: tool,  tool_name: browser, skill_source: library, python_packages: ["playwright"], description: "Playwright browser automation: navigate, snapshot, click/type by ref" }
       - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
       - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }

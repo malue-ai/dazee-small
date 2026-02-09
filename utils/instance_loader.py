@@ -1363,17 +1363,24 @@ async def create_agent_from_instance(
         group_registry.validate_and_warn(all_non_system)
 
         # 构建 Skills 提示词并注入到运行时上下文
-        skills_prompt = await skills_loader.build_skills_prompt()
-        if skills_prompt and hasattr(prompt_cache, "runtime_context") and prompt_cache.runtime_context:
-            prompt_cache.runtime_context["skills_prompt"] = skills_prompt
-            logger.info(f"   Skills 提示词: {len(skills_prompt)} 字符已注入（Fallback 用）")
+        # V12.1: 始终注入 _skills_loader 和 _skill_group_registry
+        # 即使 skills_prompt 为空或 runtime_context 刚初始化为 {}
+        if hasattr(prompt_cache, "runtime_context"):
+            if prompt_cache.runtime_context is None:
+                prompt_cache.runtime_context = {}
 
-            # V12: 注入 loader 引用和 group_registry
+            # 注入 loader 引用和 group_registry（供 tool_provider 动态生成 skills_prompt）
             prompt_cache.runtime_context["_skills_loader"] = skills_loader
             prompt_cache.runtime_context["_skill_group_registry"] = group_registry
             logger.info(
                 f"   SkillGroupRegistry 已注入: {group_registry}"
             )
+
+            # 构建静态 Fallback 提示词
+            skills_prompt = await skills_loader.build_skills_prompt()
+            if skills_prompt:
+                prompt_cache.runtime_context["skills_prompt"] = skills_prompt
+                logger.info(f"   Skills 提示词: {len(skills_prompt)} 字符已注入（Fallback 用）")
     elif config.skills:
         # 旧格式兼容
         agent._skills_loader = None

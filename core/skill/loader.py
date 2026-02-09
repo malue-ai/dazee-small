@@ -256,10 +256,15 @@ class SkillsLoader:
         """
         构建 Skills 提示词片段（XML + 指令，注入到系统提示词）
 
-        V12.0: 支持按 intent.relevant_skill_groups 过滤，只注入相关 Skills。
-        - 有 relevant_skill_groups + group_registry -> 按分组过滤
-        - relevant_skill_groups 为空列表 -> 只注入 _always 组
-        - relevant_skill_groups 为 None（Fallback） -> 注入全量（保守）
+        V12.1: need_setup / need_auth 状态的 Skill 也注入完整 SKILL.md。
+        Agent 使用时通过 HITL 确认安装/授权。
+
+        设计原则:
+        - 所有 enabled 且有 SKILL.md 的 Skill，只要意图匹配就注入
+        - ready: 直接可用
+        - need_setup / need_auth: 注入 SKILL.md + 标注状态，Agent 使用时
+          通过 HITL 确认安装/授权
+        - unavailable (缺少外部依赖如 CLI/App): 仅注入名称+安装提示
 
         Args:
             language: 语言
@@ -271,9 +276,19 @@ class SkillsLoader:
         """
         from core.prompt.skill_prompt_builder import SkillPromptBuilder, SkillSummary
 
-        available = [
-            e for e in self.get_available_skills()
-            if e.backend_type != BackendType.TOOL and e.skill_path
+        # V12.1: injectable = ready + need_setup + need_auth
+        # 这些 Skill 都注入完整 SKILL.md，Agent 可以按需 HITL 安装
+        _INJECTABLE_STATUSES = {
+            SkillStatus.READY,
+            SkillStatus.NEED_SETUP,
+            SkillStatus.NEED_AUTH,
+        }
+        injectable = [
+            e for e in self._entries
+            if e.enabled
+            and e.status in _INJECTABLE_STATUSES
+            and e.backend_type != BackendType.TOOL
+            and e.skill_path
         ]
 
         # V12.0: 按 SkillGroupRegistry 过滤（重召回原则）
@@ -281,17 +296,17 @@ class SkillsLoader:
         if relevant_skill_groups is not None and group_registry:
             allowed_names = group_registry.get_skills_for_groups(relevant_skill_groups)
 
-            before_count = len(available)
-            available = [e for e in available if e.name in allowed_names]
+            before_count = len(injectable)
+            injectable = [e for e in injectable if e.name in allowed_names]
             logger.info(
-                f"Skills 按 intent 过滤: {before_count} → {len(available)} "
+                f"Skills 按 intent 过滤: {before_count} → {len(injectable)} "
                 f"(groups={relevant_skill_groups})"
             )
 
-        # unavailable skills 也按意图分组过滤，避免上下文爆炸
+        # unavailable (缺少外部 CLI/App) 仅注入名称+安装提示
         all_unavailable = [
             e for e in self._entries
-            if e.enabled and e.status != SkillStatus.READY
+            if e.enabled and e.status == SkillStatus.UNAVAILABLE
         ]
         if allowed_names is not None:
             unavailable = [
@@ -301,17 +316,26 @@ class SkillsLoader:
             unavailable = all_unavailable
 
         summaries: list[SkillSummary] = []
-        for entry in available:
+        for entry in injectable:
             skill_md_path = Path(entry.skill_path) / "SKILL.md"
             if not skill_md_path.exists():
                 continue
             emoji = ""
             if isinstance(entry.raw_config.get("metadata"), dict):
                 emoji = (entry.raw_config["metadata"].get("emoji") or "")[:2]
+
+            # V12.1: need_setup / need_auth 在描述中标注状态
+            description = entry.description or ""
+            if entry.status == SkillStatus.NEED_SETUP:
+                hint = self._get_setup_hint(entry)
+                description = f"{description} [需安装: {hint}，使用前通过 HITL 确认安装]"
+            elif entry.status == SkillStatus.NEED_AUTH:
+                description = f"{description} [需授权: 使用前通过 HITL 确认授权]"
+
             summaries.append(
                 SkillSummary(
                     name=entry.name,
-                    description=entry.description or "",
+                    description=description,
                     location=skill_md_path.resolve(),
                     emoji=emoji,
                 )

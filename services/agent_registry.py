@@ -565,6 +565,34 @@ class AgentRegistry:
             agent._state_consistency_manager = None
             agent._state_consistency_enabled = False
 
+        # V12.1: 注入 SkillsLoader + SkillGroupRegistry 到 prompt_cache.runtime_context
+        # 供 ToolSystemRoleProvider 在运行时按 intent 动态生成 skills_prompt
+        if instance_config and instance_config.skills_first_config:
+            try:
+                from core.skill import create_skills_loader
+                from core.skill.group_registry import SkillGroupRegistry
+
+                skills_loader = create_skills_loader(
+                    skills_config=instance_config.skills_first_config,
+                    instance_skills_dir=get_instances_dir() / config.name / "skills",
+                    instance_name=config.name,
+                )
+                await skills_loader.load()
+
+                skill_groups_cfg = (instance_config.raw_config or {}).get("skill_groups", {})
+                group_registry = SkillGroupRegistry(skill_groups_cfg)
+
+                agent._skills_loader = skills_loader
+
+                if config.prompt_cache and hasattr(config.prompt_cache, "runtime_context"):
+                    if config.prompt_cache.runtime_context is None:
+                        config.prompt_cache.runtime_context = {}
+                    config.prompt_cache.runtime_context["_skills_loader"] = skills_loader
+                    config.prompt_cache.runtime_context["_skill_group_registry"] = group_registry
+                    logger.info(f"   SkillGroupRegistry 已注入: {group_registry}")
+            except Exception as e:
+                logger.warning(f"Skills 注入失败（不阻断启动）: {e}", exc_info=True)
+
         # 标记为原型（用于 clone_for_session 判断）
         agent._is_prototype = True
 

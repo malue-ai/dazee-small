@@ -2,16 +2,19 @@
 """
 Shell 命令执行器
 
-借鉴 clawdbot 的 ShellExecutor.swift 实现：
-- 通过 /usr/bin/env 执行命令
+跨平台 Shell 命令执行，借鉴 clawdbot 的实现：
 - 环境变量过滤（安全）
-- 超时控制
-- 输出捕获
+- 超时控制 + 进程树终止
+- 输出捕获（Windows 编码感知）
+- PATHEXT 可执行文件解析（Windows）
+- 白名单：大小写无关 + 扩展名无关匹配（Windows）
 """
 
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional, Set
@@ -24,6 +27,9 @@ logger = logging.getLogger(__name__)
 # Windows platform flag (evaluated once at import)
 _IS_WIN32 = sys.platform == "win32"
 
+# npm-related commands that need .cmd extension on Windows (clawdbot pattern)
+_WIN_CMD_COMMANDS: Set[str] = {"npm", "pnpm", "yarn", "npx"}
+
 
 class ShellExecutor(BaseExecutor):
     """
@@ -34,6 +40,7 @@ class ShellExecutor(BaseExecutor):
     - 环境变量过滤
     - 超时控制
     - 输出大小限制
+    - Windows: PATHEXT 解析、进程树终止、大小写无关白名单
     """
 
     # 阻止的环境变量键（对齐 clawdbot）
@@ -80,6 +87,22 @@ class ShellExecutor(BaseExecutor):
         self.safe_bins = set(safe_bins) if safe_bins else set()
         self.default_cwd = default_cwd or os.path.expanduser("~")
 
+        # Windows: build lowercase sets for case-insensitive matching
+        if _IS_WIN32:
+            self._allowlist_lower: Optional[Set[str]] = (
+                {self._normalize_win_path(p) for p in self.allowlist}
+                if self.allowlist
+                else None
+            )
+            self._safe_bins_lower: Set[str] = {
+                self._strip_win_ext(b.lower()) for b in self.safe_bins
+            }
+        else:
+            self._allowlist_lower = None
+            self._safe_bins_lower = set()
+
+    # ==================== Environment Sanitization ====================
+
     def _sanitize_env(self, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """
         清理环境变量，移除危险项
@@ -90,15 +113,12 @@ class ShellExecutor(BaseExecutor):
         Returns:
             清理后的环境变量
         """
-        # 从当前环境开始
         sanitized = dict(os.environ)
 
-        # 合并平台特有的阻止列表
         blocked_keys = self.BLOCKED_ENV_KEYS
         if _IS_WIN32:
             blocked_keys = blocked_keys | self.BLOCKED_ENV_KEYS_WIN32
 
-        # 移除阻止的键
         for key in list(sanitized.keys()):
             if key in blocked_keys:
                 del sanitized[key]
@@ -108,7 +128,6 @@ class ShellExecutor(BaseExecutor):
                     del sanitized[key]
                     break
 
-        # 合并用户提供的环境变量（同样需要过滤）
         if env:
             for key, value in env.items():
                 if key in blocked_keys:
@@ -125,9 +144,14 @@ class ShellExecutor(BaseExecutor):
 
         return sanitized
 
+    # ==================== Allowlist & Command Resolution ====================
+
     def _check_allowlist(self, command: List[str]) -> bool:
         """
         检查命令是否在白名单中
+
+        Windows: 大小写无关 + 去掉 .exe/.cmd 扩展名后匹配
+        (对齐 clawdbot exec-approvals.ts: isSafeBinUsage)
 
         Args:
             command: 命令列表
@@ -143,16 +167,90 @@ class ShellExecutor(BaseExecutor):
 
         executable = command[0]
 
-        # 检查完整路径
-        if executable in self.allowlist:
-            return True
+        if _IS_WIN32:
+            # Case-insensitive full-path check
+            if (
+                self._allowlist_lower
+                and self._normalize_win_path(executable) in self._allowlist_lower
+            ):
+                return True
 
-        # 检查是否是安全的 bin
-        bin_name = os.path.basename(executable)
-        if bin_name in self.safe_bins:
-            return True
+            # Case-insensitive safe_bin check (strip .exe/.cmd extension)
+            bin_name = os.path.basename(executable)
+            stripped = self._strip_win_ext(bin_name.lower())
+            if stripped in self._safe_bins_lower:
+                return True
+        else:
+            # Unix: exact match
+            if executable in self.allowlist:
+                return True
+
+            bin_name = os.path.basename(executable)
+            if bin_name in self.safe_bins:
+                return True
 
         return False
+
+    @staticmethod
+    def _resolve_win_command(command: List[str]) -> List[str]:
+        """
+        Resolve Windows command: add .cmd extension for npm-related commands,
+        and use shutil.which to resolve PATHEXT.
+
+        clawdbot pattern: npm/pnpm/yarn/npx need .cmd extension on Windows
+        because they are installed as .cmd batch scripts.
+
+        Args:
+            command: Original command list
+
+        Returns:
+            Command list with resolved executable
+        """
+        if not command:
+            return command
+
+        exe = command[0]
+        basename = os.path.basename(exe).lower()
+        ext = os.path.splitext(basename)[1]
+
+        # Already has extension — leave it
+        if ext:
+            return command
+
+        # npm-related commands need .cmd on Windows
+        if basename in _WIN_CMD_COMMANDS:
+            resolved = shutil.which(f"{exe}.cmd") or shutil.which(exe)
+            if resolved:
+                return [resolved] + command[1:]
+            return [f"{exe}.cmd"] + command[1:]
+
+        # General resolution via shutil.which (respects PATHEXT)
+        resolved = shutil.which(exe)
+        if resolved:
+            return [resolved] + command[1:]
+
+        return command
+
+    @staticmethod
+    def _normalize_win_path(p: str) -> str:
+        """
+        Normalize Windows path for matching: lowercase + forward slashes.
+        Strips UNC prefix (\\\\?\\ or \\\\.\\\\ ) — clawdbot pattern.
+        """
+        stripped = p
+        if stripped.startswith("\\\\?\\") or stripped.startswith("\\\\.\\"):
+            stripped = stripped[4:]
+        return stripped.replace("\\", "/").lower()
+
+    @staticmethod
+    def _strip_win_ext(name: str) -> str:
+        """Strip common Windows executable extensions for matching."""
+        stem, ext = os.path.splitext(name)
+        if ext in {".exe", ".cmd", ".bat", ".com"}:
+            return stem
+        return name
+
+    # ==================== Output Decoding ====================
 
     @staticmethod
     def _decode_output(data: bytes) -> str:
@@ -176,7 +274,6 @@ class ShellExecutor(BaseExecutor):
             # Try UTF-8 first (works when chcp 65001 or PowerShell UTF-8 mode)
             try:
                 text = data.decode("utf-8")
-                # Accept if no replacement chars from a bad decode
                 if "\ufffd" not in text:
                     return text
             except UnicodeDecodeError:
@@ -193,6 +290,36 @@ class ShellExecutor(BaseExecutor):
 
         return data.decode("utf-8", errors="replace")
 
+    # ==================== Process Management ====================
+
+    @staticmethod
+    def _kill_process_tree(pid: int) -> None:
+        """
+        Kill entire process tree (parent + children).
+
+        Windows: taskkill /F /T /PID (clawdbot pattern)
+        Unix: SIGKILL to process group
+        """
+        if _IS_WIN32:
+            try:
+                subprocess.Popen(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.DETACHED_PROCESS
+                    if _IS_WIN32
+                    else 0,
+                )
+            except Exception:
+                pass  # Best-effort
+        else:
+            try:
+                os.killpg(os.getpgid(pid), 9)  # SIGKILL to process group
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+    # ==================== Command Execution ====================
+
     async def execute(
         self,
         command: List[str],
@@ -203,6 +330,9 @@ class ShellExecutor(BaseExecutor):
     ) -> ShellResult:
         """
         执行 shell 命令
+
+        Windows: 自动解析 PATHEXT、.cmd 扩展名
+        超时时: 使用 taskkill 终止整个进程树
 
         Args:
             command: 命令列表，如 ["ls", "-la"]
@@ -216,9 +346,17 @@ class ShellExecutor(BaseExecutor):
         if not command:
             return ShellResult(success=False, stderr="命令不能为空", exit_code=-1)
 
+        # Windows: resolve .cmd / PATHEXT extensions
+        if _IS_WIN32:
+            command = self._resolve_win_command(command)
+
         # 白名单检查
         if not self._check_allowlist(command):
-            hint = f"可用命令: {', '.join(sorted(self.safe_bins))}" if self.safe_bins else ""
+            hint = (
+                f"可用命令: {', '.join(sorted(self.safe_bins))}"
+                if self.safe_bins
+                else ""
+            )
             return ShellResult(
                 success=False,
                 stderr=f"命令不在白名单中: {command[0]}。{hint}",
@@ -234,7 +372,7 @@ class ShellExecutor(BaseExecutor):
         start_time = time.time()
 
         try:
-            # 直接执行命令（不使用 /usr/bin/env 前缀，确保跨平台命令正常工作）
+            # On Windows, don't create new process group (needed for taskkill /T)
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=work_dir,
@@ -268,15 +406,24 @@ class ShellExecutor(BaseExecutor):
                 )
 
             except asyncio.TimeoutError:
-                # 超时，终止进程
-                process.terminate()
+                # Kill process tree on timeout (clawdbot pattern: taskkill /F /T)
+                if process.pid:
+                    self._kill_process_tree(process.pid)
+
+                # Fallback: terminate / kill if tree-kill didn't work
                 try:
+                    process.terminate()
                     await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    process.kill()
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
 
                 elapsed_ms = int((time.time() - start_time) * 1000)
-                logger.warning(f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms")
+                logger.warning(
+                    f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms"
+                )
 
                 return ShellResult(
                     success=False,
@@ -312,6 +459,8 @@ class ShellExecutor(BaseExecutor):
                 elapsed_ms=elapsed_ms,
             )
 
+    # ==================== Utilities ====================
+
     async def which(self, executable: str) -> Optional[str]:
         """
         检查可执行文件是否存在（对齐 clawdbot system.which）
@@ -325,10 +474,8 @@ class ShellExecutor(BaseExecutor):
             可执行文件路径，如果不存在则返回 None
         """
         if _IS_WIN32:
-            # Windows: use 'where' command
             result = await self.execute(["where", executable], timeout=5.0)
         else:
-            # macOS / Linux: use 'which' command
             result = await self.execute(["which", executable], timeout=5.0)
 
         if result.success and result.stdout.strip():
