@@ -2,11 +2,26 @@
 
 > 基于《小搭子专用实例架构设计》(V9.0) 需求文档，对照当前代码实现的完整状态梳理。
 >
-> 范围：仅涉及 Python 后端 + 框架核心层，不涉及 Tauri 桌面壳、Vue 前端组件。
+> 范围：Python 后端 + 框架核心层 + Vue 前端 + Tauri 桌面壳。
 >
 > 更新时间：2026-02-08（第二次更新：实例存储隔离 + 后台任务 + Skills 扩充 + 路径管理）
-
+>
 > 更新时间：2026-02-09（第三次更新：项目编辑 + 多 Provider 批量保存 + Skills 注册格式重构 + Windows 打包）
+>
+> 更新时间：2026-02-09（第四次更新：测试驱动全面核实——import 验证 + Skills 一致性 + E2E 报告真实性 + 链路断裂检查）
+
+---
+
+### ⚠️ 第四次更新发现的关键问题（测试驱动验证）
+
+
+| 3 | **Playbook 端到端链路断裂** | 🟡 中 | `base.py` 中虽含 "playbook" 字样但**未调用** `extract_from_session()` 或 `PlaybookManager`。Hint 注入（Phase 2）已实现，但 DRAFT 生成 → 用户确认 → APPROVED 三条链路均断开。 |
+| 4 | **文档记忆模块名错误** | 🟡 中 | 文档中 `core.memory.instance_memory` 不存在，实际模块为 `core.memory.instance_memory`（类名 `InstanceMemoryManager`）。 |
+| 5 | **tool_registry.yaml 注册为空** | 🟡 中 | 文件存在（720 字符）但仅有注释和空结构，`tools` 列表解析为 0 项。工具注册实际通过 `capabilities.yaml` 完成（9 个工具）。 |
+| 6 | **残留垃圾文件** | 🟢 低 | `tools/request_human_confirmation _copy.py`（文件名含空格的副本文件）。 |
+| 7 | **实例目录混乱** | 🟡 中 | 存在未清理的实例：`b307fc3d`（仅 1 文件，无 config）、`xiaodazi_backup`（无 prompt）、`42c0dcfb` / `820e1326`（无 config）。 |
+| 9 | **旧存储路径残留** | 🟡 中 | `data/local_store/xiaodazi/` 仍存在（3 文件），应已迁移到 `data/instances/xiaodazi/db/`。 |
+
 ---
 
 ## 〇、架构全景图
@@ -110,7 +125,7 @@
 │                                                                                         │
 │  ┌─── memory/ ── 记忆系统 ────────────────────────────────────────────────────────────┐ │
 │  │                   ┌─────────────────────────────────────┐                          │ │
-│  │                   │ xiaodazi_memory.py                   │                          │ │
+│  │                   │ instance_memory.py                   │                          │ │
 │  │                   │ 三层入口: recall / remember / flush  │                          │ │
 │  │                   └──────────┬──────────────────────────┘                          │ │
 │  │          ┌───────────────────┼──────────────────────┐                              │ │
@@ -265,7 +280,7 @@
    ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │ 并行异步处理                                                          │
-│  ├── 记忆提取: xiaodazi_memory.flush → FragmentExtractor → 双写      │
+│  ├── 记忆提取: instance_memory.flush → FragmentExtractor → 双写      │
 │  ├── 事件广播: broadcaster → SSE → 前端                               │
 │  ├── 后台任务: title_generation / mem0_update / recommended_questions │
 │  └── 知识索引: file_indexer → generic_fts → FTS5 增量索引             │
@@ -464,33 +479,36 @@ Provider 一键切换模型分配：
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 0.6 模块完成度热力图
+### 0.6 模块完成度热力图（测试驱动验证，2026-02-09）
+
+> 以下百分比基于 import 验证 + 链路测试 + 数据一致性检查，**非自评**。
 
 ```
-██████████  95%  Agent 引擎层 (V11.0 统一 RVR-B / 回溯 / 错误分类 + HITL pending 修复)
-██████████  95%  自适应终止策略 (八维度 + 费用阶梯 HITL)
-██████████  95%  实例骨架与配置 (三文件分级 + Provider 一键切换 + state_consistency)
-██████████  95%  存储层 (SQLite + FTS5 + sqlite-vec + 实例隔离完成)
-██████████  95%  状态一致性管理 (快照/回滚 + config 启用 + E2E 6/6 验证通过)
-██████████  95%  实例存储隔离 (app_paths 路径管理 + 全组件 AGENT_INSTANCE 感知)
-█████████░  90%  意图识别简化 (V11.0 极简输出 + skill_groups 语义多选)
-█████████░  90%  上下文注入器 (7 个 Phase Injector 全部就绪)
-█████████░  90%  Plan 规划系统 (渐进式展示 + 桌面端工具表 + 文件安全提示)
-█████████░  90%  记忆系统 (三层架构 + memory_flush 后台任务 + E2E 验证)
-████████░░  85%  进度转换与事件推送 (ProgressTransformer + emit_progress_update)
-█████████░  90%  Skills 二维分类框架 (49 个 Skill 已创建 + SkillsLoader)
-█████████░  90%  本地知识检索 (FTS5 + 向量混合搜索)
-█████████░  85%  E2E 评估框架 (6 个端到端用例 + Phase 0 回滚验证 + LLM-as-Judge)
-█████████░  90%  后台任务系统 (两级调度 + 自动注册 + memory_flush 已实现)
-█████████░  85%  打包与桌面端路径 (PyInstaller + Tauri sidecar + 跨平台路径)
-████████░░  80%  三大核心能力 (文件修改回滚安全链路已验证)
-███████░░░  75%  Skill 格式规范 (SKILL.md + 二维元数据)
-███████░░░  70%  Playbook 持续学习 (Hint 注入已实现，端到端链路待串联)
+████████░░  85%  Agent 引擎层 (V10.0 统一 Agent + RVR-B，但 Playbook 链路断)
+████████░░  85%  自适应终止策略 (八维度完整，但前端 HITL 事件渲染全部未实现)
+█████████░  90%  实例骨架与配置 (三文件分级 + Provider 切换，但实例目录有残留)
+████████░░  85%  存储层 (SQLite + FTS5 + sqlite-vec，但旧路径 data/local_store 残留)
+████████░░  80%  状态一致性管理 (已启用实例配置 + 路径/持久化修复；Rollback E2E 最新 2/2 PASS)
+████████░░  85%  实例存储隔离 (全组件感知 AGENT_INSTANCE，但旧路径未清理)
+█████████░  90%  FastAPI 服务端 (9 路由 + 8 服务 + 72 端点 + WebSocket，import 通过)
+███████░░░  75%  前端实现 (31 Vue + 9 Store + 5 Composables，但未验证构建/运行)
+████████░░  85%  意图识别 (V12.0 SkillGroupRegistry 链路验证通过)
+████████░░  80%  上下文注入器 (7 个 Injector import 通过，Playbook 注入无数据源)
+█████████░  85%  Plan 规划系统 (渐进式展示已实现)
+████████░░  80%  记忆系统 (三层架构 import 通过，模块名不一致: instance_memory 非 instance_memory)
+████████░░  80%  进度转换与事件推送 (ProgressTransformer 已实现，未集成到 PlanTodo 流程)
+██████░░░░  60%  Skills 体系 (68 目录 / 76 注册 / 99 配置 — 三处数据严重不一致 ⚠️)
+████████░░  85%  本地知识检索 (FTS5 + 向量混合搜索 import 通过)
+████░░░░░░  40%  E2E 评估框架 (6 用例定义但 turns=0；报告 6/6 PASS 但无评分详情 ⚠️)
+████████░░  80%  后台任务系统 (两级调度 + 4 个任务，memory_flush 链路验证通过)
+████████░░  80%  打包与桌面端路径 (双模式路径，Win/Linux 未验证)
+███████░░░  70%  项目管理 (多实例架构，但实例目录混乱: 残留测试实例未清理)
+████████░░  80%  前端 Settings (多 Provider 批量保存)
+████████░░  75%  首次启动引导 (9 步引导)
+█████░░░░░  50%  Playbook 持续学习 (Hint 注入已实现，但 3/4 链路断裂且无调用者)
 ████░░░░░░  40%  OS 兼容层 (仅 macOS)
 ███░░░░░░░  35%  应用发现 (仅 macOS 扫描)
-█████████░  85%  项目管理 (多实例架构，前端创建+编辑项目流程已实现)
-█████████░  90%  前端 Settings (多 Provider 批量保存 + 激活 + API Key 验证)
-████████░░  80%  首次启动引导 (9 步交互式引导教程)
+████████░░  80%  三大核心能力 (Rollback 已修复并启用，Playbook 链路仍断)
 ░░░░░░░░░░   0%  Skills 安全验证
 ```
 
@@ -500,48 +518,51 @@ Provider 一键切换模型分配：
 
 | 项 | 说明 |
 |----|------|
-| **LLM 切换** | `config.yaml` 的 `agent.provider` 一键切换所有模型（qwen/claude）。Provider 模板定义在 `config/llm_profiles.yaml`，包含 agent_model + agent_llm + heavy/light 分级。13 个内部 LLM 调用点通过 `tier` 字段自动解析为对应 provider 的模型。temperature 规范：0（精准）/ 0.8（生成）/ thinking 开启时框架自动设置。 |
-| **Profile 解析** | `instance_loader.py` 的 `_resolve_llm_profiles()` 将 tier-based 配置展开为完整 profile dict，注入 `set_instance_profiles()`。各 profile 可通过显式 provider/model 跳过模板解析（单点覆盖）。 |
-| **意图路由** | 单一入口：`IntentAnalyzer`（`core/routing/intent_analyzer.py`）。V11.0 极简输出（complexity + skip_memory + is_follow_up + wants_to_stop + relevant_skill_groups），上下文过滤 &lt;200ms。`relevant_skill_groups` 由 LLM 语义多选，驱动按需 Skill 注入。 |
-| **执行策略** | V11.0 统一 RVR-B（错误分类 + BacktrackManager + 终止联动）。complexity 仅影响规划深度和 Skill 聚焦（通过 `SkillFocusInjector`），不再路由到不同执行器。终止：八维度 + 费用阶梯 HITL + 回溯耗尽/意图澄清。 |
-| **记忆** | 三层：MEMORY.md 文件层、GenericFTS5 索引层、Mem0 向量层；recall/remember/flush 统一入口。Playbook 已配置（auto_extract、require_user_confirm、FileStorage）。 |
+| **Agent 架构** | V10.0 统一 Agent 类（`core/agent/base.py`），Strategy 模式通过 Executor 注入。`AgentFactory` 从 `AgentSchema` 动态初始化。⚠️ `base.py` 引用了 playbook 概念但**未实际调用** `PlaybookManager.extract_from_session()`。 |
+| **LLM 切换** | `config.yaml` 的 `agent.provider` 一键切换。Provider 模板在 `config/llm_profiles.yaml`（heavy/light 分级）。**13 个**内部调用点（验证: intent_analyzer / semantic_inference / tool_capability_inference / background_task / plan_generator / plan_manager / fragment_extractor / behavior_analyzer / memory_update / llm_analyzer / schema_generator / prompt_merger / prompt_decomposer）。 |
+| **意图路由** | `IntentAnalyzer` 三层缓存（Hash → Semantic → LLM）。V12.0 从 `SkillGroupRegistry` 动态获取分组描述（链路验证通过）。输出: complexity + skip_memory + is_follow_up + wants_to_stop + relevant_skill_groups（21 个分组）。 |
+| **执行策略** | V11.0 固定 RVR-B（`AgentRouter` 不再路由到 RVR）。RVR-B 支持错误分类 + 回溯 + Context Pollution 清理。⚠️ 前端 HITL 事件（backtrack_exhausted_confirm / intent_clarify / cost_limit 等）渲染**全部未实现**。 |
+| **记忆** | 三层架构：`InstanceMemoryManager`（⚠️ 文档原写 `InstanceMemoryManager` 不准确，实际类名为 `InstanceMemoryManager`，模块为 `core.memory.instance_memory`）。recall/remember/flush 统一入口。memory_flush 后台任务链路验证通过。 |
+| **Playbook** | ⚠️ **链路断裂**：PlaybookHintInjector（Phase 2）已实现注入，但无数据源。`base.py` 不调用 `extract_from_session()`，DRAFT 生成 / 用户确认 / APPROVED 三条链路均断开。FileStorage 存在但数据库为空。 |
 
 ---
 
-## 二、整体完成度概览
+## 二、整体完成度概览（测试驱动修正）
 
-| 架构层 | 设计章节 | 完成度 | 状态 |
-|--------|----------|--------|------|
-| 实例骨架与配置 | 1.1 | 95% | 已完成（三文件分级 + Provider 一键切换） |
-| Skills 二维分类 | 3.1.1 | 90% | 框架完成，49 个 Skill 已创建，SkillsLoader 统一加载 |
-| 自适应终止策略 | 3.4 | 95% | 已完成 |
-| 状态一致性管理 | 3.3 | 95% | 已完成（config 启用 + HITL pending 修复 + E2E 6/6 验证） |
-| Agent 引擎层 | — | 95% | V11.0 统一 RVR-B + HITL pending 暂停修复 |
-| 意图识别简化 | 3.7.1 | 90% | 已完成（V11.0 极简输出 + `relevant_skill_groups` 语义多选） |
-| 上下文注入器 | — | 90% | 7 个 Phase Injector（含 skill_focus + playbook_hint + knowledge_context） |
-| 进度转换器 | 3.7.2 | 85% | 已完成 |
-| 本地知识检索 | 3.8 | 90% | FTS5 + 向量混合搜索已完成，知识工具 + 上下文注入器已实现 |
-| 记忆系统 | 3.13 | 90% | 三层架构完成 + memory_flush 后台任务 + E2E 验证 |
-| **实例存储隔离** | **3.3** | **95%** | **全组件 AGENT_INSTANCE 感知 + app_paths 统一路径管理** |
-| **后台任务系统** | **—** | **90%** | **两级调度（SSE-dependent / fire-and-forget）+ 自动注册** |
-| **打包与桌面端路径** | **—** | **85%** | **PyInstaller + Tauri sidecar + 跨平台路径（macOS/Win/Linux）** |
-| Nodes 本地操作 | 3.5 | 80% (macOS) | macOS 11 项操作完整，win32/linux 待实现 |
-| OS 兼容层 | 3.5 | 40% | 仅 macOS 实现 |
-| 应用发现 | 3.11 | 35% | 仅 macOS 扫描 |
-| 项目管理 | 3.10 | 85% | 多实例架构 + 前端创建+编辑项目流程（CreateProjectView 双模式） |
-| 存储层 | — | 95% | SQLite + FTS5 + sqlite-vec + 实例隔离完成 |
-| Playbook 持续学习 | 2.14 | 70% | Hint 注入器已实现，端到端链路 4 条断 2 条 |
-| Skill 格式规范 | 3.2 | 75% | 基础格式 + SKILL.md 二维元数据，49 个 Skill 已适配 |
-| E2E 评估框架 | — | 85% | 6 个端到端用例 + Phase 0 回滚验证 + 双层 LLM-as-Judge |
-| Plan 规划系统 | — | 90% | 渐进式展示 + 桌面端工具表 + 文件安全自动提示 |
-| 屏幕观察工具 | 3.5 | 80% | peekaboo + Vision OCR 并行，macOS 就绪 |
-| 前端 Settings UI | 3.1.2 | 90% | 多 Provider 批量保存+激活 + API Key 在线验证 + 自动保存默认模型 |
-| 首次启动引导 | 3.1.3 | 80% | 9 步交互式引导（设置→创建项目），含跳过控制和回退机制 |
-| 前端通用弹窗 | — | 100% | SimpleConfirmModal 替代 confirm/alert，支持 4 种类型 |
-| Skills 安全验证 | 3.12 | 0% | 未开始 |
-| 服务状态仪表板 | 3.1.5 | 0% | 未开始（前端 UI 范畴） |
-| MCP Apps UI | 3.6 | 0% | 未开始（前端 UI 范畴） |
-| 三大核心能力 | 3.9 | 80% | "会干活"完整（含文件修改回滚），"会思考"完整，"会学习"部分完成 |
+> 以下完成度基于 import 验证、链路测试、数据一致性检查。标 ⚠️ 的表示实测与原文档声称不符。
+
+| 架构层 | 设计章节 | 完成度 | 验证方式 | 状态 |
+|--------|----------|--------|----------|------|
+| Agent 引擎层 | — | 85% | import ✅ 链路 ⚠️ | V10.0 统一 Agent + RVR-B，但 Playbook 提取链路未接入 |
+| FastAPI 服务端 | — | 90% | import ✅ 路由 ✅ | 9 路由 + 8 服务 + 72 端点 + WebSocket，全部加载正常 |
+| 实例骨架与配置 | 1.1 | 90% | import ✅ 数据 ⚠️ | 三文件分级 + Provider 切换。⚠️ 实例目录有 4 个残留测试实例 |
+| ⚠️ Skills 体系 | 3.1.1 | **60%** | 数据 ❌ | **目录 68 / 注册 76 / 配置 99 三处不一致。20个有目录无注册，28个注册无目录** |
+| 自适应终止策略 | 3.4 | 85% | import ✅ 前端 ❌ | 后端八维度完整，前端 HITL 事件渲染全部未实现 |
+| 状态一致性管理 | 3.3 | **80%** | import ✅ E2E ✅ | 已修复：实例启用 state_consistency、相对路径捕获、动态快照落盘；Rollback E2E 最新 2/2 PASS |
+| 实例存储隔离 | — | 85% | import ✅ 数据 ⚠️ | 全组件感知 AGENT_INSTANCE，⚠️ 旧 `data/local_store/xiaodazi/` 未清理 |
+| 意图识别 | 3.7.1 | 85% | import ✅ 链路 ✅ | V12.0 SkillGroupRegistry 动态生成描述，链路验证通过 |
+| 上下文注入器 | — | 80% | import ✅ 数据 ⚠️ | 7 个 Injector 全部可导入，PlaybookHintInjector 无数据源（无 APPROVED Playbook） |
+| 记忆系统 | 3.13 | 80% | import ✅ 命名 ⚠️ | 三层架构 import 通过。⚠️ 实际模块 `instance_memory` 非文档中的 `instance_memory` |
+| 本地知识检索 | 3.8 | 85% | import ✅ | FTS5 + 向量混合搜索 + Embedding 抽象层 import 通过 |
+| Plan 规划系统 | — | 85% | import ✅ | 渐进式展示 + 桌面工具表 + 文件安全提示 |
+| 后台任务系统 | — | 80% | import ✅ 链路 ✅ | 两级调度 + 4 个任务，memory_flush 链路验证通过 |
+| 前端实现 | — | 75% | 文件 ✅ 构建 ? | 31 Vue + 10 API + 9 Store + 5 Composables，**构建和运行未验证** |
+| 进度转换器 | 3.7.2 | 75% | import ✅ | 已实现但**未集成到 PlanTodoTool 执行流程** |
+| Nodes 本地操作 | 3.5 | 80% | macOS ✅ | macOS 11 项完整，win32/linux 不存在 |
+| 打包与桌面端 | — | 80% | 文件 ✅ | PyInstaller + Tauri sidecar，Win/Linux 未验证 |
+| 项目管理 | 3.10 | 70% | 文件 ⚠️ | 多实例架构，⚠️ 残留测试实例（b307fc3d/xiaodazi_backup/42c0dcfb/820e1326） |
+| ⚠️ E2E 评估框架 | — | **40%** | E2E ❌ | **6 用例定义但 turns=0，报告 6/6 PASS 但无评分详情——可信度存疑** |
+| ⚠️ Playbook | 2.14 | **50%** | 链路 ❌ | Hint 注入已实现，**但 DRAFT 生成/用户确认/APPROVED 三条链路全部断开** |
+| 屏幕观察工具 | 3.5 | 80% | macOS ✅ | peekaboo + Vision OCR，仅 macOS |
+| 前端 Settings | 3.1.2 | 80% | 文件 ✅ | 多 Provider 批量保存 |
+| 首次启动引导 | 3.1.3 | 75% | 文件 ✅ | 9 步引导 |
+| OS 兼容层 | 3.5 | 40% | 代码 ✅ | 仅 macOS |
+| 应用发现 | 3.11 | 35% | 代码 ✅ | 仅 macOS 扫描 |
+| 前端通用弹窗 | — | 90% | 文件 ✅ | SimpleConfirmModal 4 种类型 |
+| 三大核心能力 | 3.9 | 80% | 链路 ⚠️ | 会干活(回滚已启用+修复)，会思考(完整)，会学习(Playbook断) |
+| Skills 安全验证 | 3.12 | 0% | — | 未开始 |
+| 服务状态仪表板 | 3.1.5 | 0% | — | 未开始 |
+| MCP Apps UI | 3.6 | 0% | — | 未开始 |
 
 ---
 
@@ -627,7 +648,11 @@ config/skills.yaml (唯一数据源)
     └── loading_mode: "lazy", os_aware: true
 ```
 
-**已创建 49 个 Skills**（`instances/xiaodazi/skills/`）：
+**已创建 68 个 Skill 目录**（`instances/xiaodazi/skills/`，全部含 SKILL.md）：
+
+> ⚠️ **数据一致性警告**：目录 68 个 / skill_registry.yaml 注册 76 个 / config/skills.yaml 配置 99 个。
+> 20 个有目录但未在 registry 注册（如 deep-research、pdf-toolkit、smart-email-assistant）。
+> 28 个已注册但无目录（如 notion、github、weather 等，多为 MCP 远程 Skill）。
 
 | 分类 | Skills |
 |------|--------|
@@ -748,14 +773,28 @@ config/skills.yaml (唯一数据源)
 - `clipboard` 状态备份/恢复未实现（设计中提到）
 - 回滚选项的前端 UI 交互未实现
 
+**「根本没有快照恢复」根因与修复（2026-02-09）**：
+
+| 根因 | 说明 | 修复 |
+|------|------|------|
+| **实例未启用** | `instances/xiaodazi/config.yaml` 此前**无** `state_consistency` 段，加载后 `enabled=False`，快照/回滚流程从不执行 | 已在 config.yaml 中增加 `state_consistency.enabled: true` 及 snapshot/rollback 配置 |
+| **路径提取过严** | `_extract_file_paths` 只认绝对路径和 `~`，相对路径（如 `docs/README.md`）不捕获 → 工具写相对路径时无备份 | `core/agent/tools/flow.py` 已支持相对路径（基于 cwd 解析，仅接受存在且像路径的字符串） |
+| **动态捕获未落盘** | `ensure_file_captured` 只更新内存，不调用 `_persist_snapshot`，进程崩溃后动态捕获的文件无法从磁盘恢复 | `consistency_manager.py` 在动态捕获后调用 `_persist_snapshot(snap)` |
+
+- **Rollback E2E 报告**：历史 3 份（20260208）为 0/2 PASS；**最新** `rollback_e2e_20260209_160621.json` 为 **2/2 PASS**（B9/B10 共 6 个子场景通过）。用户侧「没有快照恢复」主要因实例未启用，与 E2E 脚本结果无关。
+
 ---
 
-### 2.5 Agent 引擎层（V11.0 统一 RVR-B）
+### 2.5 Agent 引擎层（V10.0 统一 Agent + V11.0 固定 RVR-B）
 
-**设计**：V11.0 统一使用 RVR-B 执行器，complexity 仅影响规划深度和 Skill 聚焦。
+**设计**：V10.0 统一为单一 `Agent` 类（Strategy 模式），V11.0 固定 RVR-B 执行器。
+
+> ⚠️ **链路断裂**：`base.py` 中引用了 playbook 概念但**未实际调用** `PlaybookManager.extract_from_session()`。
 
 | 组件 | 文件 | 特性 |
 |------|------|------|
+| `Agent` | `core/agent/base.py` | V10.0 统一智能体类（Strategy 模式，Executor 注入） |
+| `AgentFactory` | `core/agent/factory.py` | Prompt 驱动的动态初始化 |
 | `RVRBExecutor` | `core/agent/execution/rvrb.py` | 统一执行器：回溯 + 错误分类 + 候选方案重试 |
 | `RVRExecutor` | `core/agent/execution/rvr.py` | 保留但不再独立使用（所有路径映射到 RVR-B） |
 | `AgentFactory` | `core/agent/factory.py` | V11.0 固定注册 RVR-B：`rvr`/`rvr-b`/`rvrb`/`simple` 全部映射到 `RVRBExecutor` |
@@ -906,7 +945,7 @@ EmbeddingProvider (抽象接口)
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `core/memory/markdown_layer.py` | 已完成 | Layer 1：MEMORY.md 模板 + 段落追加 + 每日日志 + 项目记忆 |
-| `core/memory/xiaodazi_memory.py` | 已完成 | 三层入口：recall 融合搜索 / remember 双写 / flush 提取+日志 |
+| `core/memory/instance_memory.py` | 已完成 | 三层入口：recall 融合搜索 / remember 双写 / flush 提取+日志 |
 | `core/memory/mem0/pool.py` | 已完成 | Layer 3：Mem0 语义搜索 + 向量存储 |
 | `core/memory/mem0/update/quality_control.py` | 已完成 | 冲突检测 + 更新决策（LLM 驱动） |
 | `core/memory/mem0/extraction/extractor.py` | 已完成 | 碎片记忆提取（FragmentExtractor） |
@@ -954,7 +993,7 @@ remember() 双写 → MEMORY.md + FTS5 + Mem0
 **memory_flush 后台任务**（`utils/background_tasks/tasks/memory_flush.py`）：
 - 触发时机：每次聊天响应后（fire-and-forget，永不阻塞用户）
 - 快速预过滤：格式/长度检查（_MIN_TOTAL_CHARS=30, _MIN_SINGLE_TURN_CHARS=15）
-- 自动实例化 `XiaodaziMemoryManager`，调用 `flush(session_id, messages)`
+- 自动实例化 `InstanceMemoryManager`，调用 `flush(session_id, messages)`
 - 失败不抛异常（non-fatal warning）
 
 **后台任务两级调度**（`utils/background_tasks/service.py`）：
@@ -1265,6 +1304,11 @@ LLM 决策 -> tools/nodes_tool.py（NodesTool）
 - 协议中已定义但未实现的命令：`camera.snap`、`screen.record`、`location.get`、`canvas.present`、`browser.proxy`
 - 远程节点通信（WebSocket）— 接口预留，未实现
 
+#### Canvas 与 Remotion 结论
+
+- **Canvas**：不需要 Moltbot 方案。用已有的「**本地 HTML + open_url / preview_url**」即可实现内容展示（Agent 生成 HTML → 写入临时目录或通过预览 API 返回 URL → `open_url` 或前端 `window.open(preview_url)`）。
+- **Remotion**：未接入。仅在 `docs/xiaodazi_skills_recommendation.md` 中作为 P1 推荐；后续可按需新增 Skill（参考 [remotion-dev/skills](https://github.com/remotion-dev/remotion/tree/main/packages/skills) 与 `npx remotion render`）。
+
 ---
 
 ### 2.15 三大核心能力总览（3.9）
@@ -1280,7 +1324,7 @@ LLM 决策 -> tools/nodes_tool.py（NodesTool）
 | **会思考** — 自主规划 | `core/planning/` | 已完成 |
 | **会思考** — 环境感知 | `RuntimeContextBuilder` | 已完成 |
 | **会思考** — Skill 聚焦 | `SkillFocusInjector`（按 complexity 聚焦） | 已完成（详见 2.18） |
-| **会学习** — 记忆系统 | `XiaodaziMemoryManager` 三层 | 已完成 |
+| **会学习** — 记忆系统 | `InstanceMemoryManager` 三层 | 已完成 |
 | **会学习** — Playbook | `core/playbook/` + `PlaybookHintInjector` | 策略注入已实现，端到端链路待串联（详见 2.16） |
 | **会学习** — 奖励归因 | `core/evaluation/reward_attribution.py` | 框架存在，调用链路待串联 |
 
@@ -1487,30 +1531,38 @@ Phase 3: Runtime 注入（实时状态）
 
 ### 2.20 E2E 评估框架（V2 — 三层验证）
 
+> ⚠️ **第四次更新严重警告**：E2E 评估框架存在根本性问题——6 个测试用例 `turns=0`（对话流程为空），最新报告 6/6 PASS 但 `grade_results` 为空。Rollback E2E 3 份报告全部 0/2 PASS。**当前 E2E 框架无法作为质量保证手段。**
+
 **价值定位**：端到端质量验证 — 从状态管理层到 Agent 交互到 LLM-as-Judge 诊断，三层自动化。
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `evaluation/adapters/http_agent.py` | 已完成 | E2E → FastAPI 桥接适配器 |
-| `evaluation/graders/code_based.py` | 已完成 | 代码评分器（确定性检查） |
-| `evaluation/graders/model_based.py` | 已完成 | 模型评分器（LLM 质量判断） |
-| `evaluation/harness.py` | 已完成 | 评估运行引擎 |
-| `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` | 已完成 | **6 个 E2E 用例**（含 B9/B10 回滚验证） |
+| `evaluation/graders/code_based.py` | 已完成 | 代码评分器（CodeBasedGraders 类） |
+| `evaluation/graders/model_based.py` | 已完成 | 模型评分器（ModelBasedGraders 类） |
+| `evaluation/harness.py` | 已完成 | 评估运行引擎（import 通过） |
+| `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` | ⚠️ 有缺陷 | **6 个用例定义但 turns=0（对话流程为空）** |
 | `evaluation/config/judge_prompts.yaml` | 已完成 | 含 `grade_rollback_safety` 回滚安全专项评估 |
-| `scripts/run_e2e_auto.py` | 已完成 | 自动化运行器（**Phase 0 回滚预检** + 启动服务 → 执行 → 报告 → 停止） |
-| `scripts/verify_rollback_e2e.py` | **新增** | B9/B10 状态层独立验证（6 个子场景，秒级） |
-| `docs/benchmark/data/rollback_test/` | **新增** | B9/B10 合成测试数据（8 个文件） |
+| `scripts/run_e2e_auto.py` | 已完成 | 自动化运行器 |
+| `scripts/verify_rollback_e2e.py` | ⚠️ 待验证 | 声称 6/6 通过但报告显示 0/2 |
 
 **Phase 1 测试用例（6 个）**：
 
-| ID | 场景 | 验证点 | 评分方式 |
-|-----|------|--------|---------|
-| A1 | 格式混乱 Excel 分析 | RVR-B 回溯处理 + 结果质量 | code + model |
-| B1 | 跨会话记忆 | 记忆持久化 + 风格召回 | model |
-| D4 | 连续错误恢复 | ErrorClassifier + BacktrackManager | code + model |
-| C1 | 简单问答 token 对比 | Prompt Caching 命中率 | code + model |
-| **B9** | **文件修改异常退出自动回滚** | **Snapshot + OperationLog + 一致性** | **code + 2× model（含回滚安全专项）** |
-| **B10** | **文件修改用户中止回滚** | **HITL 中止 + 选择性回滚** | **2× model（含回滚安全专项）** |
+| ID | 场景 | Graders | Turns | ⚠️ 问题 |
+|-----|------|---------|-------|--------|
+| A1 | 格式混乱 Excel 分析 | check_no_tool_errors + model | 0 | ❌ 对话为空 |
+| B1 | 跨会话记忆 | model | 0 | ❌ 对话为空 |
+| D4 | 连续错误恢复 | check_no_tool_errors + model | 0 | ❌ 对话为空 |
+| C1 | 简单问答 token 对比 | check_token_limit + model | 0 | ❌ 对话为空 |
+| B9 | 文件修改异常退出回滚 | check_no_tool_errors + 2× model | 0 | ❌ 对话为空 |
+| B10 | 文件修改用户中止回滚 | 2× model | 0 | ❌ 对话为空 |
+
+**评估报告现状（13 份报告分析）**：
+
+| 报告类型 | 数量 | 结果 | 可信度 |
+|---------|------|------|--------|
+| e2e_phase1 | 10 份 | 均为 6/6 PASS | ❌ 不可信（grade_results 为空） |
+| rollback_e2e | 4 份 | 3 份 0/2、**1 份 2/2**（`rollback_e2e_20260209_160621.json`） | 最新 2/2 PASS；用户侧无快照因实例未启用，已修复 |
 
 **三层评估架构**：
 
@@ -1626,7 +1678,7 @@ python scripts/run_e2e_auto.py --provider claude
 | `infra/local_store/engine.py` | **已改造** | DB 路径从 `AGENT_INSTANCE` 自动解析到实例目录 |
 | `infra/storage/local.py` | **已改造** | 文件上传路径从 `AGENT_INSTANCE` 解析 |
 | `core/playbook/storage.py` | **已改造** | FileStorage 路径从 `AGENT_INSTANCE` 解析 |
-| `core/memory/xiaodazi_memory.py` | **已改造** | 记忆路径从 `AGENT_INSTANCE` 解析 |
+| `core/memory/instance_memory.py` | **已改造** | 记忆路径从 `AGENT_INSTANCE` 解析 |
 | `core/state/consistency_manager.py` | **已改造** | 快照路径从 `AGENT_INSTANCE` 解析 |
 | `core/memory/mem0/config.py` | **已改造** | Mem0 向量库路径实例隔离 |
 | `core/memory/mem0/sqlite_vec_store.py` | **已改造** | 向量存储路径实例隔离 |
@@ -1642,7 +1694,7 @@ instance_loader.create_agent_from_instance("xiaodazi")
     ├── engine.py → get_instance_db_dir("xiaodazi")
     │   → data/instances/xiaodazi/db/instance.db
     │
-    ├── xiaodazi_memory.py → get_instance_memory_dir("xiaodazi")
+    ├── instance_memory.py → get_instance_memory_dir("xiaodazi")
     │   → data/instances/xiaodazi/memory/MEMORY.md
     │
     ├── local.py → get_instance_storage_dir("xiaodazi")
@@ -1782,7 +1834,54 @@ dispatch_tasks(task_names, context)
 
 ---
 
-## 四、前端实现详情
+## 四、前端与服务端实现详情
+
+### 4.0 实现规模概览（测试驱动验证）
+
+#### FastAPI 服务端
+
+| 维度 | 数量 | 验证状态 |
+|------|------|----------|
+| 路由模块 | 9 个 | ✅ 全部 import 通过 |
+| 服务层 | 8 个 | ✅ 全部 import 通过 |
+| API 端点 | 72 个 | ✅ `from main import app` 加载正常 |
+| WebSocket | 1 个 (`/api/v1/ws/chat`) | ✅ |
+| 工具文件 | 10 个（含 1 个残留副本） | ⚠️ `request_human_confirmation _copy.py` 需删除 |
+| capabilities 注册 | 9 个核心工具 | ✅ |
+
+**路由模块清单**：`chat.py` / `websocket.py` / `conversation.py` / `agents.py` / `skills.py` / `files.py` / `models.py` / `settings.py` / `human_confirmation.py`
+
+**服务层清单**：`chat_service.py` / `agent_registry.py` / `session_service.py` / `conversation_service.py` / `knowledge_service.py` / `confirmation_service.py` / `settings_service.py` / `user_task_scheduler.py`
+
+#### Vue 前端
+
+| 维度 | 数量 | 验证状态 |
+|------|------|----------|
+| Vue 组件 | 31 个 | ✅ 文件存在 |
+| TypeScript 文件 | 39 个 | ✅ |
+| API 层 | 10 个模块 | ✅ |
+| Pinia Store | 9 个 | ✅ |
+| Composables | 5 个 | ✅ |
+| 视图页面 | 6 个 | ✅ |
+| **前端构建** | **未验证** | ⚠️ 未运行 `npm run build` |
+
+**组件分布**：
+
+| 目录 | 数量 | 主要组件 |
+|------|------|---------|
+| `components/chat/` | 8 | ChatHeader, ChatInputArea, ConversationSidebar, MessageList, MessageContent, MarkdownRenderer, ToolBlock, ToolMessage |
+| `components/modals/` | 6 | HITLConfirmModal, LongRunConfirmModal, RollbackOptionsModal, ConfirmModal, SimpleConfirmModal, AttachmentPreview |
+| `components/common/` | 4 | Card, DebugPanel, GuideOverlay, SplashScreen |
+| `components/workspace/` | 3 | FileExplorer, FilePreview, FileTreeNode |
+| `components/sidebar/` | 1 | PlanWidget |
+| `views/` | 6 | ChatView, SettingsView, SkillsView, KnowledgeView, OnboardingView, CreateProjectView |
+| `layouts/` | 2 | DashboardLayout, DefaultLayout |
+
+**Store 清单**：`conversation` / `session` / `agent` / `skill` / `workspace` / `connection` / `knowledge` / `ui` / `guide`
+
+**API 层清单**：`chat.ts` / `session.ts` / `agent.ts` / `skills.ts` / `models.ts` / `settings.ts` / `workspace.ts` / `config.ts` / `tauri.ts` / `index.ts`
+
+---
 
 ### 4.1 首次启动引导（3.1.3）— 9 步交互式教程
 
@@ -2005,32 +2104,37 @@ CreateProjectView（编辑模式）
 
 ---
 
-## 五、优先级建议（后端待办）
+## 五、优先级建议（测试驱动更新）
 
-### P0 — 核心体验缺口
+### P0 — 必须立即修复（测试暴露的 🔴 高严重度问题）
 
-| 项目 | 涉及文件 | 工作量 | 说明 |
-|------|----------|--------|------|
-| 停止生成功能修复 | `frontend/src/composables/useChat.ts` + `stores/session.ts` + `api/session.ts` | 小 | 暂停按钮点击后无效果，需排查 stopSession API 调用链路 |
-| Playbook 端到端串联 | `core/agent/base.py` + `core/events/broadcaster.py` + `routers/` | 中 | 串联剩余 3 条链路：DRAFT 生成 → 用户确认 → APPROVED（Hint 注入已完成） |
-| ~~实例创建 API~~ | ~~`routers/` + `utils/instance_loader.py`~~ | ~~小~~ | ✅ 前端创建+编辑流程已实现（CreateProjectView 双模式） |
-| 记忆混合检索权重 | `core/memory/xiaodazi_memory.py` | 小 | config 已声明 `vector_weight`/`bm25_weight`，recall 中应用 |
-| ProgressTransformer 集成 | `core/planning/` | 小 | 在 PlanTodoTool 步骤完成时自动调用 |
+| # | 项目 | 涉及文件 | 工作量 | 说明 |
+|---|------|----------|--------|------|
+| 1 | **Skills 三处数据对齐** | `instances/xiaodazi/skills/` + `skill_registry.yaml` + `config/skills.yaml` | 中 | 目录 68 / 注册 76 / 配置 99 严重不一致。需要：(a) 为 28 个已注册无目录的 Skill 创建 SKILL.md 或从注册中移除；(b) 为 20 个有目录无注册的 Skill 补充注册；(c) config 中 99 个配置与实际对齐 |
+| 2 | **E2E 测试用例实质化** | `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` + `scripts/run_e2e_auto.py` | 大 | turns=0 说明对话流程未定义。报告 6/6 PASS 但 grade_results 为空——需排查是评估引擎跳过了评分还是报告写入有 bug。**目前 E2E 无法作为质量保证手段** |
+| 3 | **Rollback E2E 修复** | `scripts/verify_rollback_e2e.py` + 测试数据 | 中 | 3 份 rollback_e2e 报告均 0/2 PASS。原文档声称"6/6 通过"需要重新验证。检查 B9/B10 是否因环境原因失败 |
+| 4 | **残留实例清理** | `instances/` | 小 | 清理 `b307fc3d`（仅1文件无config）、`xiaodazi_backup`（无prompt）、`42c0dcfb`、`820e1326`。删除 `tools/request_human_confirmation _copy.py` |
+| 5 | **旧存储路径清理** | `data/local_store/` | 小 | `data/local_store/xiaodazi/`（3文件）应已迁移到 `data/instances/xiaodazi/db/`，需确认后删除 |
 
-### P1 — 完善已有功能
+### P1 — 链路断裂修复
 
-| 项目 | 涉及文件 | 工作量 | 说明 |
-|------|----------|--------|------|
-| ~~知识检索语义搜索~~ | ~~`core/knowledge/local_search.py`~~ | ~~中~~ | ✅ 已完成（FTS5 + 向量混合搜索 + Embedding 抽象层） |
-| ~~E2E 测试用例扩展~~ | ~~`evaluation/suites/xiaodazi/e2e/`~~ | ~~中~~ | ✅ 已完成（4→6 用例，含 B9/B10 回滚验证 + Phase 0 + LLM-as-Judge） |
-| ~~Plan 桌面端适配~~ | ~~`prompts/` + `tools/plan_todo_tool.py`~~ | ~~中~~ | ✅ 已完成（渐进式展示 + 桌面工具表 + 文件安全提示） |
-| ~~实例存储隔离~~ | ~~`utils/app_paths.py` + 全组件改造~~ | ~~大~~ | ✅ 已完成（全组件 AGENT_INSTANCE 感知 + app_paths 路径管理） |
-| ~~memory_flush 后台任务~~ | ~~`utils/background_tasks/tasks/memory_flush.py`~~ | ~~小~~ | ✅ 已完成（会话级记忆提取 + 快速预过滤） |
-| ~~Skills 扩充~~ | ~~`instances/xiaodazi/skills/`~~ | ~~中~~ | ✅ 已完成（38→49 个 Skills，新增可视化/会议/效率类） |
-| 记忆文件监听同步 | `core/memory/` | 中 | watchdog 监听 MEMORY.md 变更 |
-| Playbook 语义匹配 | `core/playbook/manager.py` | 小 | 替换关键词匹配为 Mem0 语义搜索（LLM-First） |
-| B9/B10 Agent 评分提升 | `instances/xiaodazi/prompt.md` + Agent 行为优化 | 中 | Opus 评分 2.8/5，目标 4+/5（需 Agent 真正触达文件修改链路） |
-| DatabaseStorage 迁移 | `core/playbook/storage.py` | 小 | 将 DatabaseStorage 从已删除的 `infra.database` 迁移到 `infra/local_store` 或标记不可用 |
+| # | 项目 | 涉及文件 | 工作量 | 说明 |
+|---|------|----------|--------|------|
+| 6 | Playbook 端到端串联 | `core/agent/base.py` + `core/events/broadcaster.py` + `routers/` | 中 | `base.py` 需调用 `PlaybookManager.extract_from_session()`。3条链路：DRAFT生成→用户确认→APPROVED |
+| 7 | 停止生成功能修复 | `frontend/src/composables/useChat.ts` + `stores/session.ts` | 小 | 暂停按钮无效果 |
+| 8 | 记忆混合检索权重 | `core/memory/instance_memory.py` | 小 | config 已声明 `vector_weight`/`bm25_weight`，recall 中未应用 |
+| 9 | ProgressTransformer 集成 | `core/planning/` + `tools/plan_todo_tool.py` | 小 | PlanTodoTool 步骤完成时未调用 `transform_and_emit()` |
+| 10 | 前端 HITL 事件渲染 | `frontend/src/components/modals/` | 中 | backtrack_exhausted / intent_clarify / cost_limit / cost_warn 四类事件前端全部未处理 |
+
+### P2 — 已有功能完善
+
+| # | 项目 | 涉及文件 | 工作量 | 说明 |
+|---|------|----------|--------|------|
+| 11 | 记忆文件监听同步 | `core/memory/` | 中 | watchdog 监听 MEMORY.md 变更 |
+| 12 | Playbook 语义匹配 | `core/playbook/manager.py` | 小 | 替换关键词匹配为 Mem0 语义搜索（LLM-First） |
+| 13 | DatabaseStorage 迁移 | `core/playbook/storage.py` | 小 | DatabaseStorage 依赖已删除的 `infra.database`，需迁移或标记不可用 |
+| 14 | tool_registry.yaml 清理 | `config/tool_registry.yaml` | 小 | 文件仅有注释无内容（720字符空壳），工具注册实际在 capabilities.yaml。需决定保留还是删除 |
+| 15 | 文档模块名修正 | 本文档 + 所有引用 | 小 | `instance_memory` → `instance_memory` / `InstanceMemoryManager` → `InstanceMemoryManager` |
 
 ### Playbook 集成实施计划
 
@@ -2183,7 +2287,7 @@ playbook:
 | `infra/local_store/engine.py` | DB 路径从 `AGENT_INSTANCE` 自动解析到 `get_instance_db_dir()` |
 | `infra/storage/local.py` | 文件上传路径从 `AGENT_INSTANCE` 解析到 `get_instance_storage_dir()` |
 | `core/playbook/storage.py` | FileStorage 路径从 `AGENT_INSTANCE` 解析到 `get_instance_playbooks_dir()` |
-| `core/memory/xiaodazi_memory.py` | 记忆路径从 `AGENT_INSTANCE` 解析到 `get_instance_memory_dir()` |
+| `core/memory/instance_memory.py` | 记忆路径从 `AGENT_INSTANCE` 解析到 `get_instance_memory_dir()` |
 | `core/memory/markdown_layer.py` | 适配实例隔离路径 |
 | `core/memory/mem0/config.py` | Mem0 配置适配实例隔离 |
 | `core/memory/mem0/pool.py` | Mem0 Pool 适配实例隔离 |
@@ -2276,25 +2380,82 @@ playbook:
 |------|------|
 | `infra/local_store/generic_fts.py` | 通用 FTS5 全文搜索引擎 |
 | `core/memory/markdown_layer.py` | MEMORY.md 文件层 |
-| `core/memory/xiaodazi_memory.py` | 三层记忆架构入口 |
+| `core/memory/instance_memory.py` | 三层记忆架构入口 |
 | `core/knowledge/local_search.py` | FTS5 搜索实现 |
 | `core/knowledge/file_indexer.py` | 增量文件索引 |
 | `core/termination/adaptive.py` | 八维度终止 + HITL |
 | `core/state/consistency_manager.py` | 快照/回滚完整实现 |
 | `core/events/broadcaster.py` | rollback + progress 事件 |
 
-### 验证结果
+### 验证结果（第四次更新 — 2026-02-09 测试驱动）
 
-| 验证脚本 | 结果 |
-|----------|------|
-| `scripts/verify_v11_architecture.py` | 119/119 通过 |
-| `scripts/verify_memory_knowledge.py` | 41/41 通过 |
-| `scripts/verify_rollback_e2e.py` | **6/6 通过**（B9.1-B9.3 + B10.1-B10.3） |
-| `scripts/verify_memory_persona_e2e.py` | 记忆 + 人格验证通过 |
-| `scripts/verify_session_memory_e2e.py` | 会话记忆验证通过 |
-| `python -c "from main import app"` | 路由正常加载 |
-| `scripts/run_e2e_auto.py --case B9 --provider claude` | **PASS**（Opus 评分 2.8/5，task_completed=true） |
-| `scripts/run_e2e_auto.py` | E2E Phase 1 6 用例可执行（需配置 LLM） |
+#### 自动化 import 验证
+
+| 验证项 | 结果 | 详情 |
+|--------|------|------|
+| 核心模块 import（64 个） | **63/64 通过** | ❌ `core.memory.instance_memory` 模块不存在（实际为 `core.memory.instance_memory`） |
+| FastAPI app 路由加载 | ✅ 72 端点正常 | 9 路由 + 8 服务 + WebSocket |
+
+#### Skills 数据一致性验证
+
+| 数据源 | 数量 | 状态 |
+|--------|------|------|
+| `instances/xiaodazi/skills/` 目录 | 68 个（全部含 SKILL.md） | ✅ |
+| `skill_registry.yaml` 注册 | 76 个 | ⚠️ 28 个已注册但无目录（多为 MCP 远程 Skill） |
+| `config/skills.yaml` 配置 | 99 个 | ⚠️ 与目录差距 31 个 |
+| `skill_groups` 分组覆盖 | 92 个（21 个分组） | ⚠️ |
+| 有目录但未在 registry 注册 | 20 个 | ❌ 如 deep-research, pdf-toolkit, smart-email-assistant 等 |
+| 已注册但无目录 | 28 个 | ⚠️ 如 notion, github, weather, peekaboo, browser 等（多为 MCP 或远程工具） |
+
+#### 关键链路断裂验证
+
+| 链路 | 状态 | 详情 |
+|------|------|------|
+| IntentAnalyzer → SkillGroupRegistry | ✅ 通过 | V12.0 链路正常 |
+| ChatService → memory_flush | ✅ 通过 | 后台任务链路正常 |
+| main.py → knowledge 索引 | ✅ 通过 | 启动时调用 index_configured |
+| base.py → PlaybookManager | ❌ 断裂 | base.py 不调用 extract_from_session()，Playbook 无数据源 |
+| PlaybookHintInjector → Playbook 数据 | ⚠️ 空转 | 注入器代码正常，但无 APPROVED Playbook 可注入 |
+
+#### E2E 评估报告验证
+
+| 报告 | 结果 | 问题 |
+|------|------|------|
+| `e2e_phase1_20260209_125850.json` | 6/6 PASS | ⚠️ **grade_results 为空**，无评分详情 |
+| `e2e_phase1_20260209_123315.json` | 6/6 PASS | ⚠️ **同上** |
+| `rollback_e2e_20260208_212613.json` | 0/2 PASS | ❌ 历史 |
+| `rollback_e2e_20260208_212759.json` | 0/2 PASS | ❌ 历史 |
+| `rollback_e2e_20260208_222803.json` | 0/2 PASS | ❌ 历史 |
+| `rollback_e2e_20260209_160621.json` | **2/2 PASS** | ✅ B9/B10 共 6 子场景通过 |
+| E2E tasks turns | 6 个用例 turns=0 | ❌ **对话流程未定义** |
+
+> **结论**：E2E 报告的 6/6 PASS 不可信——用例对话为空，评分详情缺失。Rollback E2E 最新报告（20260209_160621）已 2/2 PASS；用户侧「没有快照恢复」根因是实例未启用 state_consistency，已通过 config.yaml 修复。
+
+#### 实例目录状态
+
+| 实例 | config.yaml | prompt.md | .env | 文件数 | 状态 |
+|------|-------------|-----------|------|--------|------|
+| `xiaodazi` | ✅ | ✅ | ✅ | 9 | 主实例 |
+| `_template` | ✅ | ✅ | — | 6 | 脚手架模板 |
+| `42c0dcfb` | ❌ | ✅ | — | 3 | ⚠️ 残留，缺 config |
+| `820e1326` | ❌ | ✅ | — | 3 | ⚠️ 残留，缺 config |
+| `xiaodazi_backup` | ✅ | ❌ | ✅ | 3 | ⚠️ 残留备份 |
+| `b307fc3d` | ❌ | ❌ | — | 1 | ⚠️ 残留，仅 1 文件 |
+
+#### 遗留文件
+
+| 文件 | 问题 |
+|------|------|
+| `tools/request_human_confirmation _copy.py` | 文件名含空格的副本文件，应删除 |
+| `data/local_store/xiaodazi/` | 旧存储路径残留（3 文件），应已迁移到 `data/instances/` |
+
+#### 之前的验证结果（未重新运行，仅供参考）
+
+| 验证脚本 | 历史结果 | 本次是否验证 |
+|----------|---------|-------------|
+| `scripts/verify_v11_architecture.py` | 119/119 通过 | 未重新运行 |
+| `scripts/verify_memory_knowledge.py` | 41/41 通过 | 未重新运行 |
+| `scripts/verify_rollback_e2e.py` | 声称 6/6 通过 | ⚠️ 与报告矛盾，需重跑 |
 
 ### 实例存储隔离改造涉及文件汇总
 
@@ -2302,7 +2463,7 @@ playbook:
 |------|------|---------|
 | 主数据库 | `infra/local_store/engine.py` | `get_instance_db_dir()` |
 | 文件上传 | `infra/storage/local.py` | `get_instance_storage_dir()` |
-| 记忆文件 | `core/memory/xiaodazi_memory.py` | `get_instance_memory_dir()` |
+| 记忆文件 | `core/memory/instance_memory.py` | `get_instance_memory_dir()` |
 | Mem0 向量 | `core/memory/mem0/sqlite_vec_store.py` | `get_instance_store_dir()` |
 | FTS 索引 | `core/memory/mem0/config.py` | `get_instance_store_dir()` |
 | Playbook | `core/playbook/storage.py` | `get_instance_playbooks_dir()` |

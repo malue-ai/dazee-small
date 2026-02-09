@@ -1,9 +1,11 @@
 # ============================================================
-# 记忆与知识检索配置
+# 记忆、知识检索与状态一致性配置
 # ============================================================
 #
-# 控制 Agent 的记忆能力和知识检索方式。
-# 普通用户只需关注 semantic_search.mode 即可。
+# 包含三部分：
+#   1. semantic_search — 语义搜索（知识检索方式）
+#   2. memory          — 用户记忆（跨对话持久保存偏好/习惯）
+#   3. state_consistency — 文件操作安全网（快照 → 回滚）
 #
 # ============================================================
 
@@ -40,3 +42,28 @@ semantic_search:
 #
 memory:
   enabled: true           # 是否启用用户记忆
+  mem0_enabled: true      # 是否启用 Mem0 向量记忆
+  smart_retrieval: true   # 是否启用智能检索（语义相关性过滤）
+  retention_policy: user  # 记忆保留策略: user | session | project
+
+# ==================== 状态一致性（文件安全网）====================
+#
+# 操作本地文件前自动快照，异常/用户中止时可回滚恢复。
+# 文档承诺：「修改前自动备份，出错自动恢复」
+#
+# 快照存储位置：
+#   storage_path 留空 → 自动使用实例隔离路径
+#   例: data/instances/xiaodazi/snapshots/
+#
+state_consistency:
+  enabled: true
+  snapshot:
+    # storage_path 留空则使用实例隔离路径 data/instances/xiaodazi/snapshots/
+    retention_hours: 24     # 快照保留时间（小时），超过自动清理
+    capture_files: true     # 工具执行前自动备份即将修改的文件
+    capture_cwd: true       # 记录当前工作目录
+    capture_clipboard: false # 不备份剪贴板（隐私考虑）
+  rollback:
+    auto_rollback_on_consecutive_failures: 3   # 连续失败 N 次后自动回滚
+    auto_rollback_on_critical_error: true      # 严重错误（OOM 等）立即回滚
+    rollback_timeout_seconds: 60               # 回滚操作超时保护

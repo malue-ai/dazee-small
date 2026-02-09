@@ -336,6 +336,7 @@ class StateConsistencyManager:
                 snap.file_contents[file_path] = content
                 if file_path not in snap.affected_files:
                     snap.affected_files.append(file_path)
+                self._persist_snapshot(snap)
                 logger.debug(f"动态捕获文件到快照: {file_path}, task={task_id}")
                 return True
         except Exception as e:

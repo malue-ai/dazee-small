@@ -491,6 +491,7 @@ def _extract_paths_from_tokens(tokens: List[str]) -> List[str]:
     """
     import os
 
+    cwd = os.getcwd()
     paths: List[str] = []
     for token in tokens:
         if token.startswith("-"):
