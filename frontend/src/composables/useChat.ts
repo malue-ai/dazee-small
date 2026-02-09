@@ -9,6 +9,8 @@ import { useConversationStore } from '@/stores/conversation'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connection'
+import { useAgentStore } from '@/stores/agent'
+import { useNotificationStore } from '@/stores/notification'
 import { useHITL } from './useHITL'
 import type {
   UIMessage,
@@ -250,9 +252,12 @@ export function useChat() {
       // 获取当前会话的 WebSocket 连接
       const ws = connectionStore.getConnection(targetConvId)
 
+      // Capture agentId at send time (route may change if user navigates away)
+      const sendAgentId = options.agentId || (route.params.agentId as string) || ''
+
       // 通过 WebSocket 发送消息
       const result = await ws.connect(requestBody, {
-        onEvent: (event) => handleStreamEvent(event, assistantMsg, targetConvId),
+        onEvent: (event) => handleStreamEvent(event, assistantMsg, targetConvId, sendAgentId),
         onConnected: () => {
           console.log(`✅ WebSocket 流开始 (${targetConvId})`)
         },
@@ -440,8 +445,10 @@ export function useChat() {
 
   /**
    * 处理流事件
+   *
+   * @param agentId - 发送消息时捕获的 agentId（用于离开会话后推送通知）
    */
-  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage, convId?: string): void {
+  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage, convId?: string, agentId?: string): void {
     const { type, data } = event
 
     // 处理 session 开始事件
@@ -546,6 +553,19 @@ export function useChat() {
     // 处理流结束/消息结束
     if ((type === 'message_stop' || type === 'session_stopped' || type === 'error') && convId) {
        sessionStore.markCompleted(convId)
+
+       // 用户不在当前会话时，推送全局通知
+       if (convId !== conversationStore.currentId && type !== 'error') {
+         const notifStore = useNotificationStore()
+         const agentStore = useAgentStore()
+         const agent = agentId ? agentStore.agents.find(a => a.agent_id === agentId) : null
+         const title = agent?.name || '新消息'
+         const preview = msg.content?.slice(0, 80) || '回复已完成'
+         const routeTarget = agentId
+           ? { name: 'agent-conversation', params: { agentId, conversationId: convId } }
+           : { name: 'conversation', params: { conversationId: convId } }
+         notifStore.chatMessage(title, preview, routeTarget)
+       }
     }
 
     // V11: 回滚选项

@@ -140,27 +140,6 @@
         </div>
       </div>
 
-      <!-- 创建进度条 -->
-      <Transition name="toast">
-        <div v-if="isCreating && !isEditMode && createProgress.step > 0" class="mx-6 mt-3">
-          <div class="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted/50 border border-border">
-            <Loader2 class="w-4 h-4 animate-spin text-primary flex-shrink-0" />
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-xs text-muted-foreground">{{ createProgress.message }}</span>
-                <span class="text-xs text-muted-foreground tabular-nums">{{ createProgress.step }}/{{ createProgress.total }}</span>
-              </div>
-              <div class="w-full h-1 rounded-full bg-muted overflow-hidden">
-                <div
-                  class="h-full rounded-full bg-primary transition-all duration-500 ease-out"
-                  :style="{ width: `${(createProgress.step / createProgress.total) * 100}%` }"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-
       <!-- 错误提示 -->
       <Transition name="toast">
         <div 
@@ -470,6 +449,7 @@ import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save, FolderOpen } from 'lucide-vue-next'
 import { useAgentStore } from '@/stores/agent'
+import { useAgentCreationStore } from '@/stores/agentCreation'
 import { useGuideStore } from '@/stores/guide'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
 import { modelApi, type ModelInfo } from '@/api/models'
@@ -483,6 +463,7 @@ import type { ChatRequest } from '@/types'
 const router = useRouter()
 const route = useRoute()
 const agentStore = useAgentStore()
+const agentCreationStore = useAgentCreationStore()
 const guideStore = useGuideStore()
 const ws = useWebSocketChat()
 
@@ -1030,68 +1011,37 @@ function startTypewriter(text: string) {
 /** 创建中状态 */
 const isCreating = ref(false)
 
-/** SSE 进度状态 */
-const createProgress = reactive({
-  step: 0,
-  total: 7,
-  message: '',
-})
-
-/** SSE 超时（300 秒，preload_instance 涉及多次串行 LLM 调用，通常需要 3~4 分钟） */
-const CREATE_TIMEOUT_MS = 300_000
-
-/** 重置进度状态 */
-function resetProgress() {
-  createProgress.step = 0
-  createProgress.total = 7
-  createProgress.message = ''
-}
-
-/** 创建项目（SSE 流式进度推送） */
+/** 创建项目（异步模式：POST 立即返回，WS 推送进度到全局通知卡片） */
 async function handleCreate() {
   if (!canCreate.value || isCreating.value) return
 
   isCreating.value = true
-  resetProgress()
-
-  const abortController = new AbortController()
-  const timer = setTimeout(() => abortController.abort(), CREATE_TIMEOUT_MS)
 
   try {
-    const detail = await agentStore.createAgent(
-      {
-        name: form.name.trim(),
-        description: form.description.trim(),
-        prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`,
-        ...(form.model ? { model: form.model } : {}),
-        ...(form.dataDir.trim() ? { data_dir: form.dataDir.trim() } : {})
-      },
-      (step, total, message) => {
-        createProgress.step = step
-        createProgress.total = total
-        createProgress.message = message
-      },
-      abortController.signal,
-    )
+    const { agent_id, name } = await agentStore.createAgent({
+      name: form.name.trim(),
+      description: form.description.trim(),
+      prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`,
+      ...(form.model ? { model: form.model } : {}),
+      ...(form.dataDir.trim() ? { data_dir: form.dataDir.trim() } : {})
+    })
+
+    // Start tracking creation progress (global notification + WS)
+    agentCreationStore.startCreation(agent_id, name)
 
     // 引导完成
     if (guideStore.isActive) {
       guideStore.completeGuide()
     }
 
-    // 创建成功，跳转到 Agent 对话页
-    router.replace({ name: 'agent', params: { agentId: detail.agent_id } })
+    // 立即返回首页，通知卡片会在右上角显示创建进度
+    router.replace({ name: 'chat' })
   } catch (error: any) {
     console.error('❌ 创建项目失败:', error)
-    const isTimeout = error?.name === 'AbortError'
-    const msg = isTimeout
-      ? '连接超时，但创建可能仍在后台进行中。请返回项目列表查看。'
-      : (error?.response?.data?.detail || error?.message || '未知错误')
-    showError(isTimeout ? msg : `创建失败：${msg}`)
+    const msg = error?.response?.data?.detail?.message || error?.response?.data?.detail || error?.message || '未知错误'
+    showError(`创建失败：${msg}`)
   } finally {
-    clearTimeout(timer)
     isCreating.value = false
-    resetProgress()
   }
 }
 
@@ -1191,7 +1141,7 @@ onMounted(() => {
 onUnmounted(() => {
   // 移除事件监听
   document.removeEventListener('click', handleClickOutside)
-  // 页面离开时关闭 WebSocket 连接
+  // 页面离开时关闭 WebSocket 连接（聊天引导用的 WS）
   ws.close()
   if (errorTimer) clearTimeout(errorTimer)
   if (typewriterTimer) clearInterval(typewriterTimer)

@@ -107,41 +107,21 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
-   * 创建 Agent（SSE 流式进度推送）
+   * 创建 Agent（异步模式）
+   *
+   * POST 立即返回 agent_id，后台异步 preload。
+   * 进度通过 agentCreation store 的 WebSocket 推送到全局通知卡片。
    *
    * @param data - 创建请求参数
-   * @param onProgress - 进度回调 (step, total, message)
-   * @param signal - AbortController signal for timeout/cancel
+   * @returns { agent_id, name, status: "creating" }
    */
-  async function createAgent(
-    data: AgentCreateRequest,
-    onProgress?: (step: number, total: number, message: string) => void,
-    signal?: AbortSignal,
-  ): Promise<AgentDetail> {
+  async function createAgent(data: AgentCreateRequest): Promise<{ agent_id: string; name: string }> {
     try {
-      let detail: AgentDetail
-
-      if (onProgress) {
-        // SSE mode: stream progress events
-        detail = await agentApi.createAgentSSE(data, onProgress, signal)
-      } else {
-        // Fallback: original JSON mode
-        detail = await agentApi.createAgent(data)
-      }
-
-      // 初始化映射
-      agentConversations.value[detail.agent_id] = []
-      agentOpenTabs.value[detail.agent_id] = []
-      saveMapping(AGENT_CONVERSATIONS_KEY, agentConversations.value)
-      saveMapping(AGENT_OPEN_TABS_KEY, agentOpenTabs.value)
-
-      // 刷新列表
-      await fetchList()
-
-      storeLog.info(`Agent 创建成功: ${detail.agent_id}`)
-      return detail
+      const result = await agentApi.createAgent(data)
+      storeLog.info(`Agent 创建已提交: ${result.agent_id}`)
+      return { agent_id: result.agent_id, name: result.name }
     } catch (error) {
-      storeLog.error('创建 Agent 失败', error)
+      storeLog.error('提交 Agent 创建失败', error)
       throw error
     }
   }

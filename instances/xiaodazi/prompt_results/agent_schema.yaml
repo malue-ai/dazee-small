@@ -1,5 +1,5 @@
-name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱，擅长本地桌面任务执行与个性化服务
+name: 小搭子
+description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱的本地桌面助手
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,17 +7,17 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_management
+  - file_operation
   - writing
   - data_analysis
   - translation
-  - ui_automation
-  - email
-  - reporting
+  - app_automation
+  - memory_recall
+  - preference_adaptation
   output_formats:
-  - text
-  - markdown
+  - natural_language
   - structured_list
+  - table
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,7 +25,7 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
+  trigger_condition: complexity == 'complex' or requires_multiple_skills or involves_ui_operations
   max_steps: 20
   granularity: fine
   allow_dynamic_adjustment: true
@@ -36,14 +36,17 @@ plan_manager:
   failure_threshold: 0.4
 tool_selector:
   enabled: true
-  available_tools: []
+  available_tools:
+  - nodes
+  - knowledge_search
+  - HITL
+  - plan-todo
+  - desktop_automation
   selection_strategy: capability_based
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - nodes
-  - knowledge_search
-  - hitl
+  - HITL
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -68,33 +71,13 @@ output_formatter:
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills:
-- name: excel-generator
-  enabled: true
-  description: ''
-- name: pdf-generator
-  enabled: true
-  description: ''
-- name: ppt-generator
-  enabled: true
-  description: ''
-- name: file-organizer
-  enabled: true
-  description: ''
-- name: translation
-  enabled: true
-  description: ''
-- name: writing-assistant
-  enabled: true
-  description: ''
-- name: ui-automator
-  enabled: true
-  description: ''
+skills: []
 tools:
-- web_search
 - nodes
 - knowledge_search
-- hitl
+- HITL
+- plan-todo
+- desktop_automation
 model: qwen3-max
 max_turns: 25
 execution_strategy: rvr
@@ -109,5 +92,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（如文件整理、UI操作、多步规划），强调主动性、记忆复用和安全交互。需启用细粒度规划、用户级记忆、HITL确认机制，并支持多种文档生成技能。任务常涉及多步骤执行与失败重试，故
-  max_turns 和 max_steps 较高。
+reasoning: 作为本地桌面 AI 搭子，需支持复杂任务规划（如文件整理+UI操作）、主动记忆用户偏好、安全执行本地操作，并在技能缺失时通过 HITL 引导安装或提供替代方案。强调细粒度规划、用户记忆持久化、人话交互和行动优先原则，因此启用
+  intent_analyzer、plan_manager（细粒度）、memory_manager（user 级别）和关键工具集。

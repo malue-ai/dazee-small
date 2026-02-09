@@ -18,6 +18,7 @@ ScheduledTask Tool - 定时任务管理工具
 - "取消那个喝水提醒" → cancel, task_id="..."
 """
 
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,11 @@ from core.tool.types import BaseTool, ToolContext
 from logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _get_instance_name() -> str:
+    """Get current instance name from environment variable."""
+    return os.getenv("AGENT_INSTANCE", "default")
 
 
 class ScheduledTaskTool(BaseTool):
@@ -193,7 +199,7 @@ class ScheduledTaskTool(BaseTool):
             from infra.local_store import get_workspace
             from infra.local_store.crud.scheduled_task import create_scheduled_task
 
-            workspace = await get_workspace("xiaodazi")
+            workspace = await get_workspace(_get_instance_name())
 
             async with workspace._session_factory() as session:
                 task = await create_scheduled_task(
@@ -243,7 +249,7 @@ class ScheduledTaskTool(BaseTool):
             from infra.local_store import get_workspace
             from infra.local_store.crud.scheduled_task import list_user_tasks
 
-            workspace = await get_workspace("xiaodazi")
+            workspace = await get_workspace(_get_instance_name())
 
             async with workspace._session_factory() as session:
                 tasks = await list_user_tasks(session, user_id, status="active")
@@ -298,7 +304,7 @@ class ScheduledTaskTool(BaseTool):
             from infra.local_store import get_workspace
             from infra.local_store.crud.scheduled_task import cancel_task, get_scheduled_task
 
-            workspace = await get_workspace("xiaodazi")
+            workspace = await get_workspace(_get_instance_name())
 
             async with workspace._session_factory() as session:
                 # 先获取任务信息
@@ -343,7 +349,7 @@ class ScheduledTaskTool(BaseTool):
             from infra.local_store import get_workspace
             from infra.local_store.crud.scheduled_task import get_scheduled_task, update_task
 
-            workspace = await get_workspace("xiaodazi")
+            workspace = await get_workspace(_get_instance_name())
 
             async with workspace._session_factory() as session:
                 # 先获取任务信息

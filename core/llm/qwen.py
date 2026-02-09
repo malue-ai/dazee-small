@@ -43,7 +43,7 @@ LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", 
 # 千问配置和常量
 # ============================================================
 
-QWEN_MAX_TOKENS = 32768  # 千问模型单次响应的 max_tokens 上限
+QWEN_MAX_TOKENS = 65536  # 千问模型单次响应的 max_tokens 上限（qwen3-max 官方最大值）
 
 
 @dataclass
@@ -462,7 +462,7 @@ class QwenLLMService(BaseLLMService):
         openai_messages = converted["messages"]
 
         # 构建请求参数
-        # ⚠️ 千问限制: max_tokens 不能超过 8192
+        # ⚠️ 千问限制: max_tokens 不能超过 QWEN_MAX_TOKENS (65536)
         max_tokens = min(kwargs.get("max_tokens", self.config.max_tokens), QWEN_MAX_TOKENS)
         request_params = {
             "model": self.config.model,
@@ -581,7 +581,7 @@ class QwenLLMService(BaseLLMService):
         openai_messages = converted["messages"]
 
         # 构建请求参数
-        # ⚠️ 千问限制: max_tokens 不能超过 8192
+        # ⚠️ 千问限制: max_tokens 不能超过 QWEN_MAX_TOKENS (65536)
         max_tokens = min(kwargs.get("max_tokens", self.config.max_tokens), QWEN_MAX_TOKENS)
         request_params = {
             "model": self.config.model,

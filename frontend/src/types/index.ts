@@ -107,5 +107,11 @@ export type {
   AgentMCPTool,
   AgentAPI,
   AgentCreateRequest,
-  AgentUpdateRequest
+  AgentCreateResponse,
+  AgentUpdateRequest,
+  AgentCreationProgressEvent,
+  AgentCreationCompleteEvent,
+  AgentCreationErrorEvent,
+  AgentCreationPingEvent,
+  AgentCreationEvent
 } from './agent'

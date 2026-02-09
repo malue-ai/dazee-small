@@ -12,6 +12,8 @@
     <DebugPanel v-if="isDev" />
     <!-- 全局引导浮层 -->
     <GuideOverlay />
+    <!-- 全局通知中心（Agent 创建进度、聊天消息提醒等） -->
+    <NotificationCenter />
   </template>
 </template>
 
@@ -23,6 +25,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
 import SplashScreen from '@/components/common/SplashScreen.vue'
 import GuideOverlay from '@/components/common/GuideOverlay.vue'
+import NotificationCenter from '@/components/common/NotificationCenter.vue'
 
 const route = useRoute()
 

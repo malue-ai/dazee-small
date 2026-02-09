@@ -93,3 +93,45 @@ export interface AgentUpdateRequest {
   /** 自定义数据存储目录（绝对路径），不填则使用默认路径 */
   data_dir?: string
 }
+
+// ==================== 创建响应（异步模式） ====================
+
+export interface AgentCreateResponse {
+  success: boolean
+  agent_id: string
+  name: string
+  status: 'creating'
+}
+
+// ==================== WebSocket 创建进度事件 ====================
+
+export interface AgentCreationProgressEvent {
+  type: 'progress'
+  step: number
+  total: number
+  message: string
+}
+
+export interface AgentCreationCompleteEvent {
+  type: 'complete'
+  agent_id: string
+  name: string
+  success: boolean
+  [key: string]: unknown
+}
+
+export interface AgentCreationErrorEvent {
+  type: 'error'
+  code: string
+  message: string
+}
+
+export interface AgentCreationPingEvent {
+  type: 'ping'
+}
+
+export type AgentCreationEvent =
+  | AgentCreationProgressEvent
+  | AgentCreationCompleteEvent
+  | AgentCreationErrorEvent
+  | AgentCreationPingEvent

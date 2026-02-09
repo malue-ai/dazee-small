@@ -7,12 +7,12 @@ intent_analyzer:
   - medium
   task_types:
   - code_formatting
-  - style_normalization
+  - style_enforcement
   - syntax_beautification
   output_formats:
   - code_block
   - diff
-  - plain_text
+  - summary
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -20,7 +20,7 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: input_contains_code
+  trigger_condition: input.contains_code
   max_steps: 8
   granularity: medium
   allow_dynamic_adjustment: true
@@ -34,7 +34,7 @@ tool_selector:
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 3
+  max_parallel_tools: 1
   base_tools:
   - plan_todo
   tool_timeout: 300
@@ -77,5 +77,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 该 Agent 专注于代码格式化，不依赖外部工具或复杂技能，但需智能识别语言、选择规范并执行结构化美化。任务流程明确（接收→识别→规范→格式化→输出），适合中等粒度规划；无需网络搜索或文件系统访问，故
-  tool_selector 禁用。输出必须为带语法高亮的代码块，因此启用 output_formatter。会话级记忆用于记住用户自定义配置（如缩进偏好），提升交互效率。
+reasoning: 该 Agent 专注于代码格式化任务，需准确识别语言和规范，执行确定性美化操作。无需外部工具（如搜索或 API），但需要结构化工作流（计划管理）以处理语言检测、规范选择、格式化和输出等步骤。输出必须为带语法高亮的代码块，因此启用
+  output_formatter。内存用于暂存用户偏好（如缩进大小），但无需长期记忆。

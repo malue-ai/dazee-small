@@ -67,6 +67,29 @@ agent: {}
 #   data_dir: "/path/to/your/custom/data"
 #
 
+# ==================== 状态一致性（文件快照与回滚） ====================
+#
+# Agent 执行文件操作前自动创建快照，异常时可自动或手动回滚。
+# 快照存储在：data/instances/{name}/snapshots/
+#
+
+state_consistency:
+  enabled: true
+  snapshot:
+    retention_hours: 24          # 快照保留时长（小时）
+    max_size_mb: 500             # 单次快照最大体积
+    capture_cwd: true            # 捕获工作目录
+    capture_files: true          # 捕获文件内容
+    capture_clipboard: true      # 捕获剪贴板（仅 macOS）
+  rollback:
+    auto_rollback_on_consecutive_failures: 3   # 连续失败 N 次自动回滚
+    auto_rollback_on_critical_error: true       # 严重错误自动回滚
+    rollback_timeout_seconds: 60               # 回滚超时
+  consistency_check:
+    pre_task_disk_space_mb: 100        # 前置检查：最低磁盘空间（MB）
+    pre_task_check_permissions: true   # 前置检查：文件权限
+    post_task_check_integrity: true    # 后置检查：文件完整性
+
 # ==================== 知识库 ====================
 
 knowledge:

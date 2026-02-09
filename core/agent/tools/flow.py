@@ -466,25 +466,145 @@ def create_tool_execution_flow() -> ToolExecutionFlow:
 
 # ==================== V11: 状态一致性钩子 ====================
 
+# 破坏性命令集合（纯确定性安全边界检查，非语义判断）
+_DESTRUCTIVE_COMMANDS = frozenset({
+    "rm", "rmdir", "mv", "chmod", "chown",
+    "truncate", "shred", "unlink",
+})
 
-def _extract_file_paths(tool_input: Dict[str, Any]) -> List[str]:
+# 写入类命令集合
+_WRITE_COMMANDS = frozenset({
+    "cp", "tee", "dd", "install",
+    "sed", "awk", "patch",
+})
+
+# 目录递归捕获的安全上限
+_DIR_CAPTURE_MAX_FILES = 200
+_DIR_CAPTURE_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _extract_paths_from_tokens(tokens: List[str]) -> List[str]:
     """
-    从工具输入中提取文件路径。
+    从 shell 命令 token 列表中提取文件/目录路径。
 
-    仅提取已存在的绝对路径或以 ~ 开头的路径（安全边界检查，非语义判断）。
+    仅提取以 / 或 ~ 开头且在磁盘上存在的路径（安全边界检查）。
     """
     import os
 
     paths: List[str] = []
-    for value in tool_input.values():
-        if not isinstance(value, str):
+    for token in tokens:
+        if token.startswith("-"):
             continue
-        # 绝对路径或 Home 路径
-        if value.startswith("/") or value.startswith("~"):
-            expanded = os.path.expanduser(value)
-            if os.path.isfile(expanded):
+        if token.startswith("/") or token.startswith("~"):
+            expanded = os.path.expanduser(token)
+            if os.path.exists(expanded):
                 paths.append(expanded)
     return paths
+
+
+def _detect_command_info(
+    tool_input: Dict[str, Any],
+) -> tuple:
+    """
+    从工具输入中检测 shell 命令类型和目标路径。
+
+    Returns:
+        (command_name, is_destructive, paths):
+            command_name: 命令名（如 "rm"），非 shell 命令时为 ""
+            is_destructive: 是否为破坏性命令
+            paths: 提取到的文件/目录路径列表
+    """
+    import os
+    import shlex
+
+    all_paths: List[str] = []
+    cmd_name = ""
+    is_destructive = False
+
+    for key, value in tool_input.items():
+        if isinstance(value, str):
+            # 直接路径值（如 {"path": "/Users/foo/file.txt"}）
+            if value.startswith("/") or value.startswith("~"):
+                expanded = os.path.expanduser(value)
+                if os.path.exists(expanded):
+                    all_paths.append(expanded)
+            else:
+                # 可能是 shell 命令字符串（如 "rm -rf /path/to/file"）
+                try:
+                    tokens = shlex.split(value)
+                except ValueError:
+                    continue
+                if len(tokens) >= 2:
+                    candidate_cmd = os.path.basename(tokens[0])
+                    if candidate_cmd in _DESTRUCTIVE_COMMANDS or candidate_cmd in _WRITE_COMMANDS:
+                        cmd_name = candidate_cmd
+                        is_destructive = candidate_cmd in _DESTRUCTIVE_COMMANDS
+                    all_paths.extend(_extract_paths_from_tokens(tokens))
+
+        elif isinstance(value, list):
+            # 命令数组（如 ["rm", "-rf", "/path/to/file"]）
+            str_tokens = [t for t in value if isinstance(t, str)]
+            if str_tokens:
+                candidate_cmd = os.path.basename(str_tokens[0])
+                if candidate_cmd in _DESTRUCTIVE_COMMANDS or candidate_cmd in _WRITE_COMMANDS:
+                    cmd_name = candidate_cmd
+                    is_destructive = candidate_cmd in _DESTRUCTIVE_COMMANDS
+                all_paths.extend(_extract_paths_from_tokens(str_tokens))
+
+    return cmd_name, is_destructive, all_paths
+
+
+def _extract_file_paths(tool_input: Dict[str, Any]) -> List[str]:
+    """
+    从工具输入中提取文件/目录路径。
+
+    支持：
+    1. 直接路径值（如 {"path": "/Users/foo/file.txt"}）
+    2. 命令数组（如 {"command": ["rm", "-rf", "/path"]}）
+    3. 命令字符串（如 {"command": "rm -rf /path"}）
+
+    仅提取已存在的绝对路径或 ~ 路径（安全边界检查，非语义判断）。
+    """
+    _, _, paths = _detect_command_info(tool_input)
+    return paths
+
+
+def _collect_dir_files(dir_path: str) -> List[str]:
+    """
+    递归收集目录下的所有文件路径，受安全上限约束。
+
+    Returns:
+        文件路径列表（截断到 _DIR_CAPTURE_MAX_FILES 且总大小不超过 _DIR_CAPTURE_MAX_BYTES）
+    """
+    import os
+
+    files: List[str] = []
+    total_size = 0
+
+    try:
+        for root, _dirs, filenames in os.walk(dir_path):
+            for fname in filenames:
+                if len(files) >= _DIR_CAPTURE_MAX_FILES:
+                    logger.debug(
+                        f"目录捕获达到文件数上限 {_DIR_CAPTURE_MAX_FILES}: {dir_path}"
+                    )
+                    return files
+                fpath = os.path.join(root, fname)
+                try:
+                    fsize = os.path.getsize(fpath)
+                except OSError:
+                    continue
+                if total_size + fsize > _DIR_CAPTURE_MAX_BYTES:
+                    logger.debug(
+                        f"目录捕获达到体积上限 {_DIR_CAPTURE_MAX_BYTES // (1024*1024)}MB: {dir_path}"
+                    )
+                    return files
+                total_size += fsize
+                files.append(fpath)
+    except OSError as e:
+        logger.debug(f"目录遍历失败 {dir_path}: {e}")
+
+    return files
 
 
 def _pre_capture_files(
@@ -492,16 +612,35 @@ def _pre_capture_files(
     tool_input: Dict[str, Any],
 ) -> None:
     """
-    工具执行前：提取 tool_input 中的文件路径，备份到状态快照。
+    工具执行前：提取 tool_input 中的文件/目录路径，备份到状态快照。
+
+    对破坏性命令（rm, mv 等）额外递归捕获目录内容。
     """
+    import os
+
     state_mgr = context.state_manager
     if not state_mgr:
         return
 
-    file_paths = _extract_file_paths(tool_input)
-    for fp in file_paths:
+    cmd_name, is_destructive, paths = _detect_command_info(tool_input)
+
+    for fp in paths:
         try:
-            state_mgr.ensure_file_captured(context.session_id, fp)
+            if os.path.isfile(fp):
+                state_mgr.ensure_file_captured(context.session_id, fp)
+            elif os.path.isdir(fp) and is_destructive:
+                # 破坏性命令针对目录时，递归捕获目录下所有文件
+                dir_files = _collect_dir_files(fp)
+                if dir_files:
+                    logger.info(
+                        f"破坏性命令 '{cmd_name}' 目标为目录，"
+                        f"预捕获 {len(dir_files)} 个文件: {fp}"
+                    )
+                for df in dir_files:
+                    try:
+                        state_mgr.ensure_file_captured(context.session_id, df)
+                    except Exception as e:
+                        logger.debug(f"目录内文件捕获跳过 {df}: {e}")
         except Exception as e:
             logger.debug(f"文件前置捕获跳过 {fp}: {e}")
 
@@ -515,23 +654,33 @@ def _post_record_operation(
     """
     工具执行后：将文件操作记录到操作日志。
 
-    通过检查 tool_input 中的文件路径判断是否涉及文件操作。
+    根据命令类型记录准确的操作类型（file_write / file_delete / file_rename）。
     """
+    import os
+
     state_mgr = context.state_manager
     if not state_mgr:
         return
 
-    file_paths = _extract_file_paths(tool_input)
-    if not file_paths:
+    cmd_name, is_destructive, paths = _detect_command_info(tool_input)
+    if not paths:
         return
 
     from core.state.operation_log import OperationRecord
 
-    for fp in file_paths:
+    # 根据命令名推断操作类型
+    if cmd_name in ("rm", "rmdir", "unlink", "shred"):
+        action = "file_delete"
+    elif cmd_name in ("mv",):
+        action = "file_rename"
+    else:
+        action = "file_write"
+
+    for fp in paths:
         try:
             record = OperationRecord(
                 operation_id=f"op_{tool_name}_{id(result)}",
-                action="file_write",
+                action=action,
                 target=fp,
                 before_state=None,  # 已在 pre_capture 中备份到快照
                 after_state=None,

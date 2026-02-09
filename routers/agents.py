@@ -1,22 +1,22 @@
 """
 Agent 管理路由
 
-提供 Agent CRUD 操作的 REST API
+提供 Agent CRUD 操作的 REST API + WebSocket 创建进度推送
 """
 
 import asyncio
-import json as json_lib
 import shutil
 import time
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Set
 
 import aiofiles
 import yaml
-from fastapi import APIRouter, Body, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Body, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from logger import get_logger
@@ -36,6 +36,101 @@ from utils.instance_loader import get_instances_dir
 logger = get_logger("router.agents")
 
 router = APIRouter(prefix="/api/v1/agents", tags=["Agent 管理"])
+
+
+# ============================================================
+# 创建任务追踪（内存级，支持 WebSocket 推送进度）
+# ============================================================
+
+
+@dataclass
+class CreationTask:
+    """Agent 创建任务状态"""
+
+    agent_id: str
+    agent_name: str
+    step: int = 0
+    total: int = 7
+    message: str = ""
+    status: str = "creating"  # creating | complete | error
+    error: str = ""
+    detail: Optional[dict] = None
+    subscribers: Set[asyncio.Queue] = field(default_factory=set)
+
+
+# agent_id → CreationTask（生命周期：创建开始 → 完成/失败后 120s 清理）
+_creation_tasks: Dict[str, CreationTask] = {}
+
+
+async def _notify_subscribers(task: CreationTask, event: dict):
+    """Push event to all WebSocket subscribers of a creation task."""
+    for queue in list(task.subscribers):
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+
+
+async def _background_preload(
+    agent_id: str,
+    agent_name: str,
+    registry,
+    instance_dir: Path,
+):
+    """
+    Background task: preload agent instance and push progress via WebSocket.
+
+    Runs as fire-and-forget — continues even if all WS subscribers disconnect.
+    """
+    task = _creation_tasks.get(agent_id)
+    if not task:
+        return
+
+    try:
+        async def progress_callback(step: int, message: str):
+            task.step = step
+            task.message = message
+            await _notify_subscribers(task, {
+                "type": "progress",
+                "step": step,
+                "total": task.total,
+                "message": message,
+            })
+
+        await registry.preload_instance(agent_id, progress_callback=progress_callback)
+
+        detail = registry.get_agent_detail(agent_id)
+        task.status = "complete"
+        task.step = task.total
+        task.message = "创建完成"
+        task.detail = detail
+
+        await _notify_subscribers(task, {
+            "type": "complete",
+            "agent_id": agent_id,
+            "name": agent_name,
+            "success": True,
+            **detail,
+        })
+        logger.info(f"✅ Agent '{agent_id}' 后台创建完成")
+
+    except Exception as e:
+        logger.error(f"后台创建 Agent '{agent_id}' 失败: {e}", exc_info=True)
+        if instance_dir.exists():
+            shutil.rmtree(instance_dir, ignore_errors=True)
+
+        task.status = "error"
+        task.error = str(e)
+        await _notify_subscribers(task, {
+            "type": "error",
+            "code": "CREATE_FAILED",
+            "message": str(e),
+        })
+
+    finally:
+        # Keep task for late WS subscribers, then clean up
+        await asyncio.sleep(120)
+        _creation_tasks.pop(agent_id, None)
 
 
 # ============================================================
@@ -596,11 +691,6 @@ async def _write_instance_files(
         await f.write(prompt_content)
 
 
-def _sse_event(data: dict) -> str:
-    """Format a dict as an SSE data line."""
-    return f"data: {json_lib.dumps(data, ensure_ascii=False)}\n\n"
-
-
 def _validate_create_request(request: AgentCreateRequest):
     """
     Validate create-agent request (model, agent_id, directory).
@@ -699,41 +789,26 @@ def _validate_create_request(request: AgentCreateRequest):
     summary="创建 Agent",
     description=(
         "创建新的 Agent 实例。"
-        "设置 Accept: text/event-stream 获取 SSE 流式进度推送，否则返回 JSON。"
+        "写入配置文件后立即返回 agent_id，后台异步执行 preload。"
+        "通过 WebSocket /ws/create/{agent_id} 接收实时创建进度。"
     ),
 )
 async def create_agent(request: AgentCreateRequest, raw_request: Request):
     """
-    创建 Agent
+    创建 Agent（异步模式）
 
     流程：
     1. 校验请求（名称、ID 唯一性等）
     2. 生成 config.yaml + prompt.md
     3. 写入 instances/{agent_id}/ 目录
-    4. 调用 registry.preload_instance() 热加载
-    5. 返回创建后的 Agent 详情
+    4. 后台异步执行 registry.preload_instance()
+    5. 立即返回 agent_id + status: "creating"
 
-    支持两种响应模式：
-    - JSON（默认）：同步等待完成后返回结果
-    - SSE（Accept: text/event-stream）：实时推送进度事件
+    前端通过 WS /api/v1/agents/ws/create/{agent_id} 实时获取创建进度。
     """
-    # Run validation before deciding response mode (raises HTTPException on error)
     registry, agent_id, instance_dir, config_data = _validate_create_request(request)
 
-    accept = raw_request.headers.get("accept", "")
-    use_sse = "text/event-stream" in accept
-
-    if use_sse:
-        return await _create_agent_sse(request, registry, agent_id, instance_dir, config_data)
-    else:
-        return await _create_agent_json(request, registry, agent_id, instance_dir, config_data)
-
-
-async def _create_agent_json(
-    request: AgentCreateRequest, registry, agent_id: str, instance_dir: Path, config_data: dict
-):
-    """Create agent with synchronous JSON response (original behavior)."""
-    # Write files
+    # Write files synchronously (fast, <1s)
     try:
         await _write_instance_files(
             instance_dir=instance_dir,
@@ -752,118 +827,118 @@ async def _create_agent_json(
             detail={"code": "WRITE_FAILED", "message": f"写入配置文件失败: {str(e)}"},
         )
 
-    # Load into registry
-    try:
-        await registry.preload_instance(agent_id)
-    except Exception as e:
-        if instance_dir.exists():
-            shutil.rmtree(instance_dir, ignore_errors=True)
-        logger.error(f"加载 Agent '{agent_id}' 失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "LOAD_FAILED", "message": f"Agent 创建成功但加载失败: {str(e)}"},
-        )
+    # Register creation task tracker
+    task = CreationTask(agent_id=agent_id, agent_name=request.name)
+    _creation_tasks[agent_id] = task
 
-    logger.info(f"✅ Agent '{agent_id}' 创建成功")
-    detail = registry.get_agent_detail(agent_id)
+    # Fire-and-forget: preload in background
+    asyncio.create_task(_background_preload(
+        agent_id=agent_id,
+        agent_name=request.name,
+        registry=registry,
+        instance_dir=instance_dir,
+    ))
+
+    logger.info(f"Agent '{agent_id}' 文件写入完成，后台开始 preload")
     return {
         "success": True,
         "agent_id": agent_id,
-        "message": f"Agent '{request.name}' 创建成功",
-        **detail,
+        "name": request.name,
+        "status": "creating",
     }
 
 
-async def _create_agent_sse(
-    request: AgentCreateRequest, registry, agent_id: str, instance_dir: Path, config_data: dict
-):
-    """Create agent with SSE streaming progress events."""
-    TOTAL_STEPS = 7
-    # Heartbeat interval to keep SSE connection alive during long LLM calls
-    HEARTBEAT_INTERVAL_S = 10
+@router.websocket("/ws/create/{agent_id}")
+async def ws_agent_create_progress(websocket: WebSocket, agent_id: str):
+    """
+    WebSocket endpoint for real-time agent creation progress.
 
-    async def event_generator():
-        queue: asyncio.Queue = asyncio.Queue()
+    Frontend connects after POST /api/v1/agents returns the agent_id.
+    Events pushed:
+      - {"type": "progress", "step": N, "total": 7, "message": "..."}
+      - {"type": "complete", "agent_id": "...", "name": "...", ...}
+      - {"type": "error", "code": "...", "message": "..."}
+    """
+    await websocket.accept()
 
-        async def progress_callback(step: int, message: str):
-            await queue.put({"type": "progress", "step": step, "total": TOTAL_STEPS, "message": message})
+    task = _creation_tasks.get(agent_id)
+    if not task:
+        # No active creation task — maybe already complete and cleaned up
+        # Check if agent is loaded in registry
+        registry = get_agent_registry()
+        if registry.has_agent(agent_id):
+            detail = registry.get_agent_detail(agent_id)
+            await websocket.send_json({
+                "type": "complete",
+                "agent_id": agent_id,
+                "name": detail.get("name", ""),
+                "success": True,
+                **detail,
+            })
+        else:
+            await websocket.send_json({
+                "type": "error",
+                "code": "NO_TASK",
+                "message": f"没有进行中的创建任务: {agent_id}",
+            })
+        await websocket.close()
+        return
 
-        async def do_create():
-            """Run the full create+load pipeline, pushing events to the queue."""
+    # If task already finished, send final event immediately
+    if task.status == "complete" and task.detail:
+        await websocket.send_json({
+            "type": "complete",
+            "agent_id": agent_id,
+            "name": task.agent_name,
+            "success": True,
+            **task.detail,
+        })
+        await websocket.close()
+        return
+
+    if task.status == "error":
+        await websocket.send_json({
+            "type": "error",
+            "code": "CREATE_FAILED",
+            "message": task.error,
+        })
+        await websocket.close()
+        return
+
+    # Subscribe to live events
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    task.subscribers.add(queue)
+
+    try:
+        # Send current progress snapshot (for late subscribers)
+        if task.step > 0:
+            await websocket.send_json({
+                "type": "progress",
+                "step": task.step,
+                "total": task.total,
+                "message": task.message,
+            })
+
+        while True:
             try:
-                # Step 1: Write files
-                await queue.put({
-                    "type": "progress", "step": 1, "total": TOTAL_STEPS,
-                    "message": "写入配置文件...",
-                })
-                await _write_instance_files(
-                    instance_dir=instance_dir,
-                    config_data=config_data,
-                    prompt_content=request.prompt,
-                    agent_id=agent_id,
-                    name=request.name,
-                    description=request.description,
-                )
-
-                # Steps 2-6: Load instance (progress_callback pushes steps 2-6)
-                await registry.preload_instance(
-                    agent_id, progress_callback=progress_callback
-                )
-
-                # Step 7: Complete
-                detail = registry.get_agent_detail(agent_id)
-                await queue.put({
-                    "type": "complete",
-                    "step": TOTAL_STEPS,
-                    "total": TOTAL_STEPS,
-                    "message": "创建完成",
-                    "agent_id": agent_id,
-                    "success": True,
-                    **detail,
-                })
-            except Exception as e:
-                # Cleanup on failure
-                if instance_dir.exists():
-                    shutil.rmtree(instance_dir, ignore_errors=True)
-                logger.error(f"创建 Agent '{agent_id}' 失败: {e}", exc_info=True)
-                await queue.put({
-                    "type": "error",
-                    "code": "CREATE_FAILED",
-                    "message": str(e),
-                })
-
-        # Launch the create task in background.
-        # IMPORTANT: do NOT cancel on SSE disconnect — let creation finish.
-        task = asyncio.create_task(do_create())
-
-        try:
-            while True:
+                event = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                # Keepalive — send a ping frame
                 try:
-                    # Wait for event with heartbeat timeout
-                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_S)
-                except asyncio.TimeoutError:
-                    # No event within interval — send SSE comment as keepalive
-                    yield ": keepalive\n\n"
-                    continue
-
-                yield _sse_event(event)
-
-                if event["type"] in ("complete", "error"):
-                    yield "event: done\ndata: {}\n\n"
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
                     break
-        except (asyncio.CancelledError, GeneratorExit):
-            # Client disconnected — let the creation task continue in background
-            logger.info(f"SSE 连接断开，Agent '{agent_id}' 创建任务继续在后台执行")
+                continue
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+            await websocket.send_json(event)
+
+            if event.get("type") in ("complete", "error"):
+                break
+
+    except (WebSocketDisconnect, Exception):
+        logger.debug(f"WS 创建进度连接断开: agent_id={agent_id}")
+    finally:
+        task.subscribers.discard(queue)
 
 
 @router.put(

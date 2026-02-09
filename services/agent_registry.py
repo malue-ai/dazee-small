@@ -217,17 +217,30 @@ class AgentRegistry:
         遍历 instances/ 目录下的所有实例（排除 _template 等特殊目录），
         依次调用 preload_instance() 加载每个实例。
 
+        对于没有缓存 prompt_results 的实例（需要跑 LLM 生成），
+        推迟到后台异步加载，避免阻塞服务启动。
+
         Args:
             force_refresh: 是否强制刷新缓存
 
         Returns:
-            成功加载的实例数量
+            成功加载的实例数量（仅计算同步加载的）
         """
         instances = list_instances()
         loaded_count = 0
+        deferred: list[str] = []
 
         for instance_name in instances:
             try:
+                # Check if prompt_results are cached (fast path vs slow LLM path)
+                if not force_refresh and self._needs_llm_generation(instance_name):
+                    deferred.append(instance_name)
+                    logger.info(
+                        f"⏳ 实例 '{instance_name}' 需要 LLM 生成 prompt_results，"
+                        f"推迟到后台加载"
+                    )
+                    continue
+
                 success = await self.preload_instance(instance_name, force_refresh=force_refresh)
                 if success:
                     loaded_count += 1
@@ -236,7 +249,57 @@ class AgentRegistry:
                 continue
 
         self._loaded = loaded_count > 0
+
+        # Launch deferred instances in background (non-blocking)
+        if deferred:
+            logger.info(f"🔄 {len(deferred)} 个实例将在后台异步加载: {deferred}")
+            asyncio.create_task(self._deferred_load(deferred, force_refresh))
+
         return loaded_count
+
+    def _needs_llm_generation(self, instance_name: str) -> bool:
+        """
+        Check if an instance needs slow LLM generation (no cached prompt_results).
+
+        Quick synchronous check — only inspects the file system.
+        """
+        instance_path = get_instances_dir() / instance_name
+        prompt_results_dir = instance_path / "prompt_results"
+
+        if not prompt_results_dir.exists():
+            return True
+
+        # Check that at least the key files exist
+        required_files = [
+            "agent_schema.yaml",
+            "intent_prompt.md",
+            "medium_prompt.md",
+            "complex_prompt.md",
+        ]
+        for fname in required_files:
+            if not (prompt_results_dir / fname).exists():
+                return True
+
+        return False
+
+    async def _deferred_load(self, instance_names: list[str], force_refresh: bool):
+        """
+        Load deferred instances in background after the server is already accepting
+        requests. This prevents slow LLM generation from blocking startup.
+        """
+        for instance_name in instance_names:
+            try:
+                logger.info(f"🔄 后台加载实例: {instance_name}")
+                success = await self.preload_instance(
+                    instance_name, force_refresh=force_refresh
+                )
+                if success:
+                    logger.info(f"✅ 后台加载完成: {instance_name}")
+                else:
+                    logger.warning(f"⚠️ 后台加载失败: {instance_name}")
+            except Exception as e:
+                logger.warning(f"⚠️ 后台加载实例 '{instance_name}' 失败: {e}")
+                continue
 
     def get_current_instance(self) -> Optional[str]:
         """
