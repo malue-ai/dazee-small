@@ -202,6 +202,8 @@ const emit = defineEmits<{
 
 /** 用户是否手动滚动过 */
 const userHasScrolled = ref(false)
+/** 是否正在程序化滚动（防止 handleScroll 误判） */
+let isProgrammaticScroll = false
 
 // 思考计时器
 const thinkingDurations = ref<Record<string, number>>({})
@@ -337,10 +339,16 @@ function scrollToBottom(force = false): void {
 
   if (!containerRef.value) return
   
+  // 标记为程序化滚动，防止 handleScroll 误判为用户手动滚动
+  isProgrammaticScroll = true
   nextTick(() => {
     if (containerRef.value) {
       containerRef.value.scrollTop = containerRef.value.scrollHeight
     }
+    // 延迟重置标记，确保 scroll 事件处理完毕
+    requestAnimationFrame(() => {
+      isProgrammaticScroll = false
+    })
   })
 }
 
@@ -358,8 +366,8 @@ function handleScroll(): void {
   if (isAtBottom) {
     // 如果在底部，重置滚动状态
     userHasScrolled.value = false
-  } else if (scrollTop < scrollHeight - clientHeight - 100) {
-    // 如果不在底部（且不是刚加载完更多消息导致的位置变化），标记为已手动滚动
+  } else if (!isProgrammaticScroll && scrollTop < scrollHeight - clientHeight - 100) {
+    // 如果不在底部，且不是程序化滚动触发的事件，标记为已手动滚动
     // 注意：加载更多消息时也会触发 scroll 事件，需要通过 loadingMore 排除
     if (!props.loadingMore) {
       userHasScrolled.value = true
@@ -402,17 +410,18 @@ function getScrollHeight(): number {
 watch(
   () => props.messages.length,
   (newLen, oldLen) => {
-    // 如果是新消息（长度增加），强制滚动
-    // 如果是加载更多历史消息（长度增加但 scrollTop 位置不变），不强制滚动
-    // 这里简单判断：如果是加载更多，loadingMore 会为 true（但 watch 触发时 loadingMore 可能已经变了）
-    // 通常发送新消息时我们需要强制滚动
-    
-    // 简单的策略：只要长度变化，尝试滚动（scrollToBottom 内部会检查 userHasScrolled）
-    // 如果是用户发送的消息（最后一条是 user），强制滚动
-    const lastMsg = props.messages[props.messages.length - 1]
-    const isUserMsg = lastMsg?.role === 'user'
-    
-    scrollToBottom(isUserMsg)
+    if (newLen <= (oldLen ?? 0)) return // 非新增消息（如清空），不处理
+
+    // 新消息增加时，强制滚动到底部
+    // 包括：用户发送消息、assistant 回复消息添加
+    // 加载更多历史消息时 loadingMore 为 true，不强制滚动
+    if (props.loadingMore) {
+      scrollToBottom(false)
+    } else {
+      // 重置手动滚动标记，确保后续流式内容也能自动滚动
+      userHasScrolled.value = false
+      scrollToBottom(true)
+    }
   }
 )
 

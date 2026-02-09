@@ -27,12 +27,14 @@ export interface GuideStepConfig {
   showNextButton: boolean
   /** 浮动模式：无目标高亮，只显示提示 */
   floating?: boolean
+  /** 可滚动模式：遮罩不拦截交互，tooltip 固定在视口底部，允许用户自由滚动内容 */
+  scrollable?: boolean
 }
 
 const STEP_CONFIGS: Record<number, GuideStepConfig> = {
   // == 设置阶段 ==
   1:  { tooltip: '先来配置你的模型和 API Key', position: 'top', showNextButton: false },
-  2:  { tooltip: '选择一个 Provider，填写你的 API Key，完成后点击下一步', position: 'bottom', showNextButton: true },
+  2:  { tooltip: '选择一个 Provider，填写你的 API Key，完成后点击下一步', position: 'bottom', showNextButton: true, scrollable: true },
   3:  { tooltip: '点击验证并保存，系统将自动验证 Key 有效性', position: 'top', showNextButton: false },
   4:  { tooltip: '设置完成！点击返回聊天', position: 'top', showNextButton: false },
   // == 创建项目阶段 ==

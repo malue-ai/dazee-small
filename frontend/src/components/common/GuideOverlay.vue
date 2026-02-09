@@ -51,10 +51,45 @@ watch(() => guideStore.showOverlay, (show) => {
   } else {
     stopTracking()
     rect.value = null
+    removeScrollSpacer()
   }
 }, { immediate: true })
 
-onUnmounted(stopTracking)
+onUnmounted(() => {
+  stopTracking()
+  removeScrollSpacer()
+})
+
+// ==================== 可滚动模式：底部占位空间 ====================
+
+/** 是否为可滚动模式（遮罩不拦截交互，tooltip 固定位置） */
+const isScrollable = computed(() => guideStore.currentConfig?.scrollable ?? false)
+
+const SPACER_ID = 'guide-scroll-spacer'
+
+/** 添加底部占位，让用户能滚动到 tooltip 下方 */
+function ensureScrollSpacer() {
+  if (document.getElementById(SPACER_ID)) return
+  const spacer = document.createElement('div')
+  spacer.id = SPACER_ID
+  spacer.style.height = `${TOOLTIP_ESTIMATED_HEIGHT + GAP * 2}px`
+  spacer.style.pointerEvents = 'none'
+  document.body.appendChild(spacer)
+}
+
+/** 移除底部占位 */
+function removeScrollSpacer() {
+  document.getElementById(SPACER_ID)?.remove()
+}
+
+// 进入/离开 scrollable 步骤时管理占位
+watch(isScrollable, (scrollable) => {
+  if (scrollable) {
+    ensureScrollSpacer()
+  } else {
+    removeScrollSpacer()
+  }
+}, { immediate: true })
 
 // ==================== 自动滚动目标元素到可见区域 ====================
 
@@ -150,6 +185,15 @@ const tooltipStyle = computed(() => {
     }
   }
 
+  // 可滚动模式：tooltip 紧贴高亮区域底部下方，不遮挡高亮内容
+  if (isScrollable.value && padRect.value) {
+    return {
+      top: `${padRect.value.bottom + GAP}px`,
+      left: '50%',
+      transform: 'translateX(-50%)',
+    }
+  }
+
   if (!padRect.value) return {}
   const pos = guideStore.currentConfig.position
   const p = padRect.value
@@ -205,7 +249,19 @@ const tooltipStyle = computed(() => {
           <!-- 不渲染任何遮罩，用户可自由操作页面 -->
         </template>
 
-        <!-- ====== 普通模式：四块遮罩 + 高亮边框 ====== -->
+        <!-- ====== 可滚动模式：遮罩仅视觉暗化，不拦截交互 ====== -->
+        <template v-else-if="isScrollable && padRect">
+          <div class="absolute bg-black/40 transition-all duration-200 pointer-events-none" :style="topStyle" />
+          <div class="absolute bg-black/40 transition-all duration-200 pointer-events-none" :style="bottomStyle" />
+          <div class="absolute bg-black/40 transition-all duration-200 pointer-events-none" :style="leftStyle" />
+          <div class="absolute bg-black/40 transition-all duration-200 pointer-events-none" :style="rightStyle" />
+          <div
+            class="absolute rounded-lg pointer-events-none guide-highlight-ring"
+            :style="highlightStyle"
+          />
+        </template>
+
+        <!-- ====== 普通模式：四块遮罩 + 高亮边框（拦截交互） ====== -->
         <template v-else-if="padRect">
           <div class="absolute bg-black/50 transition-all duration-200 pointer-events-auto" :style="topStyle" />
           <div class="absolute bg-black/50 transition-all duration-200 pointer-events-auto" :style="bottomStyle" />
