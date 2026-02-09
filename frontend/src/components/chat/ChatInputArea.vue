@@ -48,7 +48,7 @@
           <!-- 停止按钮：仅在加载中且无输入内容时显示 -->
           <button 
             v-if="loading && !hasInput" 
-            class="p-3 rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all shadow-sm" 
+            class="p-3 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all shadow-sm" 
             @click="emit('stop')"
             :disabled="stopping"
           >
