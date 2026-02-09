@@ -1,51 +1,40 @@
 <template>
   <div class="px-6 pb-6 pt-2 bg-transparent pointer-events-none sticky bottom-0 z-30">
     <div class="pointer-events-auto max-w-4xl mx-auto bg-white border border-border rounded-2xl p-3 shadow-lg transition-all duration-300 focus-within:shadow-xl focus-within:border-primary/30">
-      <!-- 已选文件预览 -->
-      <div v-if="selectedFiles.length > 0" class="flex flex-wrap gap-2 px-2 pb-3 border-b border-border mb-2">
-        <div 
-          v-for="(file, index) in selectedFiles" 
-          :key="index" 
-          class="flex items-center gap-2 pl-3 pr-2 py-1.5 bg-muted rounded-lg text-xs font-medium text-foreground border border-border group"
-        >
-          <FileText class="w-4 h-4 text-muted-foreground/50" />
-          <span class="max-w-[150px] truncate">{{ file.file_name }}</span>
-          <button 
-            class="p-0.5 rounded-md hover:bg-muted text-muted-foreground/50 hover:text-destructive transition-colors" 
-            @click="emit('remove-file', index)"
-          >
-            <X class="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-      
-      <div class="flex items-end gap-2">
-        <!-- 文件上传按钮 -->
+      <div class="flex items-center gap-2">
+        <!-- 添加文件按钮 -->
         <button 
           class="p-3 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-colors flex-shrink-0" 
           @click="emit('upload-click')"
           :disabled="disabled || uploading"
-          title="上传文件"
+          title="添加文件"
         >
           <Loader2 v-if="uploading" class="w-5 h-5 animate-spin" />
-          <Paperclip v-else class="w-5 h-5" />
+          <Plus v-else class="w-5 h-5" />
         </button>
         
-        <!-- 文本输入框（始终可输入，即使智能体正在回复） -->
-        <textarea
-          ref="textareaRef"
-          v-model="inputValue"
-          @keydown.enter.exact="handleEnter"
-          @compositionstart="isComposing = true"
-          @compositionend="isComposing = false"
-          @input="adjustHeight"
-          placeholder="输入消息..."
-          rows="1"
-          class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-foreground placeholder:text-muted-foreground/50 resize-none leading-relaxed overflow-y-hidden"
-        ></textarea>
+        <!-- 编辑区域：支持文本 + 内联文件标签（可通过 Backspace 删除） -->
+        <div class="flex-1 min-w-0 relative">
+          <div
+            ref="editorRef"
+            contenteditable="true"
+            @input="onEditorInput"
+            @keydown="onEditorKeydown"
+            @compositionstart="isComposing = true"
+            @compositionend="isComposing = false"
+            @paste="onPaste"
+            class="editor-content min-h-[28px] max-h-[200px] py-1 outline-none text-base text-foreground leading-relaxed overflow-y-auto whitespace-pre-wrap break-words"
+          ></div>
+          <!-- 占位符 -->
+          <div
+            v-if="editorEmpty"
+            @click="focus"
+            class="absolute left-0 top-1 text-base text-muted-foreground/50 pointer-events-none select-none"
+          >输入消息...</div>
+        </div>
         
-        <div class="pb-1 flex-shrink-0">
-          <!-- 停止按钮：仅在加载中且无输入内容时显示 -->
+        <div class="flex-shrink-0">
+          <!-- 停止按钮：加载中且无输入 -->
           <button 
             v-if="loading && !hasInput" 
             class="p-3 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all shadow-sm" 
@@ -54,7 +43,7 @@
           >
             <Square class="w-5 h-5" />
           </button>
-          <!-- 发送按钮：有输入内容时显示（即使正在加载），无内容且未加载时也显示（禁用态） -->
+          <!-- 发送按钮 -->
           <button 
             v-else
             class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center"
@@ -76,17 +65,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import type { AttachedFile } from '@/types'
-import { FileText, X, Loader2, Paperclip, Square, ArrowUp } from 'lucide-vue-next'
+import { Loader2, Plus, Square, ArrowUp } from 'lucide-vue-next'
 
 // ==================== Props ====================
 
 interface Props {
-  /** 输入值 */
+  /** 文本内容（双向绑定） */
   modelValue: string
-  /** 已选择的文件 */
-  selectedFiles?: AttachedFile[]
   /** 是否正在加载 */
   loading?: boolean
   /** 是否正在停止 */
@@ -98,7 +85,6 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  selectedFiles: () => [],
   loading: false,
   stopping: false,
   uploading: false,
@@ -108,118 +94,257 @@ const props = withDefaults(defineProps<Props>(), {
 // ==================== Emits ====================
 
 const emit = defineEmits<{
-  /** 更新输入值 */
   (e: 'update:modelValue', value: string): void
-  /** 发送消息 */
   (e: 'send'): void
-  /** 停止生成 */
   (e: 'stop'): void
-  /** 点击上传按钮 */
   (e: 'upload-click'): void
-  /** 移除文件 */
-  (e: 'remove-file', index: number): void
 }>()
 
 // ==================== State ====================
 
-/** 文本框引用 */
-const textareaRef = ref<HTMLTextAreaElement | null>(null)
-
-/** 是否正在输入法组合 */
+const editorRef = ref<HTMLDivElement | null>(null)
 const isComposing = ref(false)
+const editorEmpty = ref(true)
+
+/** 防止 input → emit → watch → 更新 DOM 的循环 */
+let _syncing = false
 
 // ==================== Computed ====================
 
-/** 输入值（双向绑定） */
-const inputValue = computed({
-  get: () => props.modelValue,
-  set: (value: string) => emit('update:modelValue', value)
-})
+const hasInput = computed(() => !editorEmpty.value)
+const canSend = computed(() => hasInput.value)
 
-/** 是否有输入内容（文字或文件） */
-const hasInput = computed(() => {
-  return inputValue.value.trim().length > 0 || props.selectedFiles.length > 0
-})
+// ==================== 文本提取 ====================
 
-/** 是否可以发送（有内容即可，不受 loading 状态限制） */
-const canSend = computed(() => {
-  return hasInput.value
-})
+/** 从编辑器 DOM 中提取纯文本（跳过文件标签内部文字） */
+function getEditorText(): string {
+  if (!editorRef.value) return ''
+  let text = ''
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent || ''
+    } else if (node instanceof HTMLElement) {
+      // 跳过文件标签内部
+      if (node.hasAttribute('data-file-chip')) return
+      if (node.tagName === 'BR') text += '\n'
+      Array.from(node.childNodes).forEach(walk)
+    }
+  }
+  walk(editorRef.value)
+  return text
+}
 
-// ==================== Methods ====================
+/** 更新空状态 */
+function updateEmptyState() {
+  if (!editorRef.value) { editorEmpty.value = true; return }
+  const text = getEditorText().trim()
+  const hasChips = !!editorRef.value.querySelector('[data-file-chip]')
+  editorEmpty.value = text.length === 0 && !hasChips
+}
 
-/**
- * 调整文本框高度
- */
-function adjustHeight(): void {
-  if (textareaRef.value) {
-    textareaRef.value.style.height = 'auto'
-    textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 150) + 'px'
-    // 内容超过最大高度时才允许滚动
-    textareaRef.value.style.overflowY = textareaRef.value.scrollHeight > 150 ? 'auto' : 'hidden'
+// ==================== 输入事件 ====================
+
+function onEditorInput() {
+  if (!editorRef.value) return
+
+  // 清理：如果只剩空白/BR且无文件标签，真正清空（配合占位符显示）
+  const text = getEditorText().trim()
+  const hasChips = !!editorRef.value.querySelector('[data-file-chip]')
+  if (!text && !hasChips && editorRef.value.innerHTML !== '') {
+    editorRef.value.innerHTML = ''
+  }
+
+  _syncing = true
+  emit('update:modelValue', getEditorText())
+  updateEmptyState()
+  nextTick(() => { _syncing = false })
+}
+
+function onEditorKeydown(e: KeyboardEvent) {
+  // Enter 发送（Shift+Enter 换行）
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (isComposing.value || e.isComposing || e.keyCode === 229) return
+    e.preventDefault()
+    handleSend()
   }
 }
 
-// 挂载时初始化高度，防止初始渲染出现滚动条
-onMounted(() => {
-  nextTick(adjustHeight)
-})
-
-/**
- * 处理回车键
- * 注意：需同时检查 isComposing ref、event.isComposing 和 keyCode === 229
- * 以兼容不同浏览器/IME 下 compositionend 与 keydown 的触发顺序差异
- */
-function handleEnter(event: KeyboardEvent): void {
-  if (isComposing.value || event.isComposing || event.keyCode === 229) return
-  event.preventDefault()
-  handleSend()
+/** 粘贴：仅保留纯文本 */
+function onPaste(e: ClipboardEvent) {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (text) document.execCommand('insertText', false, text)
 }
 
-/**
- * 处理发送
- */
-function handleSend(): void {
+// ==================== 外部 modelValue 同步 ====================
+
+watch(() => props.modelValue, (newVal) => {
+  if (_syncing) return
+  if (!editorRef.value) return
+  if (getEditorText() === newVal) return
+
+  // 清空或设置新文本（会移除文件标签）
+  editorRef.value.innerHTML = ''
+  if (newVal) {
+    editorRef.value.textContent = newVal
+    // 光标移到末尾
+    const range = document.createRange()
+    range.selectNodeContents(editorRef.value)
+    range.collapse(false)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+  }
+  updateEmptyState()
+})
+
+// ==================== 文件标签 ====================
+
+/** 在光标位置插入文件标签（像字符一样，可 Backspace 删除） */
+function insertFile(file: AttachedFile) {
+  if (!editorRef.value) return
+
+  const chip = document.createElement('span')
+  chip.setAttribute('data-file-chip', '')
+  chip.setAttribute('data-file-data', JSON.stringify({
+    file_url: file.file_url,
+    file_name: file.file_name,
+    file_type: file.file_type,
+    file_size: file.file_size,
+  }))
+  chip.contentEditable = 'false'
+  chip.className = 'file-chip'
+
+  const icon = document.createElement('span')
+  icon.className = 'file-chip-icon'
+  icon.textContent = '📄'
+
+  const nameEl = document.createElement('span')
+  nameEl.className = 'file-chip-name'
+  nameEl.textContent = file.file_name
+
+  const closeBtn = document.createElement('span')
+  closeBtn.className = 'file-chip-close'
+  closeBtn.textContent = '✕'
+  closeBtn.onmousedown = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    chip.remove()
+    onEditorInput()
+  }
+
+  chip.appendChild(icon)
+  chip.appendChild(nameEl)
+  chip.appendChild(closeBtn)
+
+  // 在当前光标位置插入
+  const sel = window.getSelection()
+  if (sel && sel.rangeCount > 0 && editorRef.value.contains(sel.anchorNode)) {
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(chip)
+    // 标签后加一个空格，并将光标移到空格之后
+    const space = document.createTextNode('\u00A0')
+    chip.after(space)
+    range.setStartAfter(space)
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+  } else {
+    // 无焦点时追加到末尾
+    editorRef.value.appendChild(chip)
+    editorRef.value.appendChild(document.createTextNode('\u00A0'))
+  }
+
+  editorRef.value.focus()
+  onEditorInput()
+}
+
+/** 获取编辑器中当前所有文件 */
+function getFiles(): AttachedFile[] {
+  if (!editorRef.value) return []
+  const files: AttachedFile[] = []
+  editorRef.value.querySelectorAll('[data-file-chip]').forEach(el => {
+    const raw = (el as HTMLElement).dataset.fileData
+    if (raw) {
+      try { files.push(JSON.parse(raw)) } catch { /* skip */ }
+    }
+  })
+  return files
+}
+
+// ==================== 操作 ====================
+
+function handleSend() {
   if (canSend.value) {
     emit('send')
-    // 重置高度
-    nextTick(() => {
-      if (textareaRef.value) {
-        textareaRef.value.style.height = 'auto'
-      }
-    })
   }
 }
 
-/**
- * 聚焦输入框
- */
-function focus(): void {
-  textareaRef.value?.focus()
+function focus() {
+  editorRef.value?.focus()
 }
 
-/**
- * 设置输入值
- */
-function setInput(text: string): void {
-  inputValue.value = text
-  nextTick(() => {
-    adjustHeight()
-    focus()
-  })
+function setInput(text: string) {
+  if (!editorRef.value) return
+  editorRef.value.innerHTML = ''
+  if (text) editorRef.value.textContent = text
+  updateEmptyState()
+  nextTick(() => focus())
 }
-
-// ==================== Watchers ====================
-
-// 监听输入值变化，调整高度
-watch(inputValue, () => {
-  nextTick(adjustHeight)
-})
 
 // ==================== Expose ====================
 
 defineExpose({
   focus,
-  setInput
+  setInput,
+  /** 在光标位置插入文件标签 */
+  insertFile,
+  /** 获取编辑器中当前所有文件 */
+  getFiles,
 })
 </script>
+
+<style>
+/* 文件标签样式（非 scoped，因为标签通过 DOM API 动态创建） */
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0 2px;
+  vertical-align: middle;
+  user-select: none;
+  line-height: 1.5;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+.file-chip-icon {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.file-chip-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip-close {
+  margin-left: 2px;
+  cursor: pointer;
+  opacity: 0.4;
+  font-size: 10px;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.file-chip-close:hover {
+  opacity: 1;
+  color: hsl(var(--destructive));
+}
+</style>

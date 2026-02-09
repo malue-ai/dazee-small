@@ -189,14 +189,12 @@
         <ChatInputArea
           ref="inputAreaRef"
           v-model="inputMessage"
-          :selected-files="fileUpload.selectedFiles.value"
           :loading="isCurrentLoading"
           :stopping="chat.isStopping.value"
           :uploading="fileUpload.isUploading.value"
           @send="handleSendMessage"
           @stop="handleStopGeneration"
           @upload-click="handleUploadClick"
-          @remove-file="handleRemoveFile"
         />
       </div>
 
@@ -826,9 +824,9 @@ function handleSuggestionClick(text: string): void {
 /** 发送消息 */
 async function handleSendMessage(): Promise<void> {
   const content = inputMessage.value.trim()
-  const files = fileUpload.selectedFiles.value.length > 0 
-    ? [...fileUpload.selectedFiles.value] 
-    : undefined
+  // 从编辑器获取内联文件标签
+  const editorFiles = inputAreaRef.value?.getFiles() || []
+  const files = editorFiles.length > 0 ? editorFiles : undefined
 
   if (!content && !files?.length) return
 
@@ -837,7 +835,7 @@ async function handleSendMessage(): Promise<void> {
     await handleStopGeneration()
   }
   
-  // 清空输入
+  // 清空输入（会同时清除编辑器中的文件标签）
   inputMessage.value = ''
   fileUpload.clearFiles()
 
@@ -888,15 +886,16 @@ function handleUploadClick(): void {
 /** 处理文件选择 */
 async function handleFileSelect(event: Event): Promise<void> {
   try {
+    const prevLen = fileUpload.selectedFiles.value.length
     await fileUpload.handleFileSelect(event)
+    // 将新上传的文件作为内联标签插入编辑器光标位置
+    const newFiles = fileUpload.selectedFiles.value.slice(prevLen)
+    for (const file of newFiles) {
+      inputAreaRef.value?.insertFile(file)
+    }
   } catch {
     showConfirm({ title: '上传失败', message: '文件上传失败，请重试', type: 'error', showCancel: false })
   }
-}
-
-/** 移除文件 */
-function handleRemoveFile(index: number): void {
-  fileUpload.removeFile(index)
 }
 
 /** 文件预览（消息中的附件） */
