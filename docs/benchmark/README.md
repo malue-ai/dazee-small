@@ -77,6 +77,7 @@ Agent 执行任务 → Code Grader (PASS/FAIL) + LLM Judge (诊断报告)
 | **B. 特色差异化** | 10 | 记忆/环境感知/HITL/长任务/回滚安全 |
 | **C. Token 消耗** | 3 | 量化成本对比 |
 | **D. 场景差异化** | 6 | 各自强项 + 短板 |
+| **E. 电脑操作 + 浏览器** | 7 | 长程 GUI/浏览器任务可靠性（E1-E4 桌面、E5-E7 浏览器） |
 
 详见 [test_cases.md](test_cases.md)
 
