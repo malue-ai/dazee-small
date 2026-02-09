@@ -508,6 +508,18 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
             f"(dim={self._dimensions})"
         )
 
+    async def warmup(self) -> None:
+        """
+        Eagerly load the model so the first real embed() call is fast.
+
+        Safe to call multiple times (idempotent).
+        """
+        if self._model is not None:
+            return
+        logger.info("Warming up GGUF embedding model...")
+        self._ensure_model()
+        logger.info("GGUF embedding model warmed up")
+
     async def embed(self, text: str) -> np.ndarray:
         """Generate embedding using GGUF model."""
         import asyncio

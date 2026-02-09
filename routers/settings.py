@@ -184,3 +184,68 @@ async def trigger_embedding_model_download() -> Dict[str, Any]:
         "success": result["success"],
         "data": result,
     }
+
+
+@router.get("/memory/health")
+async def memory_health() -> Dict[str, Any]:
+    """
+    Memory system health check.
+
+    Reports status of each layer:
+    - fts5: full-text search index
+    - mem0: vector semantic search (Mem0 + sqlite-vec)
+    """
+    try:
+        from core.memory.instance_memory import InstanceMemoryManager
+
+        mgr = InstanceMemoryManager(
+            user_id="health_check",
+            mem0_enabled=True,
+        )
+
+        # Layer 2: FTS5
+        fts5_status = "ok"
+        fts5_count = 0
+        try:
+            fts_results = await mgr._fts5_recall("test", limit=1)
+            fts5_status = "ok"
+            fts5_count = len(fts_results)
+        except Exception as e:
+            fts5_status = f"error: {e}"
+
+        # Layer 3: Mem0
+        mem0_status = "disabled"
+        mem0_count = 0
+        if mgr._mem0_enabled:
+            try:
+                mgr._ensure_mem0()
+                if mgr._mem0_pool:
+                    info = mgr._mem0_pool.memory.vector_store.col_info()
+                    mem0_count = info.get("document_count", 0)
+                    mem0_status = "ok"
+                else:
+                    mem0_status = "init_failed"
+            except Exception as e:
+                mem0_status = f"error: {e}"
+
+        all_ok = fts5_status == "ok" and mem0_status in ("ok", "disabled")
+        return {
+            "success": True,
+            "data": {
+                "status": "healthy" if all_ok else "degraded",
+                "layers": {
+                    "fts5": {"status": fts5_status, "count": fts5_count},
+                    "mem0": {
+                        "status": mem0_status,
+                        "vector_count": mem0_count,
+                        "enabled": mgr._mem0_enabled,
+                    },
+                },
+            },
+        }
+    except Exception as e:
+        logger.error(f"Memory health check failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+        }

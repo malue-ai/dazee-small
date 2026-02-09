@@ -249,6 +249,26 @@ async def _init_knowledge_index() -> None:
         print(f"⚠️ 知识库索引失败（不影响服务运行）: {e}")
 
 
+async def _warmup_embedding_model() -> None:
+    """
+    Pre-load embedding model so the first memory recall is fast.
+
+    Non-fatal: failure only means the first embed call will be slower.
+    """
+    try:
+        from core.knowledge.embeddings import create_embedding_provider
+
+        provider = await create_embedding_provider("auto")
+        if hasattr(provider, "warmup"):
+            await provider.warmup()
+            print(f"✅ Embedding 模型预热完成 ({provider.provider_id})")
+        else:
+            print(f"✅ Embedding 模型就绪 ({provider.provider_id})")
+    except Exception as e:
+        # ModelNotAvailableError, ImportError, etc. — not fatal
+        print(f"⚠️ Embedding 模型预热跳过（不影响服务运行）: {e}")
+
+
 # ==================== 关闭辅助函数 ====================
 
 
@@ -312,6 +332,7 @@ async def lifespan(app: FastAPI):
     await _preload_agent_registry()  # 加载 Agent 配置
     await _init_chat_service()  # 预热 ChatService（避免首次请求冷启动）
     await _init_knowledge_index()  # 知识库：索引配置的目录
+    await _warmup_embedding_model()  # Embedding 模型预热（非阻塞）
     scheduler = await _start_scheduler()
     user_task_scheduler = await _start_user_task_scheduler()  # 用户定时任务调度器
     

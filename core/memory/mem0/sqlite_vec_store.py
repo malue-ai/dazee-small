@@ -10,6 +10,7 @@ SQLite-Vec 向量存储适配器
 
 import json
 import sqlite3
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -59,12 +60,14 @@ class SqliteVecVectorStore(VectorStoreBase):
             )
         self._db_path = db_path
 
+        # Write-lock: Mem0 internally uses thread pools for add/search.
+        # Multiple threads sharing one SQLite connection without
+        # serialization causes "disk I/O error" under WAL mode.
+        # All write methods (insert/update/delete) acquire this lock.
+        self._write_lock = threading.Lock()
+
         # Single connection with check_same_thread=False.
-        # Mem0 internally uses thread pools for add/search — the default
-        # check_same_thread=True would raise "SQLite objects created in a
-        # thread can only be used in that same thread".
-        # WAL mode + single-writer semantics (Mem0 serializes operations)
-        # makes this safe.
+        # Reads are safe without the lock; writes are serialized above.
         self._conn = self._create_connection()
         self._ensure_table()
 
@@ -122,24 +125,25 @@ class SqliteVecVectorStore(VectorStoreBase):
     # ==================== Mem0 VectorStoreBase 接口实现 ====================
 
     def create_col(self, name: str, vector_size: int, distance: str) -> None:
-        """创建集合（虚拟表 + 元数据表）"""
-        self._conn.execute(
-            f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS [{name}] USING vec0(
-                id TEXT PRIMARY KEY,
-                embedding FLOAT[{vector_size}]
+        """创建集合（虚拟表 + 元数据表，线程安全）"""
+        with self._write_lock:
+            self._conn.execute(
+                f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS [{name}] USING vec0(
+                    id TEXT PRIMARY KEY,
+                    embedding FLOAT[{vector_size}]
+                )
+                """
             )
-            """
-        )
-        self._conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS [{name}_meta] (
-                id TEXT PRIMARY KEY,
-                payload TEXT DEFAULT '{{}}'
+            self._conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS [{name}_meta] (
+                    id TEXT PRIMARY KEY,
+                    payload TEXT DEFAULT '{{}}'
+                )
+                """
             )
-            """
-        )
-        self._conn.commit()
+            self._conn.commit()
         logger.info(f"[SqliteVec] 集合创建成功: {name}")
 
     def insert(
@@ -148,32 +152,33 @@ class SqliteVecVectorStore(VectorStoreBase):
         payloads: Optional[List[Dict]] = None,
         ids: Optional[List[str]] = None,
     ):
-        """插入向量"""
+        """插入向量（线程安全）"""
         if not ids:
             ids = [str(uuid.uuid4()) for _ in vectors]
         if not payloads:
             payloads = [{}] * len(vectors)
 
-        for vec_id, vector, payload in zip(ids, vectors, payloads):
-            embedding_json = json.dumps(vector)
-            payload_json = json.dumps(payload, ensure_ascii=False)
+        with self._write_lock:
+            for vec_id, vector, payload in zip(ids, vectors, payloads):
+                embedding_json = json.dumps(vector)
+                payload_json = json.dumps(payload, ensure_ascii=False)
 
-            # 先删除再插入（幂等 upsert）
-            self._conn.execute(
-                f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vec_id,)
-            )
-            self._conn.execute(
-                f"INSERT INTO [{self.collection_name}](id, embedding) VALUES (?, ?)",
-                (vec_id, embedding_json),
-            )
-            # 元数据
-            self._conn.execute(
-                f"INSERT OR REPLACE INTO [{self.collection_name}_meta](id, payload) "
-                f"VALUES (?, ?)",
-                (vec_id, payload_json),
-            )
+                # 先删除再插入（幂等 upsert）
+                self._conn.execute(
+                    f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vec_id,)
+                )
+                self._conn.execute(
+                    f"INSERT INTO [{self.collection_name}](id, embedding) VALUES (?, ?)",
+                    (vec_id, embedding_json),
+                )
+                # 元数据
+                self._conn.execute(
+                    f"INSERT OR REPLACE INTO [{self.collection_name}_meta](id, payload) "
+                    f"VALUES (?, ?)",
+                    (vec_id, payload_json),
+                )
 
-        self._conn.commit()
+            self._conn.commit()
         logger.debug(f"[SqliteVec] 插入成功: {len(vectors)} 条")
 
     def search(
@@ -229,14 +234,15 @@ class SqliteVecVectorStore(VectorStoreBase):
             return []
 
     def delete(self, vector_id: str) -> None:
-        """删除向量"""
-        self._conn.execute(
-            f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vector_id,)
-        )
-        self._conn.execute(
-            f"DELETE FROM [{self.collection_name}_meta] WHERE id = ?", (vector_id,)
-        )
-        self._conn.commit()
+        """删除向量（线程安全）"""
+        with self._write_lock:
+            self._conn.execute(
+                f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vector_id,)
+            )
+            self._conn.execute(
+                f"DELETE FROM [{self.collection_name}_meta] WHERE id = ?", (vector_id,)
+            )
+            self._conn.commit()
         logger.debug(f"[SqliteVec] 删除成功: {vector_id}")
 
     def update(
@@ -245,26 +251,27 @@ class SqliteVecVectorStore(VectorStoreBase):
         vector: Optional[List[float]] = None,
         payload: Optional[Dict] = None,
     ):
-        """更新向量"""
-        if vector is not None:
-            embedding_json = json.dumps(vector)
-            self._conn.execute(
-                f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vector_id,)
-            )
-            self._conn.execute(
-                f"INSERT INTO [{self.collection_name}](id, embedding) VALUES (?, ?)",
-                (vector_id, embedding_json),
-            )
+        """更新向量（线程安全）"""
+        with self._write_lock:
+            if vector is not None:
+                embedding_json = json.dumps(vector)
+                self._conn.execute(
+                    f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vector_id,)
+                )
+                self._conn.execute(
+                    f"INSERT INTO [{self.collection_name}](id, embedding) VALUES (?, ?)",
+                    (vector_id, embedding_json),
+                )
 
-        if payload is not None:
-            payload_json = json.dumps(payload, ensure_ascii=False)
-            self._conn.execute(
-                f"INSERT OR REPLACE INTO [{self.collection_name}_meta](id, payload) "
-                f"VALUES (?, ?)",
-                (vector_id, payload_json),
-            )
+            if payload is not None:
+                payload_json = json.dumps(payload, ensure_ascii=False)
+                self._conn.execute(
+                    f"INSERT OR REPLACE INTO [{self.collection_name}_meta](id, payload) "
+                    f"VALUES (?, ?)",
+                    (vector_id, payload_json),
+                )
 
-        self._conn.commit()
+            self._conn.commit()
         logger.debug(f"[SqliteVec] 更新成功: {vector_id}")
 
     def get(self, vector_id: str) -> Optional[OutputData]:
@@ -349,13 +356,14 @@ class SqliteVecVectorStore(VectorStoreBase):
             return []
 
     def delete_col(self) -> None:
-        """删除当前集合"""
+        """删除当前集合（线程安全）"""
         try:
-            self._conn.execute(f"DROP TABLE IF EXISTS [{self.collection_name}]")
-            self._conn.execute(
-                f"DROP TABLE IF EXISTS [{self.collection_name}_meta]"
-            )
-            self._conn.commit()
+            with self._write_lock:
+                self._conn.execute(f"DROP TABLE IF EXISTS [{self.collection_name}]")
+                self._conn.execute(
+                    f"DROP TABLE IF EXISTS [{self.collection_name}_meta]"
+                )
+                self._conn.commit()
             logger.info(f"[SqliteVec] 删除集合成功: {self.collection_name}")
         except Exception as e:
             logger.error(f"[SqliteVec] 删除集合失败: {e}")

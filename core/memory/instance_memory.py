@@ -13,6 +13,7 @@
 - get_memory_context()：读取 MEMORY.md 全文（供系统提示词注入）
 """
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,23 @@ from typing import Any, Dict, List, Optional
 from logger import get_logger
 
 logger = get_logger("memory.instance")
+
+# ==================== Ephemeral instruction filter ====================
+# These are session-scoped commands that should NOT be persisted as long-term
+# memory.  The patterns are pure format checks (allowed by LLM-First rules).
+
+_EPHEMERAL_PATTERNS = [
+    re.compile(r"这.*文件.*保持一致", re.I),
+    re.compile(r"请直接修改", re.I),
+    re.compile(r"给我恢复", re.I),
+    re.compile(r"帮我.*吧$", re.I),
+]
+
+
+def _is_ephemeral(content: str) -> bool:
+    """Return True if *content* looks like a transient instruction."""
+    return any(p.search(content) for p in _EPHEMERAL_PATTERNS)
+
 
 # 记忆分类 → Mem0 分类映射
 _CATEGORY_MAP = {
@@ -92,6 +110,12 @@ class InstanceMemoryManager:
 
     # ==================== recall（融合搜索）====================
 
+    # Source weights for fusion ranking.
+    # Semantic (Mem0) results get a boost because they capture meaning
+    # even when surface keywords differ.
+    _WEIGHT_FTS5 = 1.0
+    _WEIGHT_MEM0 = 1.2
+
     async def recall(
         self,
         query: str,
@@ -99,45 +123,45 @@ class InstanceMemoryManager:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """
-        回忆相关记忆（融合搜索）
+        Recall relevant memories (fusion search).
 
-        搜索策略：
-        1. FTS5 全文搜索 MEMORY.md 索引（BM25）
-        2. Mem0 语义搜索（向量相似度）
-        3. 合并去重 + 加权排序
+        Strategy:
+        1. FTS5 full-text search (BM25 keyword matching)
+        2. Mem0 semantic search (vector similarity)
+        3. Weighted merge + semantic deduplication
 
         Args:
-            query: 搜索查询
-            project_id: 项目 ID（可选，限定项目记忆）
-            limit: 返回数量
+            query: search query
+            project_id: optional project scope
+            limit: max results
 
         Returns:
             [{"content": str, "score": float, "source": str, "category": str}, ...]
         """
         results: List[Dict[str, Any]] = []
 
-        # Layer 2: FTS5 全文搜索
+        # Layer 2: FTS5 full-text search (weight 1.0)
         fts_results = await self._fts5_recall(query, limit=limit)
         for hit in fts_results:
             results.append({
                 "content": hit.get("content", ""),
-                "score": hit.get("score", 0.0),
+                "score": hit.get("score", 0.0) * self._WEIGHT_FTS5,
                 "source": "fts5",
                 "category": hit.get("category", "general"),
             })
 
-        # Layer 3: Mem0 语义搜索
+        # Layer 3: Mem0 semantic search (weight 1.2)
         if self._mem0_enabled:
             mem0_results = await self._mem0_recall(query, limit=limit)
             for mem in mem0_results:
                 results.append({
                     "content": mem.get("content", ""),
-                    "score": mem.get("score", 0.0),
+                    "score": mem.get("score", 0.0) * self._WEIGHT_MEM0,
                     "source": "mem0",
                     "category": mem.get("category", "general"),
                 })
 
-        # 合并去重（按内容相似度去重）+ 按 score 降序排序
+        # Semantic dedup + weighted sort
         results = self._deduplicate_results(results)
         results.sort(key=lambda x: x["score"], reverse=True)
 
@@ -167,6 +191,11 @@ class InstanceMemoryManager:
         if not content or not content.strip():
             return
 
+        # Skip ephemeral instructions (session-scoped commands)
+        if _is_ephemeral(content):
+            logger.debug(f"跳过临时指令: {content[:50]}")
+            return
+
         # Layer 3: 冲突检测（如果 Mem0 启用）
         if self._mem0_enabled:
             conflicts = await self._check_conflicts(content, category)
@@ -188,12 +217,43 @@ class InstanceMemoryManager:
         await self._fts5_index_entry(content, category)
 
         # Layer 3: 写入 Mem0 向量存储
+        mem0_ok = False
         if self._mem0_enabled:
-            await self._mem0_add(content, category)
+            mem0_ok = await self._mem0_add(content, category)
 
+        # Log with layer status — "degraded" means Mem0 was expected but failed
+        degraded = self._mem0_enabled and not mem0_ok
         logger.info(
-            f"记忆已保存: [{category}] {content[:50]}..."
+            f"记忆已保存: [{category}] {content[:50]}... "
+            f"(fts5=ok, mem0={'ok' if mem0_ok else 'skip' if not self._mem0_enabled else 'FAIL'})"
         )
+        if degraded:
+            logger.warning(
+                "Mem0 向量写入失败，语义搜索降级运行"
+            )
+
+    async def remember_batch(
+        self, memories: List[Dict[str, str]]
+    ) -> None:
+        """
+        Batch-write multiple memories.
+
+        Each item is ``{"content": str, "category": str}``.
+        Functionally equivalent to calling ``remember()`` for each item,
+        but logged as a batch for easier monitoring.
+        """
+        if not memories:
+            return
+
+        ok = 0
+        for mem in memories:
+            content = mem.get("content", "")
+            category = mem.get("category", "general")
+            if content and content.strip():
+                await self.remember(content=content, category=category)
+                ok += 1
+
+        logger.info(f"批量记忆写入: {ok}/{len(memories)} 条成功")
 
     # ==================== flush（会话结束刷新）====================
 
@@ -207,7 +267,7 @@ class InstanceMemoryManager:
 
         1. 使用 FragmentExtractor 从对话提取记忆碎片（Layer 3）
         2. QualityController 过滤 + 冲突检测
-        3. 对通过阈值的记忆调用 remember() 双写
+        3. 对通过阈值的记忆调用 remember_batch() 双写
         4. 写入每日日志（Layer 1）
 
         Args:
@@ -223,11 +283,7 @@ class InstanceMemoryManager:
         extracted = await self._extract_from_conversation(
             session_id, messages
         )
-        for memory in extracted:
-            await self.remember(
-                content=memory.get("content", ""),
-                category=memory.get("category", "general"),
-            )
+        await self.remember_batch(extracted)
 
         # Layer 1: 写入每日日志
         user_msgs = [
@@ -443,15 +499,15 @@ class InstanceMemoryManager:
             logger.warning(f"Mem0 语义搜索失败: {e}")
             return []
 
-    async def _mem0_add(self, content: str, category: str) -> None:
-        """写入 Mem0 向量存储"""
+    async def _mem0_add(self, content: str, category: str) -> bool:
+        """Write to Mem0 vector store. Returns True on success."""
         self._ensure_mem0()
         if not self._mem0_pool:
-            return
+            return False
 
         try:
             mem0_category = _CATEGORY_MAP.get(category, "other")
-            self._mem0_pool.add(
+            result = self._mem0_pool.add(
                 user_id=self._user_id,
                 messages=[{"role": "user", "content": content}],
                 metadata={
@@ -460,8 +516,21 @@ class InstanceMemoryManager:
                     "source": "instance_remember",
                 },
             )
+            results_list = result.get("results", [])
+            if not results_list:
+                logger.error(
+                    f"Mem0 写入失败: 返回空结果, "
+                    f"content={content[:50]}, category={category}"
+                )
+                return False
+            return True
         except Exception as e:
-            logger.warning(f"Mem0 写入失败: {e}")
+            logger.error(
+                f"Mem0 写入异常: {e}, "
+                f"content={content[:50]}, category={category}",
+                exc_info=True,
+            )
+            return False
 
     async def _check_conflicts(
         self, content: str, category: str
@@ -595,15 +664,42 @@ class InstanceMemoryManager:
 
     # ==================== 工具方法 ====================
 
+    @staticmethod
+    def _jaccard_similarity(a: str, b: str) -> float:
+        """Character-level Jaccard similarity (fast, no dependencies)."""
+        set_a = set(a.lower())
+        set_b = set(b.lower())
+        intersection = len(set_a & set_b)
+        union = len(set_a | set_b)
+        return intersection / union if union > 0 else 0.0
+
     def _deduplicate_results(
-        self, results: List[Dict[str, Any]]
+        self,
+        results: List[Dict[str, Any]],
+        similarity_threshold: float = 0.8,
     ) -> List[Dict[str, Any]]:
-        """简单去重：按内容前 50 字符去重"""
-        seen = set()
-        deduped = []
+        """
+        Semantic deduplication using character-level Jaccard similarity.
+
+        When two results are > 80% similar, the higher-scored one wins.
+        This catches rephrased duplicates that simple prefix matching misses.
+        """
+        if not results:
+            return []
+
+        deduped: List[Dict[str, Any]] = []
         for r in results:
-            key = r["content"][:50].lower().strip()
-            if key not in seen:
-                seen.add(key)
+            content = r["content"]
+            is_dup = False
+            for i, existing in enumerate(deduped):
+                sim = self._jaccard_similarity(content, existing["content"])
+                if sim > similarity_threshold:
+                    # Keep the higher-scored entry
+                    if r["score"] > existing["score"]:
+                        deduped[i] = r
+                    is_dup = True
+                    break
+            if not is_dup:
                 deduped.append(r)
+
         return deduped
