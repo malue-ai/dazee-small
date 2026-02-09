@@ -1393,7 +1393,6 @@ class ChatService:
                                 await agent.broadcaster.emit_message_stop(
                                     session_id=session_id,
                                     message_id=assistant_message_id,
-                                    stop_reason="rollback_completed",
                                 )
                             except Exception as be:
                                 logger.warning(f"回滚确认消息发送失败（文件已恢复）: {be}")
@@ -1420,7 +1419,7 @@ class ChatService:
 
             # V11: 回滚短路 — 回滚已成功则直接回复，跳过 Agent 执行
             if _rollback_handled:
-                self.session_service.end_session(session_id, status="completed")
+                await self.session_service.end_session(session_id, status="completed")
                 logger.info("回滚短路: 跳过 Agent 执行，直接回复用户")
                 return
 
