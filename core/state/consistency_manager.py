@@ -651,6 +651,30 @@ class StateConsistencyManager:
         """检查任务是否有活跃的快照"""
         return self._find_snapshot_for_task(task_id) is not None
 
+    def purge_all_snapshots(self) -> int:
+        """
+        清除所有快照（内存 + 磁盘）。
+
+        回滚完成后调用，防止后续查询因 LLM 误判 wants_rollback
+        而重复触发空回滚。
+
+        Returns:
+            清除的快照数量
+        """
+        count = len(self._snapshots)
+
+        # 清除磁盘
+        for sid in list(self._snapshots.keys()):
+            self._remove_snapshot_from_disk(sid)
+
+        # 清除内存
+        self._snapshots.clear()
+        self._task_logs.clear()
+
+        if count > 0:
+            logger.info(f"已清除所有快照: {count} 个")
+        return count
+
     def get_most_recent_snapshot(self) -> Optional[str]:
         """
         获取最近的快照 ID（不限 task_id）。

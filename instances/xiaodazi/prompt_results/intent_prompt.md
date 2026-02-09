@@ -42,7 +42,14 @@
 
 ## wants_rollback（用户是否要求撤销之前的修改）
 
-用户对**上一轮 Agent 做出的文件修改**表示不满，要求恢复到修改前的状态。注意区分：要求恢复**自己之前的操作结果**才是 rollback，要求恢复**其他东西**（如网络、系统、数据）不是。默认 `false`。
+**仅当最新一条用户消息**明确要求撤销/恢复 Agent 之前的文件修改时才为 `true`。
+
+判断规则：
+- 只看对话中**最后一条**用户消息（不看历史消息）
+- 如果最后一条消息是新任务（如"删除某文件"、"写个报告"），即使之前的消息提过"恢复"，也是 `false`
+- 要求恢复**其他东西**（如网络、系统、数据）不是 rollback
+
+默认 `false`。
 
 ## relevant_skill_groups（需要哪些技能分组）
 
@@ -109,9 +116,17 @@
 <reasoning>虽然包含"恢复"，但指的是修复网络问题，不是撤销 Agent 的文件修改</reasoning>
 </example>
 
+<example>
+<history>用户之前说过"恢复原文件"（已处理完毕），现在发新消息：</history>
+<query>删除桌面Q2_planning.md文件</query>
+<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"]}</output>
+<reasoning>最新消息是"删除文件"，是一个新任务。虽然历史中有"恢复原文件"，但那是之前已完成的请求，不影响当前意图判断</reasoning>
+</example>
+
 ## 重要说明
 
 1. 不确定复杂度时，选更高级别
 2. 不确定是否需要记忆时，`skip_memory` 设为 `false`
 3. 技能分组不确定时，宁可多选不要遗漏
 4. 一个任务可能需要多个技能分组
+5. `wants_rollback` 和 `wants_to_stop` 只看**最新一条**用户消息，不看历史

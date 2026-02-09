@@ -1355,50 +1355,73 @@ class ChatService:
                 logger.info("意图分析: 用户希望停止/取消，设置停止标志")
                 self.session_service.get_stop_event(session_id).set()
 
-            # V11: 用户回滚意图检测 — 框架直接回滚，短路 Agent 执行
+            # V11.1: 用户回滚意图检测 — 框架直接回滚，短路 Agent 执行
+            #
+            # 安全保护（防止回滚短路误触发）：
+            # 1. 快照必须有实际备份的文件（排除空快照）
+            # 2. 快照不能属于当前 session（当前 session 还没执行任何操作）
+            # 3. 回滚成功后清除所有剩余快照，防止后续查询再次触发
             _rollback_handled = False
             if getattr(routing_intent, "wants_rollback", False):
                 state_mgr = getattr(agent, "_state_consistency_manager", None)
                 if state_mgr and getattr(agent, "_state_consistency_enabled", False):
                     snapshot_id = state_mgr.get_most_recent_snapshot()
                     if snapshot_id:
-                        try:
-                            files = state_mgr.get_snapshot_file_list(snapshot_id)
-                            rollback_msgs = state_mgr.rollback(snapshot_id)
+                        # 安全检查：快照必须有文件内容且不属于当前 session
+                        snap = state_mgr._snapshots.get(snapshot_id)
+                        snap_is_valid = (
+                            snap is not None
+                            and snap.task_id != session_id
+                            and len(snap.file_contents) > 0
+                        )
+                        if not snap_is_valid:
                             logger.info(
-                                f"✅ 用户回滚意图: 已恢复 {len(rollback_msgs)} 个文件"
+                                f"用户回滚意图: 快照 {snapshot_id} 无效"
+                                f"（task_id={getattr(snap, 'task_id', '?')}, "
+                                f"files={len(getattr(snap, 'file_contents', {}))}），"
+                                f"交给 Agent 处理"
                             )
-
-                            # 回滚成功 → 立即标记短路（不管后续 broadcaster 是否成功）
-                            file_list = "\n".join(f"  - `{f}`" for f in files[:10])
-                            confirm_text = (
-                                f"已帮你恢复到修改前的状态：\n{file_list}\n\n"
-                                f"文件内容已还原，你可以打开确认一下。"
-                            )
-                            _rollback_handled = True
-                            _assistant_text_for_tasks = confirm_text
-
-                            # 尝试通过 broadcaster 发送确认（失败不影响短路）
+                        else:
                             try:
-                                await agent.broadcaster.emit_message_start(
-                                    session_id=session_id,
-                                    message_id=assistant_message_id,
-                                    model=getattr(agent, "model", "system"),
+                                files = state_mgr.get_snapshot_file_list(snapshot_id)
+                                rollback_msgs = state_mgr.rollback(snapshot_id)
+                                logger.info(
+                                    f"✅ 用户回滚意图: 已恢复 {len(rollback_msgs)} 个文件"
                                 )
-                                await agent.broadcaster.emit_message_delta(
-                                    session_id=session_id,
-                                    delta={"type": "text", "content": confirm_text},
-                                    message_id=assistant_message_id,
-                                )
-                                await agent.broadcaster.emit_message_stop(
-                                    session_id=session_id,
-                                    message_id=assistant_message_id,
-                                )
-                            except Exception as be:
-                                logger.warning(f"回滚确认消息发送失败（文件已恢复）: {be}")
 
-                        except Exception as e:
-                            logger.warning(f"回滚执行失败，回退到 Agent: {e}", exc_info=True)
+                                # 回滚成功后：清除所有剩余快照，防止后续查询再次触发
+                                state_mgr.purge_all_snapshots()
+
+                                # 回滚成功 → 立即标记短路
+                                file_list = "\n".join(f"  - `{f}`" for f in files[:10])
+                                confirm_text = (
+                                    f"已帮你恢复到修改前的状态：\n{file_list}\n\n"
+                                    f"文件内容已还原，你可以打开确认一下。"
+                                )
+                                _rollback_handled = True
+                                _assistant_text_for_tasks = confirm_text
+
+                                # 尝试通过 broadcaster 发送确认（失败不影响短路）
+                                try:
+                                    await agent.broadcaster.emit_message_start(
+                                        session_id=session_id,
+                                        message_id=assistant_message_id,
+                                        model=getattr(agent, "model", "system"),
+                                    )
+                                    await agent.broadcaster.emit_message_delta(
+                                        session_id=session_id,
+                                        delta={"type": "text", "content": confirm_text},
+                                        message_id=assistant_message_id,
+                                    )
+                                    await agent.broadcaster.emit_message_stop(
+                                        session_id=session_id,
+                                        message_id=assistant_message_id,
+                                    )
+                                except Exception as be:
+                                    logger.warning(f"回滚确认消息发送失败（文件已恢复）: {be}")
+
+                            except Exception as e:
+                                logger.warning(f"回滚执行失败，回退到 Agent: {e}", exc_info=True)
                     else:
                         logger.info("用户回滚意图: 无可用快照，交给 Agent 处理")
 
