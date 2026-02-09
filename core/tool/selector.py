@@ -101,7 +101,7 @@ class ToolSelector:
         )
 
         # 方式2：智能路由推荐（原 CapabilityRouter）
-        routing = selector.route(keywords=["PPT", "演示"], task_type="ppt_generation")
+        routing = selector.route(keywords=["PPT", "演示"])
 
         # 方式3：Skill fallback（原 UnifiedToolCaller）
         caps = selector.ensure_skill_fallback(caps, skill, llm_service)
@@ -133,6 +133,34 @@ class ToolSelector:
         if self._registry is None:
             self._registry = _get_registry()
         return self._registry
+
+    def _extract_capability_tags(self, tool_names: List[str]) -> List[str]:
+        """
+        从工具名列表提取对应的能力标签（去重保序）
+
+        解决「工具名 ≠ 能力标签」的概念映射问题。
+        例如：工具名 "plan" → 能力标签 ["task_planning", "progress_tracking"]
+
+        Args:
+            tool_names: 工具名列表
+
+        Returns:
+            去重后的能力标签列表
+        """
+        seen: set = set()
+        tags: List[str] = []
+        for name in tool_names:
+            cap = self.registry.get(name)
+            if cap and cap.capabilities:
+                for tag in cap.capabilities:
+                    if tag not in seen:
+                        seen.add(tag)
+                        tags.append(tag)
+            else:
+                logger.warning(
+                    f"工具 '{name}' 无法提取能力标签（未注册或无 capabilities 字段）"
+                )
+        return tags
 
     async def get_core_tools(self) -> List[str]:
         """
@@ -177,19 +205,22 @@ class ToolSelector:
         required_capabilities: List[str],
         context: Optional[Dict[str, Any]] = None,
         allowed_tools: Optional[List[str]] = None,
+        core_tools_override: Optional[List[str]] = None,
     ) -> ToolSelectionResult:
         """
         选择工具（异步）
 
         分层选择逻辑：
-        1. 始终加载 Level 1 核心工具（plan_todo 等）
-        2. 根据能力需求从 Level 2 动态工具中选择
+        1. 加载核心工具（Level 1），可通过 core_tools_override 精简
+        2. 根据能力需求从动态工具中选择
         3. 如果提供了 allowed_tools，则仅选择白名单内的工具
 
         Args:
-            required_capabilities: 所需能力列表（如 ["web_search", "ppt_generation"]）
+            required_capabilities: 所需能力标签列表（如 ["task_planning", "knowledge_base"]）
             context: 上下文信息（包含 task_type, available_apis 等）
-            allowed_tools: 允许使用的工具白名单（可选）
+            allowed_tools: 允许使用的工具白名单（可选，工具名列表）
+            core_tools_override: 覆盖核心工具列表（可选，工具名列表）。
+                提供时仅加载指定的核心工具，用于 simple task 场景裁剪。
 
         Returns:
             ToolSelectionResult 选择结果
@@ -198,15 +229,16 @@ class ToolSelector:
         selected = []
         selected_skills_capabilities = set()
 
-        # 1. 添加核心工具（Level 1）- 始终加载（异步）
+        # 1. 添加核心工具（Level 1）
+        #    默认加载全部核心工具；提供 core_tools_override 时仅加载指定子集
         base_tools = []
-        core_tool_names = await self.get_core_tools()
+        if core_tools_override is not None:
+            core_tool_names = core_tools_override
+        else:
+            core_tool_names = await self.get_core_tools()
         for name in core_tool_names:
             cap = self.registry.get(name)
             if cap and cap not in selected:
-                # 核心工具通常不受白名单限制，或者默认在白名单里
-                # 这里策略是：核心工具始终加载，除非显式被排除？
-                # 通常核心工具是框架运行必需的，不应用白名单过滤
                 selected.append(cap)
                 base_tools.append(name)
 
@@ -301,24 +333,6 @@ class ToolSelector:
             reason=f"基于能力需求 {required_capabilities} 选择",
         )
 
-    def select_for_task_type(
-        self, task_type: str, context: Optional[Dict[str, Any]] = None
-    ) -> ToolSelectionResult:
-        """
-        根据任务类型选择工具
-
-        Args:
-            task_type: 任务类型（如 "information_query"）
-            context: 上下文信息
-
-        Returns:
-            ToolSelectionResult 选择结果
-        """
-        # 从 Registry 获取任务类型对应的能力
-        required_capabilities = self.registry.get_capabilities_for_task_type(task_type)
-        logger.debug(f"任务类型 '{task_type}' 推断能力: {required_capabilities}")
-        return self.select(required_capabilities, context)
-
     def get_tools_for_llm(self, selection: ToolSelectionResult, llm_service=None) -> List[Any]:
         """
         将选择结果转换为 LLM API 格式
@@ -371,37 +385,33 @@ class ToolSelector:
         self,
         schema_tools: Optional[List[str]] = None,
         plan: Optional[Dict[str, Any]] = None,
-        intent_task_type: Optional[str] = None,
     ) -> Tuple[List[str], str, List[str], Optional[List[str]]]:
         """
-        解析三级优先级能力需求
+        解析能力需求（Schema + Plan 两级优先级）
 
         优先级策略（Filter 模式）：
         1. Schema 配置：作为 Allowlist (白名单)，定义允许使用的工具范围
-        2. Plan/Intent：作为 Demand (需求)，定义当前需要的工具
+        2. Plan：作为 Demand (需求)，定义当前需要的能力标签
         3. 最终结果：Demand ∩ Allowlist
 
         Args:
-            schema_tools: Schema 配置的工具列表
+            schema_tools: Schema 配置的工具名列表
             plan: 任务规划结果（包含 required_capabilities 字段）
-            intent_task_type: 意图分析的任务类型
 
         Returns:
             (required_capabilities, selection_source, overridden_sources, allowed_tools) 四元组
-            - required_capabilities: 最终选择的能力需求列表
-            - selection_source: 选择来源（schema/plan/intent/default）
+            - required_capabilities: 最终选择的能力标签列表
+            - selection_source: 选择来源（schema/plan/default）
             - overridden_sources: 被覆盖的来源列表
-            - allowed_tools: 允许使用的工具白名单（来自 Schema）
+            - allowed_tools: 允许使用的工具白名单（来自 Schema，工具名列表）
         """
         required_capabilities: List[str] = []
         selection_source = "default"
         overridden_sources: List[str] = []
         allowed_tools: Optional[List[str]] = None
 
-        # 收集各级来源的能力
-        schema_caps: List[str] = []
+        # 收集各级来源
         plan_caps: List[str] = []
-        intent_caps: List[str] = []
 
         # 1. Schema 配置（白名单来源）
         if schema_tools:
@@ -413,8 +423,7 @@ class ToolSelector:
                 logger.warning(f"Schema 中的无效工具（已过滤）: {invalid_tools}")
 
             if valid_tools:
-                schema_caps = valid_tools
-                allowed_tools = schema_caps  # 设置白名单
+                allowed_tools = valid_tools  # 设置白名单
                 logger.debug(f"Schema 白名单已设置: {len(allowed_tools)} 个工具")
 
         # 2. Plan 推荐
@@ -422,48 +431,36 @@ class ToolSelector:
             plan_caps = plan.get("required_capabilities", [])
             logger.debug(f"Plan 推荐能力: {plan_caps}")
 
-        # 3. Intent 推断
-        if intent_task_type:
-            intent_caps = self.registry.get_capabilities_for_task_type(intent_task_type)
-            logger.debug(f"Intent 推断能力 (task_type={intent_task_type}): {intent_caps}")
-
-        # 混合选择逻辑：优先使用动态需求，受白名单限制
+        # 混合选择逻辑：优先使用 Plan 需求，受白名单限制
 
         if plan_caps:
-            # 优先使用 Plan 推荐
             required_capabilities = plan_caps
             selection_source = "plan"
-            if intent_caps:
-                overridden_sources.append("intent")
 
             if allowed_tools:
                 logger.info(f"✅ 使用 Plan 推荐 (受 Schema 过滤): {required_capabilities}")
             else:
                 logger.info(f"✅ 使用 Plan 推荐: {required_capabilities}")
 
-        elif intent_caps:
-            # 其次使用 Intent 推断
-            required_capabilities = intent_caps
-            selection_source = "intent"
-
-            if allowed_tools:
-                logger.info(f"✅ 使用 Intent 推断 (受 Schema 过滤): {required_capabilities}")
-            else:
-                logger.info(f"✅ 使用 Intent 推断: {required_capabilities}")
-
         elif allowed_tools:
-            # 如果没有动态需求，但有 Schema 配置，回退到全量 Schema (Override 模式兜底)
-            # 这种情况通常发生在 Intent 未能识别出具体需求时
-            required_capabilities = allowed_tools
+            # 如果没有动态需求，但有 Schema 配置，回退到全量 Schema
+            # 需要将工具名转换为能力标签，select() 按能力标签查找工具
+            required_capabilities = self._extract_capability_tags(allowed_tools)
             selection_source = "schema"
-            # 此时 required == allowed，过滤无实际影响
-            logger.info(f"✅ 无动态需求，全量加载 Schema 配置: {len(required_capabilities)} 个工具")
+            logger.info(
+                f"✅ 无动态需求，从 Schema 工具提取能力标签: "
+                f"{len(allowed_tools)} 个工具 → {required_capabilities}"
+            )
 
         else:
-            # 彻底兜底：使用核心工具（异步）
-            required_capabilities = await self.get_core_tools()
+            # 彻底兜底：从核心工具提取能力标签
+            core_tool_names = await self.get_core_tools()
+            required_capabilities = self._extract_capability_tags(core_tool_names)
             selection_source = "default"
-            logger.info(f"⚠️ 无可用来源，使用默认核心工具: {required_capabilities}")
+            logger.info(
+                f"⚠️ 无可用来源，从核心工具提取能力标签: "
+                f"{core_tool_names} → {required_capabilities}"
+            )
 
         return required_capabilities, selection_source, overridden_sources, allowed_tools
 
@@ -504,7 +501,6 @@ class ToolSelector:
     def route(
         self,
         keywords: List[str],
-        task_type: str = None,
         quality_requirement: str = "medium",
         explicit_capability: str = None,
         context: Dict[str, Any] = None,
@@ -514,7 +510,6 @@ class ToolSelector:
 
         Args:
             keywords: 用户请求中的关键词
-            task_type: 任务类型
             quality_requirement: 质量要求（low/medium/high）
             explicit_capability: 用户明确指定的能力名称
             context: 上下文
@@ -533,7 +528,7 @@ class ToolSelector:
                 )
 
         # 查找候选能力（不传 keywords，符合 LLM-First）
-        candidates = self.registry.find_candidates(task_type=task_type, context=context)
+        candidates = self.registry.find_candidates(context=context)
 
         if not candidates:
             return None
@@ -560,7 +555,6 @@ class ToolSelector:
     def route_multiple(
         self,
         keywords: List[str],
-        task_type: str = None,
         top_k: int = 3,
         context: Dict[str, Any] = None,
     ) -> List[RoutingResult]:
@@ -569,14 +563,13 @@ class ToolSelector:
 
         Args:
             keywords: 关键词列表
-            task_type: 任务类型
             top_k: 返回数量
             context: 上下文
 
         Returns:
             RoutingResult 列表
         """
-        candidates = self.registry.find_candidates(task_type=task_type, context=context)
+        candidates = self.registry.find_candidates(context=context)
 
         scored = []
         for cap in candidates:

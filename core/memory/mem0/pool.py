@@ -146,10 +146,10 @@ class Mem0MemoryPool:
             )
 
             # 2. 创建 Embedder（优先使用本地 GGUF，离线可用）
+            embedding_config = self.config.embedder.to_dict()
             embedding_model = self._create_local_embedder()
             if embedding_model is None:
                 # Fallback: 使用 Mem0 原生 EmbedderFactory（如 OpenAI）
-                embedding_config = self.config.embedder.to_dict()
                 embedding_model = EmbedderFactory.create(
                     self.config.embedder.provider,
                     embedding_config,

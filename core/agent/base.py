@@ -663,12 +663,13 @@ class Agent:
         schema_tools = (
             self._schema.tools if self._schema and self._schema.tools else None
         )
-        if (
+        is_simple_task = (
             intent
             and intent.complexity.value == "simple"
             and not intent.needs_plan
             and not plan
-        ):
+        )
+        if is_simple_task:
             # 简单任务只需 3 个工具：nodes（执行）+ knowledge_search（知识）+ hitl（确认）
             # 不需要 plan/observe_screen/scheduled_task/api_calling
             schema_tools = ["nodes", "knowledge_search", "hitl"]
@@ -680,7 +681,6 @@ class Agent:
             await self.tool_selector.resolve_capabilities(
                 schema_tools=schema_tools,
                 plan=plan,
-                intent_task_type=None,
             )
         )
 
@@ -693,6 +693,8 @@ class Agent:
                 "available_apis": available_apis,
             },
             allowed_tools=allowed_tools,
+            # simple task 时同时限制核心工具范围，否则 step1 会加载全部 Level 1 工具
+            core_tools_override=allowed_tools if is_simple_task else None,
         )
 
         tools_for_llm = self.tool_selector.get_tools_for_llm(selection, self._llm)

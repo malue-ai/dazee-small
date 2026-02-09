@@ -31,17 +31,17 @@
 
 skill_groups:
   writing:
-    description: "写作、润色、改写、扩写、去 AI 味、文章生成、风格学习、多平台格式转换、PDF 报告、内容摘要"
-    skills: [writing-assistant, writing-analyzer, style-learner, content-reformatter, humanizer, elegant-reports, ppt-generator, summarize]
+    description: "写作、润色、改写、扩写、去 AI 味、文章生成、风格学习、多平台格式转换、PDF 报告、内容摘要、PPT 生成与编辑"
+    skills: [writing-assistant, writing-analyzer, style-learner, content-reformatter, humanizer, elegant-reports, ppt-generator, slidespeak-generator, slidespeak-editor, slidespeak-slide-editor, summarize]
   content_creation:
-    description: "社交媒体内容创作（Twitter/LinkedIn/Instagram）、Newsletter/周报/公告、视频脚本（短视频/YouTube/教学）、多平台发布策略"
-    skills: [social-media-creator, newsletter-writer, video-script-writer]
+    description: "社交媒体内容创作（Twitter/LinkedIn/Instagram）、Newsletter/周报/公告、视频脚本（短视频/YouTube/教学）、数据可视化视频、多平台发布策略、X/Twitter 发帖"
+    skills: [social-media-creator, newsletter-writer, video-script-writer, remotion, bird]
   data_analysis:
     description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理"
     skills: [excel-analyzer, excel-fixer, invoice-organizer]
   file_operation:
-    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印、批量格式转换（图片/文档）、桌面智能整理"
-    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, batch-file-converter, smart-desktop-organizer]
+    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印、批量格式转换（图片/文档）、视频帧提取、桌面智能整理"
+    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder]
   translation:
     description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
     skills: [translator, locale-aware-formatter, multi-lang-ocr]
@@ -58,8 +58,8 @@ skill_groups:
     description: "个人导师、学习计划、测验出题、间隔复习、读书笔记管理、跨书籍主题关联"
     skills: [skill-tutor, quiz-maker, reading-companion]
   creative:
-    description: "头脑风暴、创意发散、方案构思、GIF 搜索"
-    skills: [brainstorming, gifgrep]
+    description: "头脑风暴、创意发散、方案构思、GIF 搜索、Gemini CLI 问答与生成"
+    skills: [brainstorming, gifgrep, gemini]
   diagram:
     description: "流程图、架构图、思维导图、手绘图表"
     skills: [draw-io, excalidraw]
@@ -67,17 +67,17 @@ skill_groups:
     description: "AI 图像生成（DALL·E、Gemini）"
     skills: [openai-image-gen, nano-banana-pro]
   media:
-    description: "语音转文字、文字转语音、音乐播放"
-    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, spotify-player]
+    description: "语音转文字、文字转语音、音乐播放、视频帧/片段提取、React 编程式视频生成（Remotion）"
+    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, sag, spotify-player, video-frames, remotion]
   health:
     description: "营养分析、饮食建议、用药管理、健康追踪"
     skills: [nutrition-analyzer, medication-tracker]
   productivity:
-    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项）、日历、邮件、Google 全家桶、密码管理、Discord、智能邮件助手、定时任务"
-    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, smart-email-assistant, scheduled-tasks]
+    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项）、日历、邮件、Google 全家桶、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
+    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks]
   app_automation:
     description: "桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化"
-    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, openhue, goplaces, cross-app-workflow]
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, openhue, goplaces, cross-app-workflow]
   system_maintenance:
     description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查"
     skills: [disk-health-monitor]
@@ -191,6 +191,7 @@ skills:
       - { name: pdf-toolkit,        backend_type: local, skill_source: instance, python_packages: ["pypdf", "reportlab"], auto_install: true, description: "PDF 工具箱：合并/拆分/加密/水印/文本提取" }
       - { name: batch-file-converter, backend_type: local, skill_source: instance, python_packages: ["Pillow"], auto_install: true, description: "批量文件格式转换（图片/文档）" }
       - { name: local-file-encrypt,  backend_type: local, skill_source: instance, python_packages: ["cryptography"], auto_install: true, description: "本地文件加密/解密（AES-256）" }
+      - { name: video-frames,        backend_type: local, skill_source: library, bins: ["ffmpeg"], description: "从视频提取帧或短片（ffmpeg）" }
 
     external:
       - { name: summarize,           backend_type: local, skill_source: library, bins: ["summarize"], description: "URL / 视频 / 文档一键摘要" }
@@ -207,6 +208,10 @@ skills:
       - { name: draw-io,              backend_type: local, skill_source: instance, requires_app: "draw.io", description: "生成专业流程图、架构图（draw.io 格式）" }
       - { name: excalidraw,           backend_type: local, skill_source: instance, description: "生成手绘风格图表（Excalidraw 格式）" }
       - { name: multi-lang-ocr,       backend_type: local, skill_source: instance, bins: ["tesseract"], description: "多语言 OCR 图片文字提取（本地离线）" }
+      - { name: bird,                 backend_type: local, skill_source: library, bins: ["bird"], description: "X/Twitter CLI：读、搜、发帖与互动" }
+      - { name: wacli,                backend_type: local, skill_source: library, bins: ["wacli"], description: "WhatsApp 消息发送与历史同步" }
+      - { name: gemini,               backend_type: local, skill_source: library, bins: ["gemini"], description: "Gemini CLI 问答与生成" }
+      - { name: remotion,              backend_type: local, skill_source: library, description: "React 编程式视频生成：动态图表、数据可视化视频（需 Node.js + Remotion 项目）" }
 
     cloud_api:
       # --- MCP Skills（连接细节内聚在 Skill 条目内，用户只看到 Skill 名称） ---
@@ -228,6 +233,11 @@ skills:
       - { name: openai-whisper-api,  backend_type: local, skill_source: library, description: "云端语音转文字" }
       - { name: goplaces,            backend_type: local, skill_source: library, description: "周边地点搜索（Google Places）" }
       - { name: discord,             backend_type: local, skill_source: library, description: "Discord 消息与频道管理" }
+      - { name: slack,               backend_type: local, skill_source: library, description: "Slack 消息与频道操作（需配置 channels.slack）" }
+      - { name: slidespeak-generator, backend_type: local, skill_source: library, description: "SlideSpeak API 生成专业 PPT" }
+      - { name: slidespeak-editor,    backend_type: local, skill_source: library, description: "SlideSpeak API 编辑已有 PPT 形状内容" }
+      - { name: slidespeak-slide-editor, backend_type: local, skill_source: library, description: "SlideSpeak API 插入/删除/重生成幻灯片" }
+      - { name: sag,                 backend_type: local, skill_source: library, description: "ElevenLabs 文字转语音（需 ELEVENLABS_API_KEY）" }
 
   # ==================== macOS 专属 ====================
 
@@ -248,6 +258,7 @@ skills:
 
     external:
       - { name: peekaboo,            backend_type: local, skill_source: library, bins: ["peekaboo"], description: "macOS UI 自动化" }
+      - { name: imsg,                backend_type: local, skill_source: library, bins: ["imsg"], description: "iMessage/SMS CLI（macOS）" }
       - { name: bear-notes,          backend_type: local, skill_source: library, requires_app: "Bear", description: "Bear 笔记" }
       - { name: things-mac,          backend_type: local, skill_source: library, requires_app: "Things", description: "Things 待办管理" }
       - { name: spotify-player,      backend_type: local, skill_source: library, description: "Spotify 音乐播放控制" }

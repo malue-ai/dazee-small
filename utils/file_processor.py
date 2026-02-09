@@ -425,16 +425,29 @@ class FileProcessor:
 
                     attachment_text = f"📄 {meta_line}:\n```\n{content_preview}\n```"
 
-                    # 保留原始 URL（如果有）
+                    # 保留原始文件路径（如果有）
                     if pf.file_url:
-                        attachment_text += f"\n   原始文件: {pf.file_url}"
+                        if self._is_local_file(pf.file_url):
+                            resolved_path = str(self._resolve_local_path(pf.file_url))
+                            attachment_text += f"\n   原始文件: {resolved_path}"
+                        else:
+                            attachment_text += f"\n   原始文件: {pf.file_url}"
 
                     attachment_texts.append(attachment_text)
 
             elif pf.category == FileCategory.DOCUMENT:
-                # 复杂文档：提供 URL，让 Agent 决定
+                # 复杂文档：提供路径，让 Agent 用工具处理
                 if pf.file_url:
-                    attachment_texts.append(f"📎 {pf.filename} ({pf.mime_type}): {pf.file_url}")
+                    # 本地文件：解析为绝对路径，Agent 的工具才能直接读取
+                    if self._is_local_file(pf.file_url):
+                        resolved_path = str(self._resolve_local_path(pf.file_url))
+                        attachment_texts.append(
+                            f"📎 {pf.filename} ({pf.mime_type}): {resolved_path}"
+                        )
+                    else:
+                        attachment_texts.append(
+                            f"📎 {pf.filename} ({pf.mime_type}): {pf.file_url}"
+                        )
 
         # 构建最终的文本消息
         final_text = user_message

@@ -62,7 +62,6 @@ class CapabilityRegistry:
         """
         self.capabilities: Dict[str, Capability] = {}
         self.categories: List[Dict[str, Any]] = []
-        self.task_type_mappings: Dict[str, List[str]] = {}
         self._raw_capabilities: List[Dict[str, Any]] = []
 
         # 🆕 工具分类配置（合并自 tool_registry.yaml）
@@ -116,11 +115,6 @@ class CapabilityRegistry:
         except Exception as e:
             logger.error(f"❌ 加载配置失败: {e}")
             return
-
-        # 加载任务类型映射
-        self.task_type_mappings = config.get("task_type_mappings", {})
-        if self.task_type_mappings:
-            logger.info(f"✅ 加载任务类型映射: {len(self.task_type_mappings)} 种类型")
 
         # 加载能力分类定义
         self.categories = config.get("capability_categories", [])
@@ -298,7 +292,6 @@ class CapabilityRegistry:
         filtered = CapabilityRegistry.__new__(CapabilityRegistry)
         filtered.capabilities = {}
         filtered._raw_capabilities = []
-        filtered.task_type_mappings = self.task_type_mappings.copy()
         filtered.categories = self.categories.copy()
         filtered.tool_classification = self.tool_classification.copy()
         filtered._config_path = self._config_path
@@ -318,27 +311,18 @@ class CapabilityRegistry:
 
     def find_candidates(
         self,
-        task_type: str = None,
         context: Dict[str, Any] = None,
-        _keywords: List[str] = None,
     ) -> List[Capability]:
         """
-        根据任务类型和上下文查找候选能力（不依赖关键词匹配，符合 LLM-First）。
+        查找满足上下文约束的候选能力（符合 LLM-First）。
 
         Args:
-            task_type: 任务类型（来自意图分析等）
             context: 上下文（用于约束检查）
-            _keywords: 已废弃，仅保留签名兼容，不再参与过滤
 
         Returns:
             候选能力列表（未排序）
         """
         candidates = []
-
-        required_capabilities = set()
-        if task_type:
-            mapped_caps = self.get_capabilities_for_task_type(task_type)
-            required_capabilities.update(mapped_caps)
 
         for cap in self.capabilities.values():
             if cap.constraints.get("internal_use_only"):
@@ -347,11 +331,7 @@ class CapabilityRegistry:
             if not cap.meets_constraints(context):
                 continue
 
-            if required_capabilities and cap.capabilities:
-                if any(c in required_capabilities for c in cap.capabilities):
-                    candidates.append(cap)
-            elif not required_capabilities:
-                candidates.append(cap)
+            candidates.append(cap)
 
         return candidates
 
@@ -392,23 +372,6 @@ class CapabilityRegistry:
                 }
             )
         return skills
-
-    # ==================== 任务类型映射接口 ====================
-
-    def get_capabilities_for_task_type(self, task_type: str) -> List[str]:
-        """根据任务类型获取推荐的能力列表"""
-        mapping = self.task_type_mappings.get(task_type)
-        if mapping:
-            return mapping
-
-        default_mapping = self.task_type_mappings.get("other", [])
-        if not default_mapping:
-            return ["file_operations", "code_execution", "task_planning"]
-        return default_mapping
-
-    def get_all_task_types(self) -> List[str]:
-        """获取所有已配置的任务类型"""
-        return list(self.task_type_mappings.keys())
 
     def get_all_capabilities(self) -> List[Dict[str, Any]]:
         """获取所有原始能力配置数据"""

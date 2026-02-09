@@ -43,7 +43,8 @@ provider_templates:
       region: "singapore"
 
   claude:
-    agent_model: "claude-sonnet-4-5-20250929"  # 默认主 Agent（可改为 claude-opus-4-6）
+    agent_model: "claude-sonnet-4-5-20250929"   # 主 Agent：Sonnet 4.5（Benchmark 全流程验证）
+    # agent_model: "claude-opus-4-6"            # 可选：Opus 4.6
     agent_llm:
       max_tokens: 128000
       enable_thinking: true

@@ -680,6 +680,7 @@ class RVRExecutor(BaseExecutor):
         )
 
         turn = 0
+        plan_enforcement_attempted = False  # Plan enforcement: only intercept once
         while True:
             # 每轮调用 LLM 前刷新 Plan 注入（Plan 可能在上一轮工具调用中被更新）
             llm_messages = _refresh_plan_injection(llm_messages, inject_errors=(turn == 0))
@@ -717,11 +718,69 @@ class RVRExecutor(BaseExecutor):
 
                 response = ctx.last_llm_response
                 if response:
-                    # 阶段 5 验证：检查复杂任务是否创建 Plan
-                    if turn == 0 and intent and intent.needs_plan and response.tool_calls:
-                        self._validate_plan_creation(
+                    # 阶段 5：强制 Plan 创建（needs_plan=True 时）
+                    if (
+                        intent
+                        and intent.needs_plan
+                        and not plan_enforcement_attempted
+                        and response.tool_calls
+                        and not plan_cache.get("plan")
+                    ):
+                        plan_ok = self._validate_plan_creation(
                             response.tool_calls, context.extra.get("tracer")
                         )
+                        if not plan_ok:
+                            # Intercept: do not execute tools, inject reminder, retry
+                            plan_enforcement_attempted = True
+                            logger.warning(
+                                "⚠️ 强制 Plan: 拦截非 plan 工具调用，注入提醒重试"
+                            )
+
+                            # Build assistant message (preserve LLM response)
+                            assistant_content = (
+                                response.raw_content_blocks
+                                if hasattr(response, "raw_content_blocks")
+                                else []
+                            )
+                            if not assistant_content and response.tool_calls:
+                                assistant_content = []
+                                if response.content:
+                                    assistant_content.append(
+                                        {"type": "text", "text": response.content}
+                                    )
+                                for tc in response.tool_calls:
+                                    if tc.get("type") == "tool_use":
+                                        assistant_content.append(
+                                            {
+                                                "type": "tool_use",
+                                                "id": tc["id"],
+                                                "name": tc["name"],
+                                                "input": tc.get("input", {}),
+                                            }
+                                        )
+                            append_assistant_message(llm_messages, assistant_content)
+
+                            # Return error tool_results demanding plan creation
+                            plan_reminder_results = []
+                            for tc in response.tool_calls:
+                                if tc.get("type") == "tool_use":
+                                    plan_reminder_results.append(
+                                        {
+                                            "type": "tool_result",
+                                            "tool_use_id": tc["id"],
+                                            "content": (
+                                                "[SYSTEM] 强制要求：你必须先调用 "
+                                                'plan(action="create") '
+                                                "创建执行计划，再执行其他工具。"
+                                                "请立即创建 Plan。"
+                                            ),
+                                            "is_error": True,
+                                        }
+                                    )
+                            append_user_message(llm_messages, plan_reminder_results)
+
+                            turn += 1
+                            continue  # Skip tool execution, retry next turn
 
                     # 处理工具调用
                     if response.stop_reason == "tool_use" and response.tool_calls:
@@ -829,6 +888,67 @@ class RVRExecutor(BaseExecutor):
                 if response.stop_reason != "tool_use":
                     ctx.set_completed(response.content, response.stop_reason)
                     break
+
+                # 阶段 5：强制 Plan 创建（非流式路径）
+                if (
+                    intent
+                    and intent.needs_plan
+                    and not plan_enforcement_attempted
+                    and response.tool_calls
+                    and not plan_cache.get("plan")
+                ):
+                    plan_ok = self._validate_plan_creation(
+                        response.tool_calls, context.extra.get("tracer")
+                    )
+                    if not plan_ok:
+                        plan_enforcement_attempted = True
+                        logger.warning(
+                            "⚠️ 强制 Plan (非流式): 拦截非 plan 工具调用，注入提醒重试"
+                        )
+
+                        assistant_content = (
+                            response.raw_content_blocks
+                            if hasattr(response, "raw_content_blocks")
+                            else []
+                        )
+                        if not assistant_content and response.tool_calls:
+                            assistant_content = []
+                            if response.content:
+                                assistant_content.append(
+                                    {"type": "text", "text": response.content}
+                                )
+                            for tc in response.tool_calls:
+                                if tc.get("type") == "tool_use":
+                                    assistant_content.append(
+                                        {
+                                            "type": "tool_use",
+                                            "id": tc["id"],
+                                            "name": tc["name"],
+                                            "input": tc.get("input", {}),
+                                        }
+                                    )
+                        append_assistant_message(llm_messages, assistant_content)
+
+                        plan_reminder_results = []
+                        for tc in response.tool_calls:
+                            if tc.get("type") == "tool_use":
+                                plan_reminder_results.append(
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": tc["id"],
+                                        "content": (
+                                            "[SYSTEM] 强制要求：你必须先调用 "
+                                            'plan(action="create") '
+                                            "创建执行计划，再执行其他工具。"
+                                            "请立即创建 Plan。"
+                                        ),
+                                        "is_error": True,
+                                    }
+                                )
+                        append_user_message(llm_messages, plan_reminder_results)
+
+                        turn += 1
+                        continue  # Skip tool execution, retry next turn
 
                 # 处理工具调用（非流式）
                 async for _ in self._handle_tool_calls(
@@ -991,21 +1111,27 @@ class RVRExecutor(BaseExecutor):
             # "stop" 或未知策略 → 直接停止
             ctx.stop_reason = "hitl_rejected_stop"
 
-    def _validate_plan_creation(self, tool_calls: List[Dict], tracer=None) -> None:
+    def _validate_plan_creation(self, tool_calls: List[Dict], tracer=None) -> bool:
         """
-        验证复杂任务是否在第一轮创建 Plan
+        Validate that complex tasks create a Plan on the first turn.
+
+        Returns:
+            True if the first tool call is plan(action="create"), False otherwise.
         """
         first_tool_name = tool_calls[0].get("name", "")
         if first_tool_name == "plan":
             first_action = tool_calls[0].get("input", {}).get("action", "")
             if first_action == "create":
                 logger.info("✅ 阶段 5 验证通过: 复杂任务第一个工具调用是 plan(action='create')")
+                return True
             else:
                 logger.warning(f"⚠️ 阶段 5 异常: plan action 不是 create，实际: {first_action}")
+                return False
         else:
             logger.warning(f"⚠️ 阶段 5 异常: 复杂任务未创建 Plan！第一个工具: {first_tool_name}")
             if tracer:
                 tracer.add_warning(f"Plan Creation 跳过: 第一个工具是 {first_tool_name}")
+            return False
 
 
 def create_rvr_executor(config: Optional[ExecutorConfig] = None) -> RVRExecutor:
