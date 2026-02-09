@@ -88,7 +88,7 @@ class ContextStrategy:
     # 可在实例 config.yaml 中配置：context_management.enable_history_trimming
     enable_history_trimming: bool = True  # 是否启用历史消息压缩
     preserve_first_messages: int = 4  # 始终保留开头 N 条消息（任务上下文）
-    preserve_last_messages: int = 20  # 尽量保留最近 N 条消息（当前上下文）
+    preserve_last_messages: int = 10  # 尽量保留最近 N 条消息（当前上下文）
     preserve_tool_results: bool = True  # 保留中间的 tool_result（含重要数据）
 
     # 🆕 双阈值压缩机制
@@ -197,14 +197,131 @@ def _has_tool_result(msg: Dict[str, Any]) -> bool:
 
 
 # ============================================================
+# 快速字符级预过滤（防止大上下文导致后续 token 计算延迟）
+# ============================================================
+
+# 单条消息内容的硬上限（字符数）—— 任何单条 tool_result 不允许超过此值进入历史
+# 这是在昂贵的 token 计算之前的 O(n) 快速预过滤，防止上下文膨胀
+_MAX_SINGLE_CONTENT_CHARS = 3000
+
+# 总消息字符数的快速预检阈值（超过此值时触发激进裁剪，避免 token 计算延迟）
+# 约等于 token_budget * 4（1 token ≈ 4 chars 粗略估算）
+_FAST_PREFILTER_TOTAL_CHARS = 600_000
+
+
+def _fast_cap_message_content(content: Any, cap: int = _MAX_SINGLE_CONTENT_CHARS) -> Any:
+    """
+    快速截断单条消息内容到硬上限（<0.01ms per message）
+
+    不做 token 计算，纯字符截断。用于防止超大 tool_result
+    在进入 token 计算流程前就被控制住。
+    """
+    if isinstance(content, str):
+        if len(content) <= cap:
+            return content
+        head = cap * 2 // 3  # 2/3 给头部
+        tail = cap // 3      # 1/3 给尾部
+        return (
+            content[:head]
+            + f"\n\n... (已截断: 原文 {len(content)} 字符, 保留头 {head} + 尾 {tail}) ...\n\n"
+            + content[-tail:]
+        )
+
+    if isinstance(content, list):
+        capped = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > cap:
+                        head = cap * 2 // 3
+                        tail = cap // 3
+                        capped.append({
+                            **block,
+                            "text": (
+                                text[:head]
+                                + f"\n... (已截断: 原文 {len(text)} 字符) ...\n"
+                                + text[-tail:]
+                            ),
+                        })
+                    else:
+                        capped.append(block)
+                elif block.get("type") == "tool_result":
+                    # 递归处理嵌套的 tool_result content
+                    inner = block.get("content", "")
+                    capped_inner = _fast_cap_message_content(inner, cap)
+                    if capped_inner is not inner:
+                        capped.append({**block, "content": capped_inner})
+                    else:
+                        capped.append(block)
+                else:
+                    capped.append(block)
+            else:
+                capped.append(block)
+        return capped
+
+    return content
+
+
+def fast_prefilter_messages(
+    messages: List[Dict[str, Any]],
+    per_message_cap: int = _MAX_SINGLE_CONTENT_CHARS,
+) -> List[Dict[str, Any]]:
+    """
+    快速字符级预过滤：在昂贵的 token 计算之前截断超大消息（O(n), <1ms）
+
+    目的：防止上下文膨胀导致 count_message_tokens 等操作本身变慢。
+    在 token 计算之前先做一遍粗粒度截断，确保每条消息内容都在合理范围内。
+
+    Args:
+        messages: 消息列表
+        per_message_cap: 单条消息内容的字符硬上限
+
+    Returns:
+        预过滤后的消息列表
+    """
+    if not messages:
+        return messages
+
+    # 快速估算总字符数（O(n), <0.1ms）
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    if total_chars <= _FAST_PREFILTER_TOTAL_CHARS:
+        return messages  # 总量在安全范围内，跳过预过滤
+
+    # 超过阈值，逐条截断
+    capped_count = 0
+    result = []
+    for msg in messages:
+        content = msg.get("content")
+        if content is None:
+            result.append(msg)
+            continue
+        capped = _fast_cap_message_content(content, per_message_cap)
+        if capped is not content:
+            result.append({**msg, "content": capped})
+            capped_count += 1
+        else:
+            result.append(msg)
+
+    if capped_count > 0:
+        new_total = sum(len(str(m.get("content", ""))) for m in result)
+        logger.warning(
+            f"⚡ 快速预过滤: 截断 {capped_count} 条超大消息 "
+            f"(总字符 {total_chars:,} → {new_total:,})"
+        )
+
+    return result
+
+
+# ============================================================
 # tool_result 内容级压缩（即时，O(n)，零 LLM 调用）
 # ============================================================
 
-# tool_result 内容超过此字符数时触发截断
-_TOOL_RESULT_TRUNCATE_THRESHOLD = 500
+# tool_result 内容超过此字符数时触发截断（历史消息中的 tool_result）
+_TOOL_RESULT_TRUNCATE_THRESHOLD = 300
 # 截断后保留的头尾字符数
-_TOOL_RESULT_KEEP_HEAD = 200
-_TOOL_RESULT_KEEP_TAIL = 100
+_TOOL_RESULT_KEEP_HEAD = 150
+_TOOL_RESULT_KEEP_TAIL = 80
 
 
 def _compress_tool_result_content(content: Any) -> Any:
@@ -257,7 +374,7 @@ def _compress_tool_result_content(content: Any) -> Any:
 
 def _compress_old_tool_results(
     messages: List[Dict[str, Any]],
-    preserve_recent_n: int = 6,
+    preserve_recent_n: int = 4,
 ) -> List[Dict[str, Any]]:
     """
     压缩非最近消息中的 tool_result 内容（即时，O(n)，零 LLM 调用）
@@ -332,7 +449,7 @@ def trim_by_token_budget(
     messages: List[Dict[str, Any]],
     token_budget: int,
     preserve_first_messages: int = 4,
-    preserve_last_messages: int = 20,
+    preserve_last_messages: int = 10,
     preserve_tool_results: bool = True,
     system_prompt: str = "",
 ) -> Tuple[List[Dict[str, Any]], TrimStats]:
@@ -357,10 +474,13 @@ def trim_by_token_budget(
     Returns:
         (裁剪后的消息, 统计信息)
     """
+    # Step -1: 快速字符级预过滤（<1ms），防止超大消息导致后续 token 计算延迟
+    messages = fast_prefilter_messages(messages)
+
     # Step 0: 分级压缩旧消息中超长的 tool_result 内容（即时，O(n)，零 LLM 调用）
-    # 保留最近 6 条消息（约 3 轮对话）的 tool_result 原文
-    # 第 7 条以前的 tool_result 截断为头+尾
-    messages = _compress_old_tool_results(messages, preserve_recent_n=min(6, preserve_last_messages))
+    # 保留最近 4 条消息（约 2 轮对话）的 tool_result 原文
+    # 第 5 条以前的 tool_result 截断为头+尾
+    messages = _compress_old_tool_results(messages, preserve_recent_n=min(4, preserve_last_messages))
 
     original_count = len(messages)
 
@@ -500,7 +620,7 @@ async def compress_with_summary(
     conversation_id: Optional[str] = None,
     conversation_service: Optional[Any] = None,
     preserve_first_messages: int = 4,
-    preserve_last_messages: int = 20,
+    preserve_last_messages: int = 10,
     preserve_tool_results: bool = True,
     system_prompt: str = "",
     compression_phase: str = "pre_run",
@@ -841,6 +961,7 @@ __all__ = [
     "should_warn_backend",
     # 🆕 带摘要的智能压缩（双阈值机制）
     "CompressionPhase",
+    "fast_prefilter_messages",  # 快速字符级预过滤
     "trim_by_token_budget",  # 纯 token 驱动裁剪
     "compress_with_summary",
     "load_with_existing_summary",

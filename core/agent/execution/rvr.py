@@ -226,6 +226,8 @@ class RVRExecutor(BaseExecutor):
 
         始终剥离旧消息中的 base64 图片，避免截图累积撑爆上下文窗口。
         """
+        from core.context.compaction import fast_prefilter_messages
+
         messages_for_estimate = [
             {"role": m.role, "content": m.content} if hasattr(m, "role") else m
             for m in llm_messages
@@ -233,6 +235,9 @@ class RVRExecutor(BaseExecutor):
 
         # 始终剥离旧消息中的 base64 图片（保留最近 2 条消息的图片）
         messages_for_estimate = self._strip_old_images(messages_for_estimate)
+
+        # 快速字符级预过滤（<1ms）：在昂贵的 token 计算前截断超大消息
+        messages_for_estimate = fast_prefilter_messages(messages_for_estimate)
 
         # 使用统一的 token 计算方法（包含工具定义）
         estimated_tokens = count_request_tokens(
@@ -667,7 +672,7 @@ class RVRExecutor(BaseExecutor):
             if context.context_strategy
             else 180000
         )
-        safe_threshold = token_budget - 20000
+        safe_threshold = token_budget - 10000
 
         # 进入循环前检查并裁剪上下文
         llm_messages = self._trim_messages_if_needed(

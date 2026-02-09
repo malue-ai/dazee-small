@@ -387,11 +387,18 @@ Token消耗：
         overall_score = result.get("overall_score") or result.get("weighted_score", 3.0)
         confidence = result.get("confidence", 0.7)
 
-        # Model grader is advisory — always passed=True, scores for human review
+        # Model grader quality gate:
+        # - task_completed=false AND overall_score < 2.0 → passed=False (quality too low)
+        # - Otherwise → passed=True (advisory, scores for human review)
+        task_completed = result.get("task_completed", True)
+        quality_passed = True
+        if task_completed is False and overall_score < 2.0:
+            quality_passed = False
+
         return GradeResult(
             grader_type=GraderType.MODEL,
             grader_name="grade_response_quality",
-            passed=True,
+            passed=quality_passed,
             score=overall_score / 5.0,
             confidence=confidence,
             needs_human_review=True,
