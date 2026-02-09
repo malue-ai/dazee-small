@@ -193,7 +193,6 @@
           :loading="isCurrentLoading"
           :stopping="chat.isStopping.value"
           :uploading="fileUpload.isUploading.value"
-          :disabled="isCurrentLoading"
           @send="handleSendMessage"
           @stop="handleStopGeneration"
           @upload-click="handleUploadClick"
@@ -832,6 +831,11 @@ async function handleSendMessage(): Promise<void> {
     : undefined
 
   if (!content && !files?.length) return
+
+  // 如果智能体正在回复，先停止当前回复
+  if (isCurrentLoading.value) {
+    await handleStopGeneration()
+  }
   
   // 清空输入
   inputMessage.value = ''

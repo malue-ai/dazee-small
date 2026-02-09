@@ -31,7 +31,7 @@
           <Paperclip v-else class="w-5 h-5" />
         </button>
         
-        <!-- 文本输入框 -->
+        <!-- 文本输入框（始终可输入，即使智能体正在回复） -->
         <textarea
           ref="textareaRef"
           v-model="inputValue"
@@ -40,22 +40,21 @@
           @compositionend="isComposing = false"
           @input="adjustHeight"
           placeholder="输入消息..."
-          :disabled="disabled"
           rows="1"
           class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-foreground placeholder:text-muted-foreground/50 resize-none leading-relaxed overflow-y-hidden"
         ></textarea>
         
         <div class="pb-1 flex-shrink-0">
-          <!-- 停止按钮 -->
+          <!-- 停止按钮：仅在加载中且无输入内容时显示 -->
           <button 
-            v-if="loading" 
+            v-if="loading && !hasInput" 
             class="p-3 rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all shadow-sm" 
             @click="emit('stop')"
             :disabled="stopping"
           >
             <Square class="w-5 h-5" />
           </button>
-          <!-- 发送按钮（始终显示，无内容时禁用） -->
+          <!-- 发送按钮：有输入内容时显示（即使正在加载），无内容且未加载时也显示（禁用态） -->
           <button 
             v-else
             class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center"
@@ -137,9 +136,14 @@ const inputValue = computed({
   set: (value: string) => emit('update:modelValue', value)
 })
 
-/** 是否可以发送 */
+/** 是否有输入内容（文字或文件） */
+const hasInput = computed(() => {
+  return inputValue.value.trim().length > 0 || props.selectedFiles.length > 0
+})
+
+/** 是否可以发送（有内容即可，不受 loading 状态限制） */
 const canSend = computed(() => {
-  return (inputValue.value.trim().length > 0 || props.selectedFiles.length > 0) && !props.disabled
+  return hasInput.value
 })
 
 // ==================== Methods ====================
