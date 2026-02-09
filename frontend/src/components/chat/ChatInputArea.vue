@@ -1,6 +1,20 @@
 <template>
   <div class="px-6 pb-6 pt-2 bg-transparent pointer-events-none sticky bottom-0 z-30">
-    <div class="pointer-events-auto max-w-4xl mx-auto bg-white border border-border rounded-2xl p-3 shadow-lg transition-all duration-300 focus-within:shadow-xl focus-within:border-primary/30">
+    <div 
+      class="pointer-events-auto max-w-4xl mx-auto bg-white border rounded-2xl p-3 shadow-lg transition-all duration-300 focus-within:shadow-xl focus-within:border-primary/30"
+      :class="isDragOver ? 'border-primary border-dashed bg-primary/5' : 'border-border'"
+      @dragover.prevent="onDragOver"
+      @dragleave.prevent="onDragLeave"
+      @drop.prevent="onDrop"
+    >
+      <!-- 拖拽提示层 -->
+      <div
+        v-if="isDragOver"
+        class="absolute inset-0 flex items-center justify-center rounded-2xl z-10 pointer-events-none"
+      >
+        <span class="text-sm text-primary font-medium">释放以添加文件</span>
+      </div>
+
       <div class="flex items-center gap-2">
         <!-- 添加文件按钮 -->
         <button 
@@ -98,6 +112,7 @@ const emit = defineEmits<{
   (e: 'send'): void
   (e: 'stop'): void
   (e: 'upload-click'): void
+  (e: 'files-dropped', files: File[]): void
 }>()
 
 // ==================== State ====================
@@ -105,6 +120,8 @@ const emit = defineEmits<{
 const editorRef = ref<HTMLDivElement | null>(null)
 const isComposing = ref(false)
 const editorEmpty = ref(true)
+const isDragOver = ref(false)
+let dragLeaveTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 防止 input → emit → watch → 更新 DOM 的循环 */
 let _syncing = false
@@ -169,11 +186,44 @@ function onEditorKeydown(e: KeyboardEvent) {
   }
 }
 
-/** 粘贴：仅保留纯文本 */
+/** 粘贴：仅保留纯文本，同时支持粘贴文件 */
 function onPaste(e: ClipboardEvent) {
+  // 如果粘贴内容包含文件（如截图），通知父组件处理
+  const files = Array.from(e.clipboardData?.files || [])
+  if (files.length > 0) {
+    e.preventDefault()
+    emit('files-dropped', files)
+    return
+  }
+
   e.preventDefault()
   const text = e.clipboardData?.getData('text/plain') || ''
   if (text) document.execCommand('insertText', false, text)
+}
+
+// ==================== 拖拽放置文件 ====================
+
+function onDragOver(e: DragEvent) {
+  // 只在有文件时显示拖拽状态
+  if (e.dataTransfer?.types.includes('Files')) {
+    if (dragLeaveTimer) { clearTimeout(dragLeaveTimer); dragLeaveTimer = null }
+    isDragOver.value = true
+  }
+}
+
+function onDragLeave() {
+  // 延迟隐藏：避免在子元素间移动时闪烁
+  dragLeaveTimer = setTimeout(() => { isDragOver.value = false }, 100)
+}
+
+function onDrop(e: DragEvent) {
+  isDragOver.value = false
+  if (dragLeaveTimer) { clearTimeout(dragLeaveTimer); dragLeaveTimer = null }
+
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length > 0) {
+    emit('files-dropped', files)
+  }
 }
 
 // ==================== 外部 modelValue 同步 ====================

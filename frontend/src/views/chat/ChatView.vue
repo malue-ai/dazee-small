@@ -189,14 +189,13 @@
         <ChatInputArea
           ref="inputAreaRef"
           v-model="inputMessage"
-          :selected-files="fileUpload.selectedFiles.value"
           :loading="isCurrentLoading"
           :stopping="chat.isStopping.value"
           :uploading="fileUpload.isUploading.value"
           @send="handleSendMessage"
           @stop="handleStopGeneration"
           @upload-click="handleUploadClick"
-          @remove-file="handleRemoveFile"
+          @files-dropped="handleFilesDropped"
         />
       </div>
 
@@ -826,9 +825,9 @@ function handleSuggestionClick(text: string): void {
 /** 发送消息 */
 async function handleSendMessage(): Promise<void> {
   const content = inputMessage.value.trim()
-  const files = fileUpload.selectedFiles.value.length > 0 
-    ? [...fileUpload.selectedFiles.value] 
-    : undefined
+  // 从编辑器中获取当前文件（用户可能已删除部分文件标签）
+  const editorFiles = inputAreaRef.value?.getFiles() || []
+  const files = editorFiles.length > 0 ? editorFiles : undefined
 
   if (!content && !files?.length) return
 
@@ -885,18 +884,39 @@ function handleUploadClick(): void {
   fileInputRef.value?.click()
 }
 
-/** 处理文件选择 */
+/** 处理文件选择（点击 + 按钮后） */
 async function handleFileSelect(event: Event): Promise<void> {
   try {
+    const beforeCount = fileUpload.selectedFiles.value.length
     await fileUpload.handleFileSelect(event)
+    // 将新上传的文件插入编辑器显示
+    const newFiles = fileUpload.selectedFiles.value.slice(beforeCount)
+    for (const file of newFiles) {
+      inputAreaRef.value?.insertFile(file)
+    }
   } catch {
     showConfirm({ title: '上传失败', message: '文件上传失败，请重试', type: 'error', showCancel: false })
   }
 }
 
-/** 移除文件 */
-function handleRemoveFile(index: number): void {
-  fileUpload.removeFile(index)
+/** 处理拖拽/粘贴的文件 */
+async function handleFilesDropped(files: File[]): Promise<void> {
+  if (!files.length) return
+
+  fileUpload.isUploading.value = true
+  try {
+    for (const file of files) {
+      const result = await fileUpload.uploadFile(file)
+      if (result) {
+        fileUpload.selectedFiles.value.push(result)
+        inputAreaRef.value?.insertFile(result)
+      }
+    }
+  } catch {
+    showConfirm({ title: '上传失败', message: '文件上传失败，请重试', type: 'error', showCancel: false })
+  } finally {
+    fileUpload.isUploading.value = false
+  }
 }
 
 /** 文件预览（消息中的附件） */
