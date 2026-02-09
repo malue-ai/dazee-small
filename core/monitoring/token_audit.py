@@ -18,6 +18,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from utils.app_paths import get_logs_dir
+
 import aiofiles
 from pydantic import BaseModel, Field
 
@@ -140,7 +142,7 @@ class TokenAuditor:
         max_records: int = 10_000,  # 最大保留记录数
         enable_persistence: bool = False,  # 是否持久化（默认内存）
         # 计费日志配置
-        log_dir: str = "logs/tokens",  # 日志目录
+        log_dir: str = "",  # 日志目录（空则使用 get_logs_dir()/tokens）
         enable_billing_log: bool = True,  # 是否启用计费日志
     ):
         # 单次调用阈值
@@ -155,7 +157,7 @@ class TokenAuditor:
         self.enable_persistence = enable_persistence
 
         # 计费日志配置
-        self.log_dir = Path(log_dir)
+        self.log_dir = Path(log_dir) if log_dir else get_logs_dir() / "tokens"
         self.enable_billing_log = enable_billing_log
         if enable_billing_log:
             self.log_dir.mkdir(parents=True, exist_ok=True)

@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from utils.app_paths import get_user_data_dir
+
 import aiofiles
 
 from core.monitoring.failure_case_db import FailureCaseDB
@@ -43,7 +45,7 @@ class CaseConverter:
     def __init__(
         self,
         failure_db: FailureCaseDB,
-        eval_suites_dir: str = "evaluation/suites/regression",
+        eval_suites_dir: str = "",
         min_cases_for_suite: int = 5,
     ):
         """
@@ -55,7 +57,7 @@ class CaseConverter:
             min_cases_for_suite: 生成套件的最小案例数
         """
         self.failure_db = failure_db
-        self.eval_suites_dir = Path(eval_suites_dir)
+        self.eval_suites_dir = Path(eval_suites_dir) if eval_suites_dir else get_user_data_dir() / "evaluation" / "suites" / "regression"
         self.min_cases_for_suite = min_cases_for_suite
 
         # 确保目录存在

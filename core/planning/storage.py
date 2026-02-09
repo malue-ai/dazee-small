@@ -13,6 +13,8 @@ Plan 存储层（Storage）
 """
 
 import asyncio
+
+from utils.app_paths import get_user_data_dir
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -43,7 +45,7 @@ class PlanStorage:
         plans = await storage.get_by_conversation(conversation_id)
     """
 
-    def __init__(self, storage_path: str = "data/plans", retention_days: int = 30):
+    def __init__(self, storage_path: str = "", retention_days: int = 30):
         """
         初始化存储层
 
@@ -53,7 +55,7 @@ class PlanStorage:
 
         注意：需要调用 await initialize() 完成异步初始化
         """
-        self.storage_path = Path(storage_path)
+        self.storage_path = Path(storage_path) if storage_path else get_user_data_dir() / "data" / "plans"
         self.retention_days = retention_days
 
         # 确保存储目录存在

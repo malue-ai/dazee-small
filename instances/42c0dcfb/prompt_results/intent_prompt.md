@@ -128,6 +128,36 @@
 <output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
+<example>
+<query>帮我分析这份会议记录，提取行动项</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["meeting"]}}</output>
+</example>
+
+<example>
+<query>帮我头脑风暴一下，公众号怎么涨粉</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["creative"]}}</output>
+</example>
+
+<example>
+<query>帮我画一个项目开发流程图</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["diagram"]}}</output>
+</example>
+
+<example>
+<query>帮我分析这个职位描述，优化简历</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["career"]}}</output>
+</example>
+
+<example>
+<query>教我学数据分析，从零开始</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["learning"]}}</output>
+</example>
+
+<example>
+<query>帮我把这篇文章去掉 AI 味，然后生成一份 PDF 报告</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
+</example>
+
 ---
 
 ## 重要说明

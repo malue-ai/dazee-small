@@ -51,7 +51,10 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Protocol
+
+# Type alias for progress callback: async def callback(step: int, message: str) -> None
+ProgressCallback = Optional[Callable[[int, str], Coroutine[Any, Any, None]]]
 
 # 2. 第三方库
 import aiofiles
@@ -343,7 +346,11 @@ class InstancePromptCache:
         logger.info("🧹 已清除所有 InstancePromptCache 实例")
 
     async def load_once(
-        self, raw_prompt: str, config: Optional[Dict[str, Any]] = None, force_refresh: bool = False
+        self,
+        raw_prompt: str,
+        config: Optional[Dict[str, Any]] = None,
+        force_refresh: bool = False,
+        progress_callback: ProgressCallback = None,
     ) -> bool:
         """
         一次性加载所有提示词版本（幂等）
@@ -359,6 +366,7 @@ class InstancePromptCache:
             raw_prompt: 运营写的原始系统提示词
             config: 实例配置（来自 config.yaml）
             force_refresh: 强制刷新缓存
+            progress_callback: async callback(step, message) for progress reporting
 
         Returns:
             是否成功加载
@@ -429,7 +437,7 @@ class InstancePromptCache:
             try:
                 # 🆕 V5.5: 分解 LLM 任务生成场景化提示词
                 llm_start = time.time()
-                await self._generate_decomposed_prompts(raw_prompt, config)
+                await self._generate_decomposed_prompts(raw_prompt, config, progress_callback)
                 self.metrics.llm_analysis_time_ms = (time.time() - llm_start) * 1000
 
                 self.is_loaded = True
@@ -576,7 +584,10 @@ class InstancePromptCache:
     # ============================================================
 
     async def _generate_decomposed_prompts(
-        self, raw_prompt: str, config: Optional[Dict[str, Any]] = None
+        self,
+        raw_prompt: str,
+        config: Optional[Dict[str, Any]] = None,
+        progress_callback: ProgressCallback = None,
     ):
         """
         🆕 V5.5: 分解 LLM 任务生成场景化提示词
@@ -606,6 +617,8 @@ class InstancePromptCache:
 
         # Task 1: 生成 AgentSchema
         if regen_flags.get("agent_schema", True) or not self.agent_schema:
+            if progress_callback:
+                await progress_callback(2, "分析角色定义...")
             logger.info("   Task 1/5: 生成 AgentSchema...")
             await self._generate_agent_schema(raw_prompt, config)
             logger.info(
@@ -616,6 +629,8 @@ class InstancePromptCache:
 
         # Task 2: 生成意图识别提示词
         if regen_flags.get("intent_prompt", True) or not self.intent_prompt:
+            if progress_callback:
+                await progress_callback(3, "生成意图识别...")
             logger.info("   Task 2/5: 生成意图识别提示词...")
             await self._generate_intent_prompt_decomposed(raw_prompt)
             logger.info(f"   ✅ 意图识别提示词: {len(self.intent_prompt or '')} 字符")
@@ -624,6 +639,8 @@ class InstancePromptCache:
 
         # Task 3: 生成简单任务提示词
         if regen_flags.get("simple_prompt", True) or not self.system_prompt_simple:
+            if progress_callback:
+                await progress_callback(4, "生成场景提示词(1/3)...")
             logger.info("   Task 3/5: 生成简单任务提示词...")
             await self._generate_simple_prompt_decomposed(raw_prompt)
             logger.info(f"   ✅ 简单任务提示词: {len(self.system_prompt_simple or '')} 字符")
@@ -632,6 +649,8 @@ class InstancePromptCache:
 
         # Task 4: 生成中等任务提示词
         if regen_flags.get("medium_prompt", True) or not self.system_prompt_medium:
+            if progress_callback:
+                await progress_callback(5, "生成场景提示词(2/3)...")
             logger.info("   Task 4/5: 生成中等任务提示词...")
             await self._generate_medium_prompt_decomposed(raw_prompt)
             logger.info(f"   ✅ 中等任务提示词: {len(self.system_prompt_medium or '')} 字符")
@@ -640,6 +659,8 @@ class InstancePromptCache:
 
         # Task 5: 生成复杂任务提示词
         if regen_flags.get("complex_prompt", True) or not self.system_prompt_complex:
+            if progress_callback:
+                await progress_callback(6, "生成场景提示词(3/3)...")
             logger.info("   Task 5/5: 生成复杂任务提示词...")
             await self._generate_complex_prompt_decomposed(raw_prompt)
             logger.info(f"   ✅ 复杂任务提示词: {len(self.system_prompt_complex or '')} 字符")
@@ -1607,6 +1628,7 @@ async def load_instance_cache(
     config: Optional[Dict[str, Any]] = None,
     cache_dir: Optional[str] = None,
     force_refresh: bool = False,
+    progress_callback: ProgressCallback = None,
 ) -> InstancePromptCache:
     """
     加载实例缓存（便捷函数）
@@ -1619,6 +1641,7 @@ async def load_instance_cache(
         config: 实例配置
         cache_dir: 缓存目录路径（启用持久化）
         force_refresh: 强制刷新
+        progress_callback: async callback(step, message) for progress reporting
 
     Returns:
         加载完成的 InstancePromptCache
@@ -1629,5 +1652,5 @@ async def load_instance_cache(
     if cache_dir:
         cache.set_cache_dir(cache_dir)
 
-    await cache.load_once(raw_prompt, config, force_refresh)
+    await cache.load_once(raw_prompt, config, force_refresh, progress_callback)
     return cache

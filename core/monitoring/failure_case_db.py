@@ -13,6 +13,8 @@ import json
 import os
 from dataclasses import asdict
 from datetime import datetime, timedelta
+
+from utils.app_paths import get_user_data_dir
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -41,7 +43,7 @@ class FailureCaseDB:
         tasks = db.export_as_eval_tasks(case_ids=["case_001", "case_002"])
     """
 
-    def __init__(self, storage_path: str = "data/failure_cases", retention_days: int = 30):
+    def __init__(self, storage_path: str = "", retention_days: int = 30):
         """
         初始化失败案例数据库
 
@@ -51,7 +53,7 @@ class FailureCaseDB:
 
         注意：需要调用 await initialize() 完成异步初始化
         """
-        self.storage_path = Path(storage_path)
+        self.storage_path = Path(storage_path) if storage_path else get_user_data_dir() / "data" / "failure_cases"
         self.retention_days = retention_days
 
         # 确保存储目录存在

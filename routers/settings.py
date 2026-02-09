@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
+from logger import get_logger
 from services.settings_service import (
     get_embedding_status,
     get_settings,
@@ -19,6 +20,8 @@ from services.settings_service import (
     get_settings_status,
     update_settings,
 )
+
+logger = get_logger("settings_router")
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
@@ -54,6 +57,25 @@ async def write_settings(body: Dict[str, Any]) -> Dict[str, Any]:
     ```
     """
     updated = await update_settings(body)
+
+    # API Key 变更后热重载所有 Agent（使新 provider/model 生效）
+    if "api_keys" in body:
+        # 清除 Mem0 config 缓存，下次初始化时重新检测 embedding provider
+        try:
+            from core.memory.mem0.config import set_mem0_config
+            set_mem0_config(None)
+            logger.info("🔄 Mem0 embedding 配置缓存已清除，将随 API Key 自动重新检测")
+        except Exception:
+            pass
+
+        try:
+            from services.agent_registry import get_agent_registry
+            registry = get_agent_registry()
+            result = await registry.reload_agent()
+            logger.info(f"🔄 Settings 变更后热重载 Agent: {result}")
+        except Exception as e:
+            logger.warning(f"⚠️ Agent 热重载失败（不影响设置保存）: {e}")
+
     return {
         "success": True,
         "data": updated,

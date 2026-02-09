@@ -107,11 +107,27 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
-   * 创建 Agent
+   * 创建 Agent（SSE 流式进度推送）
+   *
+   * @param data - 创建请求参数
+   * @param onProgress - 进度回调 (step, total, message)
+   * @param signal - AbortController signal for timeout/cancel
    */
-  async function createAgent(data: AgentCreateRequest): Promise<AgentDetail> {
+  async function createAgent(
+    data: AgentCreateRequest,
+    onProgress?: (step: number, total: number, message: string) => void,
+    signal?: AbortSignal,
+  ): Promise<AgentDetail> {
     try {
-      const detail = await agentApi.createAgent(data)
+      let detail: AgentDetail
+
+      if (onProgress) {
+        // SSE mode: stream progress events
+        detail = await agentApi.createAgentSSE(data, onProgress, signal)
+      } else {
+        // Fallback: original JSON mode
+        detail = await agentApi.createAgent(data)
+      }
 
       // 初始化映射
       agentConversations.value[detail.agent_id] = []

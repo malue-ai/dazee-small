@@ -22,8 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
-# Python 环境：优先使用 conda zeno，回退到系统 python3
-CONDA_ENV_NAME="${CONDA_ENV_NAME:-zeno}"
+# Python 环境：使用当前已激活的环境（conda/venv 均可）
 PYTHON_CMD="python3"
 
 SKIP_BACKEND=false
@@ -48,19 +47,16 @@ check_cmd() {
   fi
 }
 
-# ==================== 激活 Python 环境 ====================
+# ==================== 检查 Python 环境 ====================
 
-# 尝试激活 conda 环境（支持非交互式 shell）
-if command -v conda &> /dev/null; then
-  eval "$(conda shell.bash hook 2>/dev/null)"
-  if conda activate "$CONDA_ENV_NAME" 2>/dev/null; then
-    PYTHON_CMD="python"
-    info "已激活 conda 环境: $CONDA_ENV_NAME ($(python --version 2>&1))"
-  else
-    warn "conda 环境 '$CONDA_ENV_NAME' 不存在，使用系统 python3"
-  fi
+PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 || true)
+if [ -n "$VIRTUAL_ENV" ]; then
+  info "当前 venv 环境: $VIRTUAL_ENV ($PYTHON_VERSION)"
+elif [ -n "$CONDA_PREFIX" ]; then
+  info "当前 conda 环境: $(basename "$CONDA_PREFIX") ($PYTHON_VERSION)"
 else
-  info "未检测到 conda，使用系统 python3"
+  warn "未检测到激活的虚拟环境，将使用系统 python3 ($PYTHON_VERSION)"
+  warn "建议先激活环境: source .venv/bin/activate 或 conda activate <env>"
 fi
 
 # ==================== 依赖检查 ====================

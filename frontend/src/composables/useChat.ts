@@ -243,7 +243,7 @@ export function useChat() {
         variables: options.variables || {
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           locale: navigator.language,
-          timestamp: new Date().toISOString()
+          local_time: new Date().toLocaleString('sv-SE', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }).replace(' ', 'T')
         }
       }
 

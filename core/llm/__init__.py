@@ -202,7 +202,12 @@ def create_llm_service(
     }
 
     if model is None:
-        model = default_models.get(provider, "claude-sonnet-4-5-20250929")
+        model = default_models.get(provider)
+        if model is None:
+            raise ValueError(
+                f"未指定模型且 provider '{provider}' 无默认模型。"
+                f"请在 config.yaml 中配置 agent.provider 和 agent.model"
+            )
 
     # 从环境变量读取 API Key（支持 api_key_env 参数）
     api_key_env = kwargs.pop("api_key_env", None)

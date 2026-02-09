@@ -62,7 +62,8 @@ def _get_log_dir() -> Path:
                 home = os.environ.get('HOME', os.path.expanduser('~'))
                 return Path(home) / 'Library' / 'Application Support' / 'com.zenflux.agent' / 'logs'
             return Path(sys.executable).parent / 'logs'
-        return Path('logs')
+        import tempfile
+        return Path(tempfile.gettempdir()) / 'zenflux-agent' / 'logs'
 
 
 _log_dir = _get_log_dir()

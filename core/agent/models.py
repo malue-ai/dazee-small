@@ -33,7 +33,7 @@ class AgentConfig(BaseModel):
 
     agent_id: str = Field(..., description="智能体唯一标识")
     role: AgentRole = Field(AgentRole.EXECUTOR, description="智能体角色")
-    model: str = Field("claude-sonnet-4-5-20250929", description="使用的模型")
+    model: str = Field("", description="使用的模型（必须由 config.yaml 显式配置）")
 
     # 系统提示词
     system_prompt: Optional[str] = Field(None, description="自定义系统提示词")

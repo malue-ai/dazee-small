@@ -9,7 +9,13 @@
 #
 
 skill_groups:
-  _always: [local-search, app-recommender]
+  # 示例分组（按需添加）：
+  # writing:
+  #   description: "写作、润色、改写"
+  #   skills: [writing-assistant]
+  _always:
+    description: "始终注入（基础能力）"
+    skills: [local-search, app-recommender]
 
 skills:
   loading_mode: "lazy"

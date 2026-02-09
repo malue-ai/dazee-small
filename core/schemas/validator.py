@@ -434,7 +434,7 @@ class AgentSchema(BaseModel):
     # 运行时参数
     # ============================================================
 
-    model: str = Field(default="claude-sonnet-4-5-20250929", description="主 LLM 模型")
+    model: str = Field(default="", description="主 LLM 模型（必须由 config.yaml 显式配置）")
 
     max_turns: int = Field(default=15, ge=1, le=50, description="最大对话轮次")
 
@@ -685,7 +685,7 @@ DEFAULT_AGENT_SCHEMA = AgentSchema(
         max_output_length=50000,
     ),
     # 运行时参数
-    model="claude-sonnet-4-5-20250929",  # 平衡能力和成本
+    model="",  # 不预设默认模型，必须由 config.yaml 显式配置
     max_turns=15,  # 适中的对话长度
     allow_parallel_tools=False,  # 默认串行（更稳定）
     skills=[],  # 由 config.yaml 配置

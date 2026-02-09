@@ -140,6 +140,27 @@
         </div>
       </div>
 
+      <!-- 创建进度条 -->
+      <Transition name="toast">
+        <div v-if="isCreating && !isEditMode && createProgress.step > 0" class="mx-6 mt-3">
+          <div class="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted/50 border border-border">
+            <Loader2 class="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-xs text-muted-foreground">{{ createProgress.message }}</span>
+                <span class="text-xs text-muted-foreground tabular-nums">{{ createProgress.step }}/{{ createProgress.total }}</span>
+              </div>
+              <div class="w-full h-1 rounded-full bg-muted overflow-hidden">
+                <div
+                  class="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                  :style="{ width: `${(createProgress.step / createProgress.total) * 100}%` }"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
       <!-- 错误提示 -->
       <Transition name="toast">
         <div 
@@ -911,18 +932,48 @@ function startTypewriter(text: string) {
 /** 创建中状态 */
 const isCreating = ref(false)
 
-/** 创建项目（调用 Agent API） */
+/** SSE 进度状态 */
+const createProgress = reactive({
+  step: 0,
+  total: 7,
+  message: '',
+})
+
+/** SSE 超时（60 秒） */
+const CREATE_TIMEOUT_MS = 60_000
+
+/** 重置进度状态 */
+function resetProgress() {
+  createProgress.step = 0
+  createProgress.total = 7
+  createProgress.message = ''
+}
+
+/** 创建项目（SSE 流式进度推送） */
 async function handleCreate() {
   if (!canCreate.value || isCreating.value) return
 
   isCreating.value = true
+  resetProgress()
+
+  const abortController = new AbortController()
+  const timer = setTimeout(() => abortController.abort(), CREATE_TIMEOUT_MS)
+
   try {
-    const detail = await agentStore.createAgent({
-      name: form.name.trim(),
-      description: form.description.trim(),
-      prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`,
-      ...(form.model ? { model: form.model } : {})
-    })
+    const detail = await agentStore.createAgent(
+      {
+        name: form.name.trim(),
+        description: form.description.trim(),
+        prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`,
+        ...(form.model ? { model: form.model } : {})
+      },
+      (step, total, message) => {
+        createProgress.step = step
+        createProgress.total = total
+        createProgress.message = message
+      },
+      abortController.signal,
+    )
 
     // 引导完成
     if (guideStore.isActive) {
@@ -933,10 +984,14 @@ async function handleCreate() {
     router.replace({ name: 'agent', params: { agentId: detail.agent_id } })
   } catch (error: any) {
     console.error('❌ 创建项目失败:', error)
-    const msg = error?.response?.data?.detail || error?.message || '未知错误'
+    const msg = error?.name === 'AbortError'
+      ? '创建超时，请稍后重试'
+      : (error?.response?.data?.detail || error?.message || '未知错误')
     showError(`创建失败：${msg}`)
   } finally {
+    clearTimeout(timer)
     isCreating.value = false
+    resetProgress()
   }
 }
 

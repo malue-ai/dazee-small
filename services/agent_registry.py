@@ -118,7 +118,12 @@ class AgentRegistry:
 
     # ==================== 单实例加载 ====================
 
-    async def preload_instance(self, instance_name: str, force_refresh: bool = False) -> bool:
+    async def preload_instance(
+        self,
+        instance_name: str,
+        force_refresh: bool = False,
+        progress_callback=None,
+    ) -> bool:
         """
         🆕 V9.5: 单实例加载模式（推荐的生产部署方式）
 
@@ -133,6 +138,7 @@ class AgentRegistry:
         Args:
             instance_name: 实例名称（instances/ 目录下的文件夹名）
             force_refresh: 是否强制刷新缓存
+            progress_callback: async callback(step, message) for progress reporting
 
         Returns:
             是否加载成功
@@ -169,7 +175,11 @@ class AgentRegistry:
 
             try:
                 # 1. 加载实例配置
-                await self._load_single_agent(instance_name, force_refresh=force_refresh)
+                await self._load_single_agent(
+                    instance_name,
+                    force_refresh=force_refresh,
+                    progress_callback=progress_callback,
+                )
 
                 # 2. 创建 Agent 原型
                 if self._shared_event_manager is None:
@@ -543,13 +553,19 @@ class AgentRegistry:
         config = self._configs[agent_id]
         return AgentFactory.create_route(prompt_cache=config.prompt_cache)
 
-    async def _load_single_agent(self, agent_id: str, force_refresh: bool = False):
+    async def _load_single_agent(
+        self,
+        agent_id: str,
+        force_refresh: bool = False,
+        progress_callback=None,
+    ):
         """
         加载单个 Agent 配置
 
         Args:
             agent_id: Agent ID
             force_refresh: 是否强制刷新缓存
+            progress_callback: async callback(step, message) for progress reporting
         """
         instance_start = datetime.now()
 
@@ -579,6 +595,7 @@ class AgentRegistry:
             config=config.raw_config,
             cache_dir=str(cache_dir),
             force_refresh=force_refresh,
+            progress_callback=progress_callback,
         )
 
         # 5. 准备 APIs 运行时参数

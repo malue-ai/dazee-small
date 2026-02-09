@@ -60,8 +60,8 @@ async def _load_config() -> Dict:
                 # 转换格式以保持兼容
                 _config_cache = {
                     "core_tools": _extract_core_tools_from_capabilities(caps_config),
-                    "frequent_tools": tool_classification.get("frequent_tools", []),
-                    "tool_categories": tool_classification.get("categories", {}),
+                    "frequent_tools": tool_classification.get("frequent_tools") or [],
+                    "tool_categories": tool_classification.get("categories") or {},
                 }
                 logger.debug(f"✅ 从 capabilities.yaml 加载工具分类配置")
                 return _config_cache
@@ -121,7 +121,7 @@ async def get_core_tools() -> List[str]:
         核心工具名称列表
     """
     config = await _load_config()
-    return config.get("core_tools", []).copy()
+    return (config.get("core_tools") or []).copy()
 
 
 async def get_frequent_tools() -> List[str]:
@@ -132,7 +132,7 @@ async def get_frequent_tools() -> List[str]:
         常用工具名称列表
     """
     config = await _load_config()
-    return config.get("frequent_tools", []).copy()
+    return (config.get("frequent_tools") or []).copy()
 
 
 async def get_tool_categories() -> Dict[str, List[str]]:
@@ -143,7 +143,7 @@ async def get_tool_categories() -> Dict[str, List[str]]:
         类别名称 -> 工具名称列表
     """
     config = await _load_config()
-    return config.get("tool_categories", {}).copy()
+    return (config.get("tool_categories") or {}).copy()
 
 
 # 导出列表

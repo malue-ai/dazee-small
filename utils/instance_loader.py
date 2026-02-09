@@ -394,10 +394,48 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
 
             raw_config["agent"] = agent_config
     elif llm_file:
-        # No provider set but file exists: load raw profiles as-is
+        # No provider set but file exists: load raw profiles, strip tier hints
         raw_profiles = llm_file.get("llm_profiles", {})
         if raw_profiles:
-            raw_config["llm_profiles"] = raw_profiles
+            stripped = {}
+            for name, params in raw_profiles.items():
+                params = dict(params)
+                params.pop("tier", None)
+                stripped[name] = params
+            raw_config["llm_profiles"] = stripped
+
+    # ── 2b. Fallback: 如果 provider/model 仍为空，从已激活模型获取 ──
+    if not agent_config.get("provider") or not agent_config.get("model"):
+        try:
+            from core.llm.model_registry import ModelRegistry
+            activated = ModelRegistry.list_activated()
+            if activated:
+                first = activated[0]
+                if not agent_config.get("provider"):
+                    agent_config["provider"] = first.provider
+                    logger.info(f"   agent.provider 从已激活模型自动设置: {first.provider}")
+                if not agent_config.get("model"):
+                    agent_config["model"] = first.model_name
+                    logger.info(f"   agent.model 从已激活模型自动设置: {first.model_name}")
+                raw_config["agent"] = agent_config
+
+                # 重新解析 provider templates（如果有 llm_file 且刚设置了 provider）
+                if llm_file and agent_config.get("provider"):
+                    _pname = agent_config["provider"]
+                    _templates = (llm_file.get("provider_templates") or {})
+                    _profiles = (llm_file.get("llm_profiles") or {})
+                    if _templates and _profiles:
+                        resolved = _resolve_llm_profiles(_pname, _templates, _profiles)
+                        raw_config["llm_profiles"] = resolved
+                        _tmpl = _templates.get(_pname, {})
+                        _tmpl_llm = _tmpl.get("agent_llm", {})
+                        if _tmpl_llm:
+                            agent_config["llm"] = {**_tmpl_llm, **agent_config.get("llm", {})}
+                            raw_config["agent"] = agent_config
+            else:
+                logger.warning("   ⚠️ 未配置 provider/model 且无已激活模型，Agent 可能无法启动")
+        except Exception as e:
+            logger.warning(f"   ⚠️ 从已激活模型获取默认值失败: {e}")
 
     # ── 3. Parse config ────────────────────
     instance_info = raw_config.get("instance", {})

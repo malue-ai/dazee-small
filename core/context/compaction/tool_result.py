@@ -13,6 +13,8 @@
 
 import hashlib
 import json
+
+from utils.app_paths import get_user_data_dir
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,7 +29,7 @@ logger = get_logger("context.compaction.tool_result")
 DEFAULT_THRESHOLD = 2000  # 字符数阈值（对齐 config/context_compaction.yaml）
 DEFAULT_HEAD_LINES = 5  # 保留开头行数
 DEFAULT_TAIL_LINES = 5  # 保留结尾行数
-DEFAULT_STORAGE_DIR = "workspace/storage/tool_results"
+DEFAULT_STORAGE_DIR = ""  # 空则使用 get_user_data_dir()/workspace/storage/tool_results
 
 # 压缩标记前缀（用于识别已压缩的内容）
 COMPRESSED_MARKER = "[COMPRESSED:"
@@ -74,7 +76,7 @@ class ToolResultCompressor:
         self.threshold = threshold
         self.head_lines = head_lines
         self.tail_lines = tail_lines
-        self.storage_dir = Path(storage_dir)
+        self.storage_dir = Path(storage_dir) if storage_dir else get_user_data_dir() / "workspace" / "storage" / "tool_results"
 
         # 确保存储目录存在
         self.storage_dir.mkdir(parents=True, exist_ok=True)

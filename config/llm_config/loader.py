@@ -73,6 +73,7 @@ async def get_llm_profile(profile_name: str, **overrides) -> Dict[str, Any]:
 
     profile = _profiles[profile_name].copy()
     profile.pop("description", None)
+    profile.pop("tier", None)  # tier is a resolution hint, not an LLMConfig param
 
     if overrides:
         profile.update(overrides)

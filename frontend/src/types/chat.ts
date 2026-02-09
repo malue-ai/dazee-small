@@ -300,7 +300,7 @@ export interface SendMessageOptions {
   variables?: {
     timezone?: string
     locale?: string
-    timestamp?: string
+    local_time?: string
     hitlFlag?: boolean // 🆕 HITL 响应标识
     [key: string]: unknown
   }

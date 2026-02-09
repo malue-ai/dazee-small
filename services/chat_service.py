@@ -2222,7 +2222,9 @@ class ChatService:
                         usage_stats = agent.usage_tracker.get_stats()
 
                         usage_response = UsageResponse.from_tracker(
-                            tracker=agent.usage_tracker, model=agent.model, latency=duration_ms / 1000.0
+                            tracker=agent.usage_tracker,
+                            latency=duration_ms / 1000.0,
+                            model=agent.model,
                         )
 
                         token_usage = TokenUsage(
@@ -2254,7 +2256,7 @@ class ChatService:
                             "output_tokens": token_usage.output_tokens,
                             "thinking_tokens": token_usage.thinking_tokens,
                             "cache_read_tokens": token_usage.cache_read_tokens,
-                            "total_price": usage_response.total_price,
+                            "estimated_cost": agent.usage_tracker.estimate_cost(),
                         },
                     )
 

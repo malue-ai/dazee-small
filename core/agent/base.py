@@ -704,23 +704,43 @@ class Agent:
     # ==================== 辅助方法 ====================
 
     def _extract_user_query(self, messages: List[Dict[str, Any]]) -> str:
-        """提取用户查询"""
+        """
+        Extract raw user query from the last message.
+
+        Strips the [User Context] block appended by format_variables(),
+        so downstream consumers (knowledge search, memory recall, playbook
+        matching) use the user's actual question, not metadata noise.
+        """
         if not messages:
             return ""
 
         content = messages[-1].get("content", "")
 
         if isinstance(content, str):
-            return content
+            return self._strip_injected_context(content)
 
         if isinstance(content, list):
             text_parts = []
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "text":
                     text_parts.append(block.get("text", ""))
-            return " ".join(text_parts)
+            return self._strip_injected_context(" ".join(text_parts))
 
         return ""
+
+    @staticmethod
+    def _strip_injected_context(text: str) -> str:
+        """
+        Remove [User Context] block injected by chat_service / format_variables().
+
+        The block is appended as '\\n\\n[User Context]\\n- key: value\\n...'
+        and should not pollute search queries or memory recall.
+        """
+        marker = "[User Context]"
+        idx = text.find(marker)
+        if idx >= 0:
+            return text[:idx].strip()
+        return text
 
     def _inject_tool_context(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """工具上下文注入"""

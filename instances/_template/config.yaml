@@ -44,9 +44,13 @@ user_prompt: ""
 #   "claude" - Anthropic（claude-sonnet-4-5 + claude-haiku-4-5）
 #
 
-agent:
-  provider: "qwen"
-  # model: "qwen3-max"             # 不填则由 provider 自动决定
+# provider 和 model 不预设，从用户配置的 API Key 自动获取
+# 用户在设置页面填写 API Key 后，会自动激活对应厂商的模型
+# 也可手动指定：
+#   agent:
+#     provider: "qwen"     # 一键切换：qwen / claude
+#     model: "qwen3-max"   # 不填则由 provider 自动决定
+agent: {}
 
 # ==================== 存储（自动管理，无需配置） ====================
 #

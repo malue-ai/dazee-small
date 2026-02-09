@@ -514,8 +514,13 @@ class GenericFTS5:
             for op in (" AND ", " OR ", " NOT ")
         )
 
-        # 移除 FTS5 特殊字符（+ 也是特殊字符，如 C++ 中的 +）
-        query = re.sub(r'[*^()\[\]{}:"+\\]', " ", query)
+        # 移除 FTS5 特殊字符
+        # - * ^ ( ) [ ] { } : " + \ 是 FTS5 查询语法的保留字符
+        # - `-` 在 FTS5 中等价于 NOT，必须移除
+        # - `/` 不是 FTS5 语法字符但会产生无意义 token（如 Asia/Shanghai → Asia Shanghai）
+        # - `.` 在 FTS5 中用于列过滤/隐式短语语法，会导致 syntax error
+        #   （如时间戳 30.725Z → "fts5: syntax error near '.'"）
+        query = re.sub(r'[*^()\[\]{}:"+\\/<>\-.]', " ", query)
 
         # 如果用户用了布尔操作符，清洗特殊字符后直接返回
         if has_bool_op:
@@ -530,10 +535,13 @@ class GenericFTS5:
         if not query:
             return ""
 
-        # 按空格分词，用 OR 连接（提高中英文混合召回率）
-        terms = [t for t in query.split() if t]
-        if len(terms) <= 1:
-            return query
+        # 按空格分词，过滤无效 token 后用 OR 连接
+        # 无效 token：空字符串、纯标点、纯空白
+        terms = [t for t in query.split() if t and re.search(r"\w", t)]
+        if not terms:
+            return ""
+        if len(terms) == 1:
+            return terms[0]
 
         return " OR ".join(terms)
 

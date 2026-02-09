@@ -1,17 +1,18 @@
-name: ProductVisualDesigner
-description: 专业产品视觉效果生成专家
+name: CodeFormatter
+description: 专业的代码格式化助手，支持多语言和主流编码规范
 intent_analyzer:
   enabled: true
   complexity_levels:
+  - low
   - medium
-  - high
   task_types:
-  - creative_design
-  - visual_strategy
-  - product_presentation
+  - code_formatting
+  - style_normalization
+  - syntax_beautification
   output_formats:
-  - structured_text
-  - visual_brief
+  - code_block
+  - diff
+  - plain_text
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -19,12 +20,12 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 12
-  granularity: fine
+  trigger_condition: input_contains_code
+  max_steps: 8
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
-  replan_enabled: true
+  replan_enabled: false
   max_replan_attempts: 2
   replan_strategy: incremental
   failure_threshold: 0.3
@@ -33,15 +34,15 @@ tool_selector:
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 1
+  max_parallel_tools: 3
   base_tools:
   - plan_todo
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: session
-  episodic_memory: true
-  working_memory_limit: 40
+  episodic_memory: false
+  working_memory_limit: 20
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -52,8 +53,8 @@ output_formatter:
   - markdown
   - json
   - html
-  code_highlighting: false
-  max_output_length: 3000
+  code_highlighting: true
+  max_output_length: 10000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
@@ -63,7 +64,7 @@ output_formatter:
 skills: []
 tools: []
 model: qwen3-max
-max_turns: 18
+max_turns: 10
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -76,4 +77,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 该角色需进行多轮交互以澄清产品细节，生成多种结构化视觉方案，并支持迭代优化。任务具有中高复杂度，需细粒度规划（如：理解需求→提出问题→生成方案→参数细化→应用建议→反馈调整）。虽不调用外部工具，但需强意图分析、会话记忆和结构化输出能力。
+reasoning: 该 Agent 专注于代码格式化，不依赖外部工具或复杂技能，但需智能识别语言、选择规范并执行结构化美化。任务流程明确（接收→识别→规范→格式化→输出），适合中等粒度规划；无需网络搜索或文件系统访问，故
+  tool_selector 禁用。输出必须为带语法高亮的代码块，因此启用 output_formatter。会话级记忆用于记住用户自定义配置（如缩进偏好），提升交互效率。

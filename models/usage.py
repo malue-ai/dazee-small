@@ -69,10 +69,21 @@ class UsageResponse(BaseModel):
     tool_call_details: List[ToolCallRecord] = Field(default_factory=list)
 
     @classmethod
-    def from_tracker(cls, tracker: "UsageTracker", latency: float = 0.0) -> "UsageResponse":
-        """从 UsageTracker 创建响应"""
+    def from_tracker(
+        cls,
+        tracker: "UsageTracker",
+        latency: float = 0.0,
+        model: Optional[str] = None,
+    ) -> "UsageResponse":
+        """从 UsageTracker 创建响应。
+
+        Args:
+            tracker: Token 使用量追踪器
+            latency: 总延迟（秒）
+            model: Agent 主模型名称。未传时从 tracker 第一次调用推断。
+        """
         if not tracker.calls and not tracker.tool_calls:
-            return cls()
+            return cls(model=model or "unknown")
 
         total_input = sum(call.input_tokens for call in tracker.calls)
         total_output = sum(call.output_tokens for call in tracker.calls)
@@ -88,6 +99,8 @@ class UsageResponse(BaseModel):
             else 0.0
         )
 
+        resolved_model = model or (tracker.calls[0].model if tracker.calls else "unknown")
+
         return cls(
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_output,
@@ -97,7 +110,7 @@ class UsageResponse(BaseModel):
             total_tokens=total_prompt_tokens + total_output + total_thinking,
             latency=latency,
             llm_calls=len(tracker.calls),
-            model=tracker.calls[0].model if tracker.calls else "unknown",
+            model=resolved_model,
             cache_hit_rate=round(cache_hit_rate, 4),
             llm_call_details=tracker.calls,
             tool_call_details=list(tracker.tool_calls.values()),
@@ -216,7 +229,7 @@ class UsageTracker:
             return
 
         if model is None:
-            model = getattr(llm_response, "model", None) or "claude-sonnet-4"
+            model = getattr(llm_response, "model", None) or "unknown"
 
         message_id = getattr(llm_response, "id", None)
         self.record_call(llm_response=llm_response, model=model, purpose=purpose, message_id=message_id)

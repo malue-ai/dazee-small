@@ -1518,6 +1518,11 @@ class ClaudeLLMService(BaseLLMService):
                 logger.warning(f"文件已存在: {output_path}")
                 return None
 
+            # 确保输出路径为绝对路径（打包后 cwd 可能只读）
+            if not os.path.isabs(output_path):
+                from utils.app_paths import get_user_data_dir
+                output_path = str(get_user_data_dir() / output_path)
+
             # 创建目录
             output_dir = os.path.dirname(output_path)
             if output_dir:

@@ -4,7 +4,10 @@ Agent 管理路由
 提供 Agent CRUD 操作的 REST API
 """
 
+import asyncio
+import json as json_lib
 import shutil
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -12,8 +15,8 @@ from typing import Optional
 
 import aiofiles
 import yaml
-from fastapi import APIRouter, Body, HTTPException, Query, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from logger import get_logger
@@ -98,7 +101,6 @@ AGENT_TEMPLATES = [
         description="仅包含搜索能力的轻量级 Agent，适合简单问答场景",
         icon="🔍",
         config={
-            "model": "claude-sonnet-4-5-20250929",
             "plan_manager_enabled": False,
             "enabled_capabilities": {
                 "code_execution": False,
@@ -121,7 +123,6 @@ AGENT_TEMPLATES = [
         description="搜索 + 知识库，适合大多数业务场景",
         icon="⚡",
         config={
-            "model": "claude-sonnet-4-5-20250929",
             "plan_manager_enabled": True,
             "enabled_capabilities": {
                 "code_execution": False,
@@ -145,7 +146,6 @@ AGENT_TEMPLATES = [
         description="全部功能 + Extended Thinking，适合复杂推理任务",
         icon="🚀",
         config={
-            "model": "claude-sonnet-4-5-20250929",
             "plan_manager_enabled": True,
             "enabled_capabilities": {
                 "code_execution": True,
@@ -590,26 +590,21 @@ async def _write_instance_files(
         await f.write(prompt_content)
 
 
-@router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-    summary="创建 Agent",
-    description="创建新的 Agent 实例（生成配置文件并加载到注册表）",
-)
-async def create_agent(request: AgentCreateRequest):
-    """
-    创建 Agent
+def _sse_event(data: dict) -> str:
+    """Format a dict as an SSE data line."""
+    return f"data: {json_lib.dumps(data, ensure_ascii=False)}\n\n"
 
-    流程：
-    1. 校验请求（名称、ID 唯一性等）
-    2. 生成 config.yaml + prompt.md
-    3. 写入 instances/{agent_id}/ 目录
-    4. 调用 registry.preload_instance() 热加载
-    5. 返回创建后的 Agent 详情
+
+def _validate_create_request(request: AgentCreateRequest):
+    """
+    Validate create-agent request (model, agent_id, directory).
+
+    Returns (registry, agent_id, instance_dir, config_data) on success.
+    Raises HTTPException on validation failure.
     """
     registry = get_agent_registry()
 
-    # 0. Resolve model: use specified model, or fall back to first activated model
+    # 0. Resolve model
     if not request.model:
         activated = ModelRegistry.list_activated()
         if not activated:
@@ -647,7 +642,6 @@ async def create_agent(request: AgentCreateRequest):
             },
         )
 
-    # Check directory conflict
     instance_dir = get_instances_dir() / agent_id
     if instance_dir.exists():
         raise HTTPException(
@@ -658,10 +652,51 @@ async def create_agent(request: AgentCreateRequest):
             },
         )
 
-    # 2. Build config dict
     config_data = _build_config_dict(request)
+    return registry, agent_id, instance_dir, config_data
 
-    # 3. Write files
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="创建 Agent",
+    description=(
+        "创建新的 Agent 实例。"
+        "设置 Accept: text/event-stream 获取 SSE 流式进度推送，否则返回 JSON。"
+    ),
+)
+async def create_agent(request: AgentCreateRequest, raw_request: Request):
+    """
+    创建 Agent
+
+    流程：
+    1. 校验请求（名称、ID 唯一性等）
+    2. 生成 config.yaml + prompt.md
+    3. 写入 instances/{agent_id}/ 目录
+    4. 调用 registry.preload_instance() 热加载
+    5. 返回创建后的 Agent 详情
+
+    支持两种响应模式：
+    - JSON（默认）：同步等待完成后返回结果
+    - SSE（Accept: text/event-stream）：实时推送进度事件
+    """
+    # Run validation before deciding response mode (raises HTTPException on error)
+    registry, agent_id, instance_dir, config_data = _validate_create_request(request)
+
+    accept = raw_request.headers.get("accept", "")
+    use_sse = "text/event-stream" in accept
+
+    if use_sse:
+        return await _create_agent_sse(request, registry, agent_id, instance_dir, config_data)
+    else:
+        return await _create_agent_json(request, registry, agent_id, instance_dir, config_data)
+
+
+async def _create_agent_json(
+    request: AgentCreateRequest, registry, agent_id: str, instance_dir: Path, config_data: dict
+):
+    """Create agent with synchronous JSON response (original behavior)."""
+    # Write files
     try:
         await _write_instance_files(
             instance_dir=instance_dir,
@@ -672,37 +707,27 @@ async def create_agent(request: AgentCreateRequest):
             description=request.description,
         )
     except Exception as e:
-        # Cleanup on failure
         if instance_dir.exists():
             shutil.rmtree(instance_dir, ignore_errors=True)
         logger.error(f"创建 Agent '{agent_id}' 写入文件失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "WRITE_FAILED",
-                "message": f"写入配置文件失败: {str(e)}",
-            },
+            detail={"code": "WRITE_FAILED", "message": f"写入配置文件失败: {str(e)}"},
         )
 
-    # 4. Load into registry
+    # Load into registry
     try:
         await registry.preload_instance(agent_id)
     except Exception as e:
-        # Cleanup: remove files if loading failed
         if instance_dir.exists():
             shutil.rmtree(instance_dir, ignore_errors=True)
         logger.error(f"加载 Agent '{agent_id}' 失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "LOAD_FAILED",
-                "message": f"Agent 创建成功但加载失败: {str(e)}",
-            },
+            detail={"code": "LOAD_FAILED", "message": f"Agent 创建成功但加载失败: {str(e)}"},
         )
 
-    # 5. Return detail
     logger.info(f"✅ Agent '{agent_id}' 创建成功")
-
     detail = registry.get_agent_detail(agent_id)
     return {
         "success": True,
@@ -710,6 +735,88 @@ async def create_agent(request: AgentCreateRequest):
         "message": f"Agent '{request.name}' 创建成功",
         **detail,
     }
+
+
+async def _create_agent_sse(
+    request: AgentCreateRequest, registry, agent_id: str, instance_dir: Path, config_data: dict
+):
+    """Create agent with SSE streaming progress events."""
+    TOTAL_STEPS = 7
+
+    async def event_generator():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def progress_callback(step: int, message: str):
+            await queue.put({"type": "progress", "step": step, "total": TOTAL_STEPS, "message": message})
+
+        async def do_create():
+            """Run the full create+load pipeline, pushing events to the queue."""
+            try:
+                # Step 1: Write files
+                await queue.put({
+                    "type": "progress", "step": 1, "total": TOTAL_STEPS,
+                    "message": "写入配置文件...",
+                })
+                await _write_instance_files(
+                    instance_dir=instance_dir,
+                    config_data=config_data,
+                    prompt_content=request.prompt,
+                    agent_id=agent_id,
+                    name=request.name,
+                    description=request.description,
+                )
+
+                # Steps 2-6: Load instance (progress_callback pushes steps 2-6)
+                await registry.preload_instance(
+                    agent_id, progress_callback=progress_callback
+                )
+
+                # Step 7: Complete
+                detail = registry.get_agent_detail(agent_id)
+                await queue.put({
+                    "type": "complete",
+                    "step": TOTAL_STEPS,
+                    "total": TOTAL_STEPS,
+                    "message": "创建完成",
+                    "agent_id": agent_id,
+                    "success": True,
+                    **detail,
+                })
+            except Exception as e:
+                # Cleanup on failure
+                if instance_dir.exists():
+                    shutil.rmtree(instance_dir, ignore_errors=True)
+                logger.error(f"创建 Agent '{agent_id}' 失败: {e}", exc_info=True)
+                await queue.put({
+                    "type": "error",
+                    "code": "CREATE_FAILED",
+                    "message": str(e),
+                })
+
+        # Launch the create task in background
+        task = asyncio.create_task(do_create())
+
+        try:
+            while True:
+                event = await queue.get()
+                yield _sse_event(event)
+
+                if event["type"] in ("complete", "error"):
+                    yield "event: done\ndata: {}\n\n"
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.put(
