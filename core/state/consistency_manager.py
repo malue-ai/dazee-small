@@ -36,7 +36,7 @@ logger = get_logger(__name__)
 def _capture_clipboard() -> str:
     """
     捕获当前剪贴板内容（仅文本）。
-    macOS 使用 pbpaste，其他平台暂返回空字符串。
+    macOS 使用 pbpaste，Windows 使用 PowerShell Get-Clipboard。
     失败或超时返回空字符串。
     """
     try:
@@ -46,6 +46,17 @@ def _capture_clipboard() -> str:
                 capture_output=True,
                 text=True,
                 timeout=2,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if result.returncode == 0 and result.stdout is not None:
+                return result.stdout
+        elif sys.platform == "win32":
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                capture_output=True,
+                text=True,
+                timeout=3,
                 encoding="utf-8",
                 errors="replace",
             )
@@ -437,17 +448,34 @@ class StateConsistencyManager:
                     logger.warning(f"工作目录恢复失败: {e}")
                     messages.append(f"工作目录恢复失败: {e}")
             clipboard = getattr(snap.environment, "clipboard_content", None)
-            if clipboard is not None and clipboard and sys.platform == "darwin":
+            if clipboard is not None and clipboard:
                 try:
-                    subprocess.run(
-                        ["pbcopy"],
-                        input=clipboard,
-                        capture_output=True,
-                        text=True,
-                        timeout=2,
-                        encoding="utf-8",
-                    )
-                    messages.append("剪贴板已恢复")
+                    if sys.platform == "darwin":
+                        subprocess.run(
+                            ["pbcopy"],
+                            input=clipboard,
+                            capture_output=True,
+                            text=True,
+                            timeout=2,
+                            encoding="utf-8",
+                        )
+                        messages.append("剪贴板已恢复")
+                    elif sys.platform == "win32":
+                        # Use PowerShell Set-Clipboard to restore
+                        escaped = clipboard.replace("'", "''")
+                        subprocess.run(
+                            [
+                                "powershell",
+                                "-NoProfile",
+                                "-Command",
+                                f"Set-Clipboard -Value '{escaped}'",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=3,
+                            encoding="utf-8",
+                        )
+                        messages.append("剪贴板已恢复")
                 except Exception as e:
                     logger.debug(f"剪贴板恢复跳过: {e}")
 

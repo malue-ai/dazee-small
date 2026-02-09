@@ -12,6 +12,7 @@ Shell 命令执行器
 import asyncio
 import logging
 import os
+import sys
 import time
 from typing import Any, Dict, List, Optional, Set
 
@@ -19,6 +20,9 @@ from core.nodes.executors.base import BaseExecutor
 from core.nodes.protocol import ShellResult
 
 logger = logging.getLogger(__name__)
+
+# Windows platform flag (evaluated once at import)
+_IS_WIN32 = sys.platform == "win32"
 
 
 class ShellExecutor(BaseExecutor):
@@ -45,6 +49,12 @@ class ShellExecutor(BaseExecutor):
         "DYLD_",  # macOS 动态链接器
         "LD_",  # Linux 动态链接器
     ]
+
+    # Windows 额外阻止的环境变量键
+    BLOCKED_ENV_KEYS_WIN32: Set[str] = {
+        "PSModulePath",  # 防止注入恶意 PowerShell 模块
+        "__PSLockdownPolicy",  # PowerShell Constrained Language Mode
+    }
 
     # 默认超时时间（秒）
     DEFAULT_TIMEOUT: float = 30.0
@@ -83,9 +93,14 @@ class ShellExecutor(BaseExecutor):
         # 从当前环境开始
         sanitized = dict(os.environ)
 
+        # 合并平台特有的阻止列表
+        blocked_keys = self.BLOCKED_ENV_KEYS
+        if _IS_WIN32:
+            blocked_keys = blocked_keys | self.BLOCKED_ENV_KEYS_WIN32
+
         # 移除阻止的键
         for key in list(sanitized.keys()):
-            if key in self.BLOCKED_ENV_KEYS:
+            if key in blocked_keys:
                 del sanitized[key]
                 continue
             for prefix in self.BLOCKED_ENV_PREFIXES:
@@ -96,7 +111,7 @@ class ShellExecutor(BaseExecutor):
         # 合并用户提供的环境变量（同样需要过滤）
         if env:
             for key, value in env.items():
-                if key in self.BLOCKED_ENV_KEYS:
+                if key in blocked_keys:
                     logger.warning(f"跳过阻止的环境变量: {key}")
                     continue
                 blocked = False
@@ -139,6 +154,45 @@ class ShellExecutor(BaseExecutor):
 
         return False
 
+    @staticmethod
+    def _decode_output(data: bytes) -> str:
+        """
+        Decode subprocess output with platform-aware encoding.
+
+        On Windows, PowerShell / cmd may output in system codepage (e.g. CP936
+        for Simplified Chinese). We try UTF-8 first, then fall back to the
+        system preferred encoding.
+
+        Args:
+            data: Raw bytes from subprocess stdout/stderr
+
+        Returns:
+            Decoded string
+        """
+        if not data:
+            return ""
+
+        if _IS_WIN32:
+            # Try UTF-8 first (works when chcp 65001 or PowerShell UTF-8 mode)
+            try:
+                text = data.decode("utf-8")
+                # Accept if no replacement chars from a bad decode
+                if "\ufffd" not in text:
+                    return text
+            except UnicodeDecodeError:
+                pass
+
+            # Fall back to system default encoding (e.g. cp936 / gbk)
+            try:
+                import locale
+
+                encoding = locale.getpreferredencoding(False)
+                return data.decode(encoding, errors="replace")
+            except (UnicodeDecodeError, LookupError):
+                pass
+
+        return data.decode("utf-8", errors="replace")
+
     async def execute(
         self,
         command: List[str],
@@ -180,7 +234,7 @@ class ShellExecutor(BaseExecutor):
         start_time = time.time()
 
         try:
-            # 直接执行命令（不使用 /usr/bin/env 前缀，确保 macOS 命令正常工作）
+            # 直接执行命令（不使用 /usr/bin/env 前缀，确保跨平台命令正常工作）
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=work_dir,
@@ -196,9 +250,9 @@ class ShellExecutor(BaseExecutor):
 
                 elapsed_ms = int((time.time() - start_time) * 1000)
 
-                # 截断过大的输出
-                stdout = stdout_bytes.decode("utf-8", errors="replace")
-                stderr = stderr_bytes.decode("utf-8", errors="replace")
+                # 平台感知的编码解码
+                stdout = self._decode_output(stdout_bytes)
+                stderr = self._decode_output(stderr_bytes)
 
                 if len(stdout) > self.MAX_OUTPUT_BYTES:
                     stdout = stdout[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
@@ -262,15 +316,24 @@ class ShellExecutor(BaseExecutor):
         """
         检查可执行文件是否存在（对齐 clawdbot system.which）
 
+        Windows 使用 where 命令，macOS/Linux 使用 which 命令。
+
         Args:
             executable: 可执行文件名
 
         Returns:
             可执行文件路径，如果不存在则返回 None
         """
-        result = await self.execute(["which", executable], timeout=5.0)
+        if _IS_WIN32:
+            # Windows: use 'where' command
+            result = await self.execute(["where", executable], timeout=5.0)
+        else:
+            # macOS / Linux: use 'which' command
+            result = await self.execute(["which", executable], timeout=5.0)
+
         if result.success and result.stdout.strip():
-            return result.stdout.strip()
+            # where may return multiple lines; take the first match
+            return result.stdout.strip().splitlines()[0]
         return None
 
     async def cleanup(self) -> None:

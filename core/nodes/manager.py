@@ -111,9 +111,12 @@ class NodeManager:
                 safe_bins=self.config.safe_bins if self.config.safe_bins else None,
             )
         elif platform == "win32":
-            # TODO: WindowsLocalNode
-            logger.warning("Windows 本地节点尚未实现")
-            return
+            from core.nodes.local.windows import WindowsLocalNode
+
+            self.local_node = WindowsLocalNode(
+                allowlist=self.config.allowlist if self.config.allowlist else None,
+                safe_bins=self.config.safe_bins if self.config.safe_bins else None,
+            )
         elif platform == "linux":
             # TODO: LinuxLocalNode
             logger.warning("Linux 本地节点尚未实现")

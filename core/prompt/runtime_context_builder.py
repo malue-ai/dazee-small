@@ -130,6 +130,24 @@ class RuntimeContextBuilder:
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2)
                 if proc.returncode == 0:
                     return f"macOS {stdout.decode().strip()}"
+            elif system == "windows":
+                # Use PowerShell to get Windows version details
+                proc = await asyncio.create_subprocess_exec(
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "(Get-CimInstance Win32_OperatingSystem).Caption + ' Build ' + "
+                    "(Get-CimInstance Win32_OperatingSystem).BuildNumber",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+                if proc.returncode == 0:
+                    version_str = stdout.decode("utf-8", errors="replace").strip()
+                    if version_str:
+                        return version_str
+                # Fallback: platform.version()
+                return f"Windows {platform.version()}"
             elif system == "linux":
                 # 尝试读取 /etc/os-release（异步）
                 os_release = Path("/etc/os-release")
@@ -171,11 +189,18 @@ class RuntimeContextBuilder:
             dirs["pictures"] = user_home / "Pictures"
             dirs["movies"] = user_home / "Movies"
             dirs["music"] = user_home / "Music"
-        elif system == "linux":
+        elif system == "windows":
             dirs["pictures"] = user_home / "Pictures"
             dirs["videos"] = user_home / "Videos"
             dirs["music"] = user_home / "Music"
-        elif system == "windows":
+            # Windows-specific directories
+            appdata = os.environ.get("APPDATA")
+            if appdata:
+                dirs["appdata"] = Path(appdata)
+            local_appdata = os.environ.get("LOCALAPPDATA")
+            if local_appdata:
+                dirs["local_appdata"] = Path(local_appdata)
+        elif system == "linux":
             dirs["pictures"] = user_home / "Pictures"
             dirs["videos"] = user_home / "Videos"
             dirs["music"] = user_home / "Music"
@@ -251,6 +276,42 @@ class RuntimeContextBuilder:
 
             apps.sort(key=lambda x: x.lower())
 
+        elif system == "windows":
+            # Windows: scan registry + Start Menu via AppScanner
+            try:
+                from core.discovery.app_scanner import AppScanner
+
+                scanner = AppScanner()
+                scanned = scanner.scan()
+                for app_info in scanned[:max_apps]:
+                    name = app_info.get("name", "")
+                    if name and name not in seen:
+                        seen.add(name)
+                        display = cls.APP_DISPLAY_NAME_MAP.get(name, name)
+                        apps.append(display)
+                apps.sort(key=lambda x: x.lower())
+            except Exception as e:
+                logger.debug(f"Windows app detection failed: {e}")
+
+            # Supplement with common Windows commands
+            if not apps:
+                win_cmds = [
+                    "powershell", "git", "python", "node", "code",
+                    "winget", "wt",
+                ]
+                for cmd in win_cmds:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            "where", cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        await asyncio.wait_for(proc.communicate(), timeout=2)
+                        if proc.returncode == 0:
+                            apps.append(cmd)
+                    except Exception:
+                        pass
+
         elif system == "linux":
             # Linux: 检查常用命令（异步）
             common_cmds = ["firefox", "chromium", "code", "gnome-terminal"]
@@ -288,6 +349,8 @@ class RuntimeContextBuilder:
                 "movies": "影片",
                 "videos": "视频",
                 "music": "音乐",
+                "appdata": "应用数据",
+                "local_appdata": "本地应用数据",
             },
         },
         "en": {
@@ -309,6 +372,8 @@ class RuntimeContextBuilder:
                 "movies": "Movies",
                 "videos": "Videos",
                 "music": "Music",
+                "appdata": "AppData (Roaming)",
+                "local_appdata": "AppData (Local)",
             },
         },
     }
@@ -420,6 +485,28 @@ class RuntimeContextBuilder:
                             "- AppleScript: `osascript -e 'tell application ...'`",
                         ]
                     )
+            elif env.platform == "windows":
+                lines.extend(
+                    [
+                        "**Windows Capabilities**:",
+                        "- Shell command execution via PowerShell & cmd (`nodes run`)",
+                        "- PowerShell script execution (full .NET access)",
+                        "- System toast notifications (`nodes notify`)",
+                        "- Screenshot capture (`screenshot` command)",
+                        "- Clipboard operations (`Get-Clipboard` / `Set-Clipboard`)",
+                        "- App launch (`Start-Process` / `start` command)",
+                        "- URL/file opening (`start <url>` / `explorer.exe <path>`)",
+                        "- Text-to-speech (`SAPI.SpVoice`)",
+                        "",
+                        "**Tips**:",
+                        "- Run PowerShell: `powershell -NoProfile -Command \"<script>\"`",
+                        "- Open app: `start <AppName>` or `Start-Process <path>`",
+                        "- Open URL: `start https://example.com`",
+                        "- Open folder: `explorer.exe <path>`",
+                        "- List processes: `tasklist`",
+                        "- System info: `systeminfo`",
+                    ]
+                )
             elif env.platform == "linux":
                 lines.extend(
                     [
@@ -473,6 +560,28 @@ class RuntimeContextBuilder:
                             "- AppleScript: `osascript -e 'tell application ...'`",
                         ]
                     )
+            elif env.platform == "windows":
+                lines.extend(
+                    [
+                        "**Windows 操作能力**:",
+                        "- Shell 命令执行 - PowerShell 和 cmd (`nodes run`)",
+                        "- PowerShell 脚本执行（可调用完整 .NET 框架）",
+                        "- 系统 Toast 通知 (`nodes notify`)",
+                        "- 屏幕截图 (`screenshot` 命令)",
+                        "- 剪贴板操作 (`Get-Clipboard` / `Set-Clipboard`)",
+                        "- 应用启动 (`Start-Process` / `start` 命令)",
+                        "- URL/文件打开 (`start <url>` / `explorer.exe <路径>`)",
+                        "- 文字转语音 (`SAPI.SpVoice`)",
+                        "",
+                        "**操作提示**:",
+                        "- 执行 PowerShell: `powershell -NoProfile -Command \"<脚本>\"`",
+                        "- 打开应用: `start <应用名>` 或 `Start-Process <路径>`",
+                        "- 打开 URL: `start https://example.com`",
+                        "- 打开文件夹: `explorer.exe <路径>`",
+                        "- 查看进程: `tasklist`",
+                        "- 系统信息: `systeminfo`",
+                    ]
+                )
             elif env.platform == "linux":
                 lines.extend(
                     [
