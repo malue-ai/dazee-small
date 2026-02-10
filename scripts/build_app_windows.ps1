@@ -159,17 +159,29 @@ if (-not (Test-Path $VenvPy)) {
     Ok "venv exists"
 }
 
-Info "Installing Python dependencies..."
+Info "Installing Python dependencies (this may take a few minutes)..."
 $reqFile = Join-Path $ProjectRoot "requirements.txt"
-& $VenvPip install -r $reqFile --quiet 2>&1 | Out-Null
+& $VenvPip install -r $reqFile -q 2>&1 | Where-Object { $_ -match "error|ERROR|Failed|Could not" } | ForEach-Object { Warn "  $_" }
+if ($LASTEXITCODE -ne 0) {
+    Warn "Some pip packages may have failed. Retrying with verbose output..."
+    & $VenvPip install -r $reqFile 2>&1 | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" }
+}
 Ok "Python deps ready"
 
-& $VenvPy -c "import PyInstaller" 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    & $VenvPip install pyinstaller --quiet 2>&1 | Out-Null
-    Ok "PyInstaller installed"
+Info "Checking PyInstaller..."
+$pyiCheck = & $VenvPy -c "import PyInstaller; print(PyInstaller.__version__)" 2>&1
+if ($pyiCheck -match "^\d+\.\d+") {
+    Ok "PyInstaller $($pyiCheck.Trim()) ready"
 } else {
-    Ok "PyInstaller ready"
+    Info "  Installing PyInstaller..."
+    & $VenvPip install pyinstaller 2>&1 | ForEach-Object { Write-Host "    $_" }
+    # Verify installation
+    $pyiCheck2 = & $VenvPy -c "import PyInstaller; print(PyInstaller.__version__)" 2>&1
+    if ($pyiCheck2 -match "^\d+\.\d+") {
+        Ok "PyInstaller $($pyiCheck2.Trim()) installed"
+    } else {
+        Fail "PyInstaller installation failed. Try manually: .venv\Scripts\pip install pyinstaller"
+    }
 }
 
 # --- npm ---
