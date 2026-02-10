@@ -823,14 +823,43 @@ watch(showHistoryDropdown, (isOpen) => {
   }
 })
 
-// 监听路由中的 agentId 变化
-watch(() => route.params.agentId, async (newAgentId) => {
+// 监听路由中的 agentId 变化（通知卡片"打开"、浏览器前进/后退等外部路由跳转）
+watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
   if (newAgentId && typeof newAgentId === 'string') {
     if (agentStore.currentAgentId !== newAgentId) {
+      // 刷新 Agent 列表（新创建的 Agent 可能尚未在列表中）
+      await agentStore.fetchList()
+
+      // 切换 Agent 并加载详情
       await agentStore.selectAgent(newAgentId)
+
+      // 重置聊天加载状态
+      chat.isLoading.value = false
+      chat.isStopping.value = false
+
+      // 尝试恢复最近使用的会话：优先打开的标签页 > 历史记录
+      const openTabs = agentStore.getOpenTabIds(newAgentId)
+      const historyIds = agentStore.getConversationIds(newAgentId)
+      const lastConvId = openTabs.length > 0
+        ? openTabs[openTabs.length - 1]
+        : historyIds.length > 0
+          ? historyIds[historyIds.length - 1]
+          : null
+
+      if (lastConvId) {
+        agentStore.openTab(newAgentId, lastConvId)
+        await conversationStore.load(lastConvId)
+      } else {
+        // 新项目没有历史会话，清空聊天区域
+        conversationStore.reset()
+      }
     }
   } else {
     agentStore.reset()
+    // 离开 Agent 模式时也清空会话状态
+    if (oldAgentId) {
+      conversationStore.reset()
+    }
   }
 })
 

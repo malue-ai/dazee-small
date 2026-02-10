@@ -1114,6 +1114,10 @@ async function handleCreate() {
 async function handleSave() {
   if (!canCreate.value || isCreating.value || !editAgentId.value) return
 
+  // 记住保存前的选中状态（编辑页不会改变 currentAgentId）
+  const previousAgentId = agentStore.currentAgentId
+  const isEditingCurrentAgent = previousAgentId === editAgentId.value
+
   isCreating.value = true
   try {
     const { agent_id, name } = await agentStore.updateAgent(editAgentId.value, {
@@ -1132,8 +1136,16 @@ async function handleSave() {
       guideStore.completeGuide()
     }
 
-    // 立即跳转到 Agent 对话页，通知卡片会在右上角显示重载进度
-    router.replace({ name: 'agent', params: { agentId: agent_id } })
+    // 后端编辑时会先删除再重建 Agent，因此需要根据编辑目标决定跳转：
+    // - 编辑的是当前选中的 Agent → 它会被临时删除，跳转到首页（自动选中第一个）
+    // - 编辑的是其他 Agent → 保持当前选中状态不变
+    if (isEditingCurrentAgent) {
+      router.replace({ name: 'chat' })
+    } else if (previousAgentId) {
+      router.replace({ name: 'agent', params: { agentId: previousAgentId } })
+    } else {
+      router.replace({ name: 'chat' })
+    }
   } catch (error: any) {
     console.error('❌ 保存项目失败:', error)
     const msg = error?.response?.data?.detail?.message || error?.response?.data?.detail || error?.message || '未知错误'
