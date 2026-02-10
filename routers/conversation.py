@@ -28,7 +28,7 @@ from services.conversation_service import (
 )
 
 # 配置日志
-logger = get_logger("conversation_router")
+logger = get_logger(__name__)
 
 # 创建路由器
 router = APIRouter(

@@ -82,9 +82,11 @@ export async function getConversationMessages(
   order: 'asc' | 'desc' = 'asc',
   beforeCursor?: string
 ): Promise<MessagesResponse> {
-  const params: Record<string, unknown> = { limit, offset, order }
+  const params: Record<string, unknown> = { limit, order }
   if (beforeCursor) {
     params.before_cursor = beforeCursor
+  } else {
+    params.offset = offset
   }
   
   const response = await api.get<ApiResponse<MessagesResponse>>(

@@ -213,26 +213,13 @@ class UserMemoryInjector(BaseInjector):
         try:
             from core.memory.instance_memory import InstanceMemoryManager
 
-            # Read memory.enabled from config (same pattern as memory_flush.py)
-            _memory_enabled = True
-            try:
-                import os
-                import yaml
-                from utils.app_paths import get_instances_dir
-
-                _inst = os.getenv("AGENT_INSTANCE", "default")
-                _cfg_path = get_instances_dir() / _inst / "config" / "memory.yaml"
-                if _cfg_path.exists():
-                    with open(_cfg_path) as _f:
-                        _mem_section = (yaml.safe_load(_f) or {}).get("memory", {})
-                    _memory_enabled = _mem_section.get("enabled", True)
-            except Exception:
-                pass
+            from utils.memory_config import load_memory_config
+            mem_cfg = await load_memory_config()
 
             mgr = InstanceMemoryManager(
                 user_id=context.user_id or "default",
                 mem0_enabled=False,  # Only need file layer for injection
-                enabled=_memory_enabled,
+                enabled=mem_cfg.enabled,
             )
             content = await mgr.get_memory_context()
 

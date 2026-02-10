@@ -22,7 +22,7 @@ const isCheckingSkip = ref(false)
 
 /**
  * 处理跳过引导：
- * 1. 查找默认 xiaodazi 项目
+ * 1. 查找默认项目（第一个已加载的 Agent）
  * 2. 通过 API 检查其是否已配置 AI 模型
  * 3. 如果没有模型 → 跳转到编辑引导（Step 11），不允许跳过
  * 4. 如果有模型 → 正常跳过
@@ -37,10 +37,8 @@ async function handleSkip() {
       await agentStore.fetchList()
     }
 
-    // 查找默认项目（优先匹配 xiaodazi，否则取第一个）
-    const defaultAgent = agentStore.agents.find(a =>
-      a.name.includes('xiaodazi') || a.name.includes('小打字') || a.agent_id.includes('xiaodazi')
-    ) || agentStore.agents[0]
+    // 取第一个已加载的 Agent 作为默认项目
+    const defaultAgent = agentStore.agents[0]
 
     if (defaultAgent) {
       try {

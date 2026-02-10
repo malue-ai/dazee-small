@@ -1008,7 +1008,7 @@ class EvaluationHarness:
                     if key in ["created_at", "timestamp"] and isinstance(value, str):
                         try:
                             obj[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                        except:
+                        except (ValueError, TypeError):
                             pass
                     elif isinstance(value, (dict, list)):
                         parse_datetime(value)

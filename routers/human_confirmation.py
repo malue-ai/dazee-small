@@ -36,7 +36,7 @@ from services.confirmation_service import (
     get_confirmation_service,
 )
 
-logger = get_logger("human_confirmation_router")
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/human-confirmation", tags=["HITL"])
 

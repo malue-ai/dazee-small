@@ -229,7 +229,7 @@ class RVRExecutor(BaseExecutor):
         safe_threshold: int,
         context_strategy,
         turn: int = 0,
-        tools_for_llm: List[Dict] = None,  # 工具定义，用于更准确的 token 估算
+        tools_for_llm: Optional[List[Dict]] = None,  # 工具定义，用于更准确的 token 估算
     ) -> List:
         """
         如果消息超过安全阈值，执行裁剪
@@ -251,7 +251,7 @@ class RVRExecutor(BaseExecutor):
 
         # 使用统一的 token 计算方法（包含工具定义）
         estimated_tokens = count_request_tokens(
-            messages_for_estimate, system_prompt_text, tools_for_llm
+            messages_for_estimate, system_prompt_text, tools_for_llm or []
         )
 
         if estimated_tokens <= safe_threshold:
@@ -324,7 +324,7 @@ class RVRExecutor(BaseExecutor):
         tools: List,
         ctx: "RuntimeContext",
         session_id: str,
-        broadcaster: "EventBroadcaster",
+        broadcaster: Optional["EventBroadcaster"],
         usage_tracker: "UsageTracker",
         is_first_turn: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -355,7 +355,7 @@ class RVRExecutor(BaseExecutor):
 
         try:
             # 调用 LLM Stream
-            async for response in llm.create_message_stream(
+            async for response in llm.create_message_stream(  # type: ignore[misc]
                 messages=messages, system=system_prompt, tools=tools
             ):
                 # LLMResponse 对象 → 根据字段判断事件类型
@@ -420,10 +420,10 @@ class RVRExecutor(BaseExecutor):
         session_id: str,
         conversation_id: str,
         ctx: "RuntimeContext",
-        tool_executor: "ToolExecutor",
-        broadcaster: "EventBroadcaster",
+        tool_executor: Optional["ToolExecutor"],
+        broadcaster: Optional["EventBroadcaster"],
         context_engineering=None,
-        plan_cache: Dict = None,
+        plan_cache: Optional[Dict] = None,
         plan_todo_tool=None,
         event_manager=None,
         state_manager=None,
@@ -455,7 +455,7 @@ class RVRExecutor(BaseExecutor):
             create_tool_execution_flow,
         )
 
-        tool_calls = [tc for tc in response.tool_calls if tc.get("type") == "tool_use"]
+        tool_calls = [tc for tc in (response.tool_calls or []) if tc.get("type") == "tool_use"]
 
         if not tool_calls:
             return
@@ -518,9 +518,7 @@ class RVRExecutor(BaseExecutor):
 
         # 更新消息历史
         # 添加 assistant 消息（包含 tool_use）
-        assistant_content = (
-            response.raw_content_blocks if hasattr(response, "raw_content_blocks") else []
-        )
+        assistant_content = getattr(response, "raw_content_blocks", None) or []
         if not assistant_content and response.tool_calls:
             # 构建 content blocks
             assistant_content = []
@@ -562,7 +560,7 @@ class RVRExecutor(BaseExecutor):
         broadcaster: "EventBroadcaster",
         usage_tracker: "UsageTracker",
         context_engineering=None,
-        plan_cache: Dict = None,
+        plan_cache: Optional[Dict] = None,
         plan_todo_tool=None,
         event_manager=None,
         state_manager=None,
@@ -834,7 +832,7 @@ class RVRExecutor(BaseExecutor):
                                         "wait_hitl_confirm_async"
                                     )
                                     if callable(wait_fn):
-                                        user_choice = await wait_fn()
+                                        user_choice = await wait_fn()  # type: ignore[misc]
                                         if user_choice == "approve":
                                             logger.info(
                                                 f"HITL 已批准: {pending_names}"
@@ -894,7 +892,7 @@ class RVRExecutor(BaseExecutor):
             else:
                 # 非流式处理
                 response = await llm.create_message_async(
-                    messages=llm_messages, system=system_prompt, tools=tools_for_llm
+                    messages=llm_messages, system=system_prompt, tools=tools_for_llm  # type: ignore[arg-type]
                 )
 
                 usage_tracker.accumulate(response)
@@ -923,11 +921,7 @@ class RVRExecutor(BaseExecutor):
                             "⚠️ 强制 Plan (非流式): 拦截非 plan 工具调用，注入提醒重试"
                         )
 
-                        assistant_content = (
-                            response.raw_content_blocks
-                            if hasattr(response, "raw_content_blocks")
-                            else []
-                        )
+                        assistant_content = getattr(response, "raw_content_blocks", None) or []
                         if not assistant_content and response.tool_calls:
                             assistant_content = []
                             if response.content:
@@ -1037,8 +1031,8 @@ class RVRExecutor(BaseExecutor):
                                     "message": f"任务已执行 {ctx.current_turn} 轮，是否继续？",
                                 },
                             }
-                            await wait_fn()
-                            cfg.terminator.confirm_long_running()
+                            await wait_fn()  # type: ignore[misc]
+                            cfg.terminator.confirm_long_running()  # type: ignore[attr-defined]
                 except Exception as e:
                     logger.warning(
                         f"terminator.evaluate() 异常，继续执行: {e}",
@@ -1117,10 +1111,10 @@ class RVRExecutor(BaseExecutor):
         if (
             cfg.terminator
             and hasattr(cfg.terminator, "config")
-            and hasattr(cfg.terminator.config, "hitl")
+            and hasattr(cfg.terminator.config, "hitl")  # type: ignore[attr-defined]
         ):
             on_rejection = getattr(
-                cfg.terminator.config.hitl, "on_rejection", "ask_rollback"
+                cfg.terminator.config.hitl, "on_rejection", "ask_rollback"  # type: ignore[attr-defined]
             )
 
         logger.info(

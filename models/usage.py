@@ -16,6 +16,20 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 
+class TokenUsage(BaseModel):
+    """Token usage statistics for evaluation and monitoring."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens + self.thinking_tokens
+
+
 class LLMCallRecord(BaseModel):
     """单次 LLM 调用记录"""
 
@@ -332,6 +346,7 @@ def create_usage_tracker() -> UsageTracker:
 
 
 __all__ = [
+    "TokenUsage",
     "UsageResponse",
     "LLMCallRecord",
     "ToolCallRecord",

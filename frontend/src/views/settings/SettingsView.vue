@@ -3,14 +3,14 @@
     <div class="max-w-2xl mx-auto">
       <!-- 页面标题 -->
       <div class="mb-8">
-        <h1 class="text-2xl font-semibold text-foreground">Settings</h1>
-        <p class="mt-1 text-sm text-muted-foreground">配置 API Key</p>
+        <h1 class="text-2xl font-semibold text-foreground">设置</h1>
+        <p class="mt-1 text-sm text-muted-foreground">配置 API Key 和语义搜索</p>
       </div>
 
       <!-- 加载状态 -->
       <div v-if="loading" class="flex items-center justify-center py-20">
         <Loader2 class="w-6 h-6 animate-spin text-muted-foreground" />
-        <span class="ml-3 text-sm text-muted-foreground">Loading...</span>
+        <span class="ml-3 text-sm text-muted-foreground">加载中...</span>
       </div>
 
       <!-- 配置表单 -->
@@ -34,7 +34,7 @@
         <!-- ==================== Provider 卡片区域 ==================== -->
         <div ref="providerSectionRef">
           <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
-            API Providers
+            模型服务商
           </h2>
 
           <div class="space-y-3">
@@ -50,7 +50,10 @@
                 class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
                 @click="toggleProvider(p.name)"
               >
-                <span class="text-xl flex-shrink-0">{{ p.icon }}</span>
+                <!-- 只显示文本首字母或特殊标识，不显示 emoji -->
+                <div class="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                  <span class="text-sm font-semibold text-foreground">{{ getProviderInitial(p.name) }}</span>
+                </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-medium text-foreground">{{ p.display_name }}</span>
@@ -89,7 +92,7 @@
                       <input
                         :type="showSecrets[p.name] ? 'text' : 'password'"
                         v-model="providerKeys[p.name]"
-                        :placeholder="`Enter ${p.display_name} API Key`"
+                        :placeholder="`输入 ${p.display_name} API Key`"
                         class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 transition-shadow font-mono pr-9"
                       />
                       <button
@@ -115,7 +118,7 @@
                 <!-- Base URL（可选） -->
                 <div>
                   <label class="text-xs font-medium text-foreground mb-1.5 block">
-                    Base URL
+                    接口地址
                     <span class="text-muted-foreground/40 font-normal ml-1">可选</span>
                   </label>
                   <input
@@ -167,16 +170,16 @@
                             {{ formatContextWindow(m.context_window) }}
                           </span>
                           <span v-if="m.max_output_tokens && m.in_catalog" class="px-1.5 py-0.5 bg-muted rounded text-[9px] text-muted-foreground">
-                            {{ formatContextWindow(m.max_output_tokens) }} out
+                            {{ formatContextWindow(m.max_output_tokens) }} 输出
                           </span>
                           <span v-if="m.supports_thinking" class="px-1.5 py-0.5 bg-primary/10 rounded text-[9px] text-primary">
-                            Thinking
+                            推理
                           </span>
                           <span v-if="m.supports_vision" class="px-1.5 py-0.5 bg-primary/10 rounded text-[9px] text-primary">
-                            Vision
+                            视觉
                           </span>
                           <span v-if="m.supports_tools && m.in_catalog" class="px-1.5 py-0.5 bg-muted rounded text-[9px] text-muted-foreground">
-                            Tools
+                            工具
                           </span>
                           <span v-if="!m.in_catalog" class="px-1.5 py-0.5 bg-muted/50 rounded text-[9px] text-muted-foreground/60 italic">
                             未收录
@@ -198,7 +201,7 @@
                       {{ m }}
                     </span>
                     <span v-if="validateResults[p.name].models.length > 8" class="text-[10px] text-success/60">
-                      +{{ validateResults[p.name].models.length - 8 }} more
+                      +{{ validateResults[p.name].models.length - 8 }} 个
                     </span>
                   </div>
                 </div>
@@ -287,7 +290,7 @@
                     : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'"
                 >
                   <div class="flex items-center gap-2">
-                    <Cloud class="w-4 h-4 text-blue-500" />
+                    <Cloud class="w-4 h-4 text-muted-foreground" />
                     <span class="text-xs font-semibold text-foreground">OpenAI 云端</span>
                   </div>
                   <p class="text-[11px] text-muted-foreground leading-relaxed">
@@ -397,6 +400,245 @@
           </div>
         </div>
 
+        <!-- ==================== 多渠道网关 ==================== -->
+        <div ref="gatewaySectionRef">
+          <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
+            多渠道网关
+          </h2>
+
+          <div class="bg-card rounded-lg border border-border overflow-hidden">
+            <!-- 加载中 -->
+            <div v-if="gatewayLoading" class="flex items-center gap-2 py-8 justify-center text-muted-foreground">
+              <Loader2 class="w-4 h-4 animate-spin" />
+              <span class="text-xs">加载网关配置...</span>
+            </div>
+
+            <template v-else-if="gatewayConfig">
+              <!-- 总开关 -->
+              <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                    <Radio class="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <span class="text-sm font-medium text-foreground">启用网关</span>
+                    <p class="text-[11px] text-muted-foreground mt-0.5">接收外部平台消息并路由到 Agent</p>
+                  </div>
+                </div>
+                <button
+                  @click="toggleGatewayEnabled"
+                  class="relative w-10 h-[22px] rounded-full transition-colors"
+                  :class="gatewayConfig.enabled ? 'bg-primary' : 'bg-muted-foreground/20'"
+                >
+                  <div
+                    class="absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform"
+                    :class="gatewayConfig.enabled ? 'translate-x-[22px]' : 'translate-x-[3px]'"
+                  />
+                </button>
+              </div>
+
+              <!-- 渠道列表 -->
+              <div v-if="gatewayConfig.enabled" class="divide-y divide-border">
+                <div
+                  v-for="ch in gatewayConfig.channels"
+                  :key="ch.id"
+                >
+                  <!-- 渠道头部 -->
+                  <button
+                    class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                    @click="toggleGatewayChannel(ch.id)"
+                  >
+                    <div class="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                      <span class="text-sm font-semibold text-foreground">{{ getChannelInitial(ch.id) }}</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-medium text-foreground">{{ ch.display_name }}</span>
+                        <span
+                          v-if="ch.status === 'connected'"
+                          class="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-success/10 text-success"
+                        >
+                          已连接
+                        </span>
+                        <span
+                          v-else-if="ch.status === 'connecting'"
+                          class="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary"
+                        >
+                          连接中
+                        </span>
+                        <span
+                          v-else-if="ch.status === 'error'"
+                          class="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive"
+                        >
+                          错误
+                        </span>
+                      </div>
+                      <p class="text-xs text-muted-foreground truncate mt-0.5">{{ ch.description }}</p>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                      <!-- 渠道开关 -->
+                      <div
+                        @click.stop="toggleChannelEnabled(ch.id)"
+                        class="relative w-9 h-5 rounded-full transition-colors cursor-pointer"
+                        :class="gatewayChannelEnabled[ch.id] ? 'bg-primary' : 'bg-muted-foreground/20'"
+                      >
+                        <div
+                          class="absolute top-[2px] w-[16px] h-[16px] rounded-full bg-white shadow transition-transform"
+                          :class="gatewayChannelEnabled[ch.id] ? 'translate-x-[18px]' : 'translate-x-[2px]'"
+                        />
+                      </div>
+                      <ChevronDown
+                        class="w-4 h-4 text-muted-foreground transition-transform duration-200"
+                        :class="{ 'rotate-180': expandedGatewayChannel === ch.id }"
+                      />
+                    </div>
+                  </button>
+
+                  <!-- 展开内容 -->
+                  <div v-if="expandedGatewayChannel === ch.id" class="border-t border-border px-4 py-4 space-y-4 bg-muted/30">
+                    <!-- 配置步骤引导 -->
+                    <div v-if="ch.setup_steps?.length" class="rounded-lg border border-primary/20 bg-primary/5 overflow-hidden">
+                      <button
+                        @click="gatewayGuideExpanded[ch.id] = !gatewayGuideExpanded[ch.id]"
+                        class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-primary/10 transition-colors"
+                      >
+                        <BookOpen class="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                        <span class="text-xs font-medium text-primary">如何获取 {{ ch.display_name }} 配置？</span>
+                        <ChevronDown
+                          class="w-3.5 h-3.5 text-primary/60 ml-auto transition-transform duration-200"
+                          :class="{ 'rotate-180': gatewayGuideExpanded[ch.id] }"
+                        />
+                      </button>
+                      <div v-if="gatewayGuideExpanded[ch.id]" class="px-3 pb-3 space-y-2.5">
+                        <div
+                          v-for="(step, idx) in ch.setup_steps"
+                          :key="idx"
+                          class="flex gap-2.5"
+                        >
+                          <div class="w-5 h-5 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span class="text-[10px] font-bold text-primary">{{ idx + 1 }}</span>
+                          </div>
+                          <div class="min-w-0">
+                            <p class="text-xs font-medium text-foreground leading-relaxed">{{ step.title }}</p>
+                            <p class="text-[11px] text-muted-foreground leading-relaxed mt-0.5 whitespace-pre-line">{{ step.detail }}</p>
+                            <a
+                              v-if="step.link"
+                              :href="step.link"
+                              target="_blank"
+                              rel="noopener"
+                              class="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary-hover mt-1 transition-colors"
+                            >
+                              <ExternalLink class="w-3 h-3" />
+                              <span>打开平台</span>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 字段输入 -->
+                    <div v-for="field in ch.fields" :key="field.key">
+                      <label class="flex items-center gap-1.5 text-xs font-medium text-foreground mb-1.5">
+                        <Lock v-if="field.secret" class="w-3 h-3 text-muted-foreground/50" />
+                        {{ field.label }}
+                      </label>
+
+                      <!-- Secret field with eye toggle -->
+                      <template v-if="field.secret">
+                        <div class="relative">
+                          <input
+                            :type="gatewayShowSecrets[ch.id + ':' + field.key] ? 'text' : 'password'"
+                            :value="gatewayParamEdits[ch.id]?.[field.key] ?? ch.params[field.key] ?? ''"
+                            @input="onGatewayParamInput(ch.id, field.key, ($event.target as HTMLInputElement).value)"
+                            :placeholder="field.placeholder"
+                            class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 transition-shadow font-mono pr-9"
+                          />
+                          <button
+                            @click="gatewayShowSecrets[ch.id + ':' + field.key] = !gatewayShowSecrets[ch.id + ':' + field.key]"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground"
+                          >
+                            <Eye v-if="!gatewayShowSecrets[ch.id + ':' + field.key]" class="w-3.5 h-3.5" />
+                            <EyeOff v-else class="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </template>
+
+                      <!-- List field -->
+                      <template v-else-if="field.type === 'list'">
+                        <input
+                          type="text"
+                          :value="formatListValue(gatewayParamEdits[ch.id]?.[field.key] ?? ch.params[field.key])"
+                          @input="onGatewayParamInput(ch.id, field.key, ($event.target as HTMLInputElement).value)"
+                          :placeholder="field.placeholder"
+                          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 transition-shadow text-muted-foreground"
+                        />
+                        <p class="text-[10px] text-muted-foreground/60 mt-1">多个 ID 用英文逗号分隔</p>
+                      </template>
+
+                      <!-- Normal text field -->
+                      <template v-else>
+                        <input
+                          type="text"
+                          :value="gatewayParamEdits[ch.id]?.[field.key] ?? ch.params[field.key] ?? ''"
+                          @input="onGatewayParamInput(ch.id, field.key, ($event.target as HTMLInputElement).value)"
+                          :placeholder="field.placeholder"
+                          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 transition-shadow font-mono text-muted-foreground"
+                        />
+                      </template>
+                    </div>
+
+                    <!-- 测试连接按钮 -->
+                    <div class="flex items-center gap-3 pt-1">
+                      <button
+                        @click="testGatewayConnection(ch.id)"
+                        :disabled="gatewayTesting[ch.id]"
+                        class="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                      >
+                        <Loader2 v-if="gatewayTesting[ch.id]" class="w-3 h-3 animate-spin" />
+                        <Wifi v-else class="w-3 h-3" />
+                        测试连接
+                      </button>
+
+                      <!-- 测试结果 -->
+                      <div
+                        v-if="gatewayTestResults[ch.id]"
+                        class="flex items-center gap-1.5 text-xs"
+                        :class="gatewayTestResults[ch.id].valid ? 'text-success' : 'text-destructive'"
+                      >
+                        <CircleCheck v-if="gatewayTestResults[ch.id].valid" class="w-3.5 h-3.5 flex-shrink-0" />
+                        <AlertTriangle v-else class="w-3.5 h-3.5 flex-shrink-0" />
+                        <span>{{ gatewayTestResults[ch.id].message }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 保存按钮 + 状态提示 -->
+              <div v-if="gatewayConfig.enabled" class="px-4 py-3 border-t border-border flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div v-if="gatewaySaveSuccess" class="flex items-center gap-1.5 text-xs text-success">
+                    <CircleCheck class="w-3.5 h-3.5" />
+                    <span>已保存，重启服务后生效</span>
+                  </div>
+                  <div v-if="gatewaySaveError" class="flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertTriangle class="w-3.5 h-3.5" />
+                    <span>{{ gatewaySaveError }}</span>
+                  </div>
+                </div>
+                <button
+                  @click="saveGatewayConfig"
+                  :disabled="gatewaySaving || !gatewayHasChanges"
+                  class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                >
+                  <Loader2 v-if="gatewaySaving" class="w-3 h-3 animate-spin" />
+                  <span>{{ gatewaySaving ? '保存中...' : '保存网关配置' }}</span>
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <!-- ==================== 操作按钮 ==================== -->
         <div class="flex items-center justify-between pt-2">
           <a
@@ -430,7 +672,8 @@ import { useRouter } from 'vue-router'
 import {
   Check, Lock, Eye, EyeOff, Loader2,
   CircleCheck, AlertTriangle, ChevronDown, ShieldCheck,
-  HardDrive, Download, Search, Cloud,
+  HardDrive, Download, Search, Cloud, Radio,
+  BookOpen, ExternalLink, Wifi,
 } from 'lucide-vue-next'
 import {
   getSettings,
@@ -445,6 +688,15 @@ import {
   type EmbeddingStatus,
 } from '@/api/settings'
 import { modelApi, type ProviderDetail, type ValidateKeyResult } from '@/api/models'
+import {
+  getGatewayConfig,
+  updateGatewayConfig,
+  testChannelConnection,
+  type GatewayConfig,
+  type GatewayConfigUpdate,
+  type GatewayChannel,
+  type ChannelTestResult,
+} from '@/api/gateway'
 import { useGuideStore } from '@/stores/guide'
 
 const router = useRouter()
@@ -657,6 +909,229 @@ async function applySemanticMode() {
   }
 }
 
+// ==================== 多渠道网关状态 ====================
+
+const gatewayLoading = ref(false)
+const gatewayConfig = ref<GatewayConfig | null>(null)
+const gatewaySaving = ref(false)
+const gatewaySaveSuccess = ref(false)
+const gatewaySaveError = ref('')
+const expandedGatewayChannel = ref<string | null>(null)
+const gatewayShowSecrets = reactive<Record<string, boolean>>({})
+const gatewayGuideExpanded = reactive<Record<string, boolean>>({})
+const gatewayTesting = reactive<Record<string, boolean>>({})
+const gatewayTestResults = reactive<Record<string, ChannelTestResult>>({})
+
+/** Per-channel enabled state (editable, not yet saved) */
+const gatewayChannelEnabled = reactive<Record<string, boolean>>({})
+
+/** Per-channel param edits (only stores changed values) */
+const gatewayParamEdits = reactive<Record<string, Record<string, any>>>({})
+
+/** Track if user has made any changes */
+const gatewayHasChanges = computed(() => {
+  if (!gatewayConfig.value) return false
+
+  // Check gateway-level enabled toggle
+  // (no separate tracking needed — toggle calls saveGatewayConfig directly)
+
+  // Check channel enabled toggles
+  for (const ch of gatewayConfig.value.channels) {
+    if (gatewayChannelEnabled[ch.id] !== ch.enabled) return true
+  }
+
+  // Check param edits
+  for (const chId of Object.keys(gatewayParamEdits)) {
+    const edits = gatewayParamEdits[chId]
+    if (edits && Object.keys(edits).length > 0) return true
+  }
+
+  return false
+})
+
+/** Load gateway config from backend */
+async function loadGatewayConfig() {
+  gatewayLoading.value = true
+  try {
+    gatewayConfig.value = await getGatewayConfig()
+    // Init channel enabled state
+    for (const ch of gatewayConfig.value.channels) {
+      gatewayChannelEnabled[ch.id] = ch.enabled
+    }
+  } catch (e) {
+    console.error('Failed to load gateway config:', e)
+  } finally {
+    gatewayLoading.value = false
+  }
+}
+
+/** Toggle gateway enabled and save immediately */
+async function toggleGatewayEnabled() {
+  if (!gatewayConfig.value) return
+  const newEnabled = !gatewayConfig.value.enabled
+  gatewayConfig.value.enabled = newEnabled
+
+  try {
+    await updateGatewayConfig({ enabled: newEnabled })
+    gatewaySaveSuccess.value = true
+    setTimeout(() => { gatewaySaveSuccess.value = false }, 3000)
+  } catch (e: any) {
+    gatewaySaveError.value = e?.message || '保存失败'
+    gatewayConfig.value.enabled = !newEnabled // rollback
+    setTimeout(() => { gatewaySaveError.value = '' }, 3000)
+  }
+}
+
+/** Toggle a specific channel's enabled state (local, save with button) */
+function toggleChannelEnabled(channelId: string) {
+  gatewayChannelEnabled[channelId] = !gatewayChannelEnabled[channelId]
+}
+
+/** Toggle expand/collapse of channel config */
+function toggleGatewayChannel(channelId: string) {
+  if (expandedGatewayChannel.value === channelId) {
+    expandedGatewayChannel.value = null
+    return
+  }
+  expandedGatewayChannel.value = channelId
+
+  // Auto-expand guide if channel is not yet configured
+  if (gatewayConfig.value) {
+    const ch = gatewayConfig.value.channels.find(c => c.id === channelId)
+    if (ch && !isChannelConfigured(ch)) {
+      gatewayGuideExpanded[channelId] = true
+    }
+  }
+}
+
+/** Check if a channel has real config values (not just env var placeholders) */
+function isChannelConfigured(ch: GatewayChannel): boolean {
+  return ch.fields.some(f => {
+    const val = ch.params[f.key]
+    if (!val) return false
+    if (typeof val === 'string' && val.startsWith('${')) return false
+    if (Array.isArray(val) && val.length === 0) return false
+    return true
+  })
+}
+
+/** Handle channel param input change */
+function onGatewayParamInput(channelId: string, key: string, value: string) {
+  if (!gatewayParamEdits[channelId]) {
+    gatewayParamEdits[channelId] = {}
+  }
+  gatewayParamEdits[channelId][key] = value
+}
+
+/** Format a list value (array → comma-separated string) */
+function formatListValue(value: any): string {
+  if (Array.isArray(value)) return value.join(', ')
+  if (typeof value === 'string') return value
+  return ''
+}
+
+/** Parse a comma-separated string into a list */
+function parseListValue(value: string): string[] {
+  if (!value.trim()) return []
+  return value.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+/** Test channel connection */
+async function testGatewayConnection(channelId: string) {
+  if (!gatewayConfig.value) return
+  const ch = gatewayConfig.value.channels.find(c => c.id === channelId)
+  if (!ch) return
+
+  gatewayTesting[channelId] = true
+  delete gatewayTestResults[channelId]
+
+  try {
+    // Merge original params with user edits
+    const params: Record<string, any> = { ...ch.params }
+    const edits = gatewayParamEdits[channelId]
+    if (edits) {
+      for (const [k, v] of Object.entries(edits)) {
+        params[k] = v
+      }
+    }
+
+    const result = await testChannelConnection(channelId, params)
+    gatewayTestResults[channelId] = result
+  } catch (e: any) {
+    gatewayTestResults[channelId] = {
+      valid: false,
+      message: e?.response?.data?.detail?.message || e?.message || '测试失败',
+    }
+  } finally {
+    gatewayTesting[channelId] = false
+  }
+}
+
+/** Channel initial for icon */
+function getChannelInitial(id: string): string {
+  const map: Record<string, string> = { telegram: 'T', feishu: '飞' }
+  return map[id] || id.charAt(0).toUpperCase()
+}
+
+/** Save gateway config changes */
+async function saveGatewayConfig() {
+  if (!gatewayConfig.value) return
+  gatewaySaving.value = true
+  gatewaySaveError.value = ''
+  gatewaySaveSuccess.value = false
+
+  try {
+    const update: GatewayConfigUpdate = { channels: {} }
+
+    for (const ch of gatewayConfig.value.channels) {
+      const channelUpdate: { enabled?: boolean; params?: Record<string, any> } = {}
+
+      // Channel enabled state
+      if (gatewayChannelEnabled[ch.id] !== ch.enabled) {
+        channelUpdate.enabled = gatewayChannelEnabled[ch.id]
+      }
+
+      // Channel params
+      const edits = gatewayParamEdits[ch.id]
+      if (edits && Object.keys(edits).length > 0) {
+        channelUpdate.params = {}
+        for (const field of ch.fields) {
+          if (edits[field.key] !== undefined) {
+            const raw = edits[field.key]
+            channelUpdate.params[field.key] = field.type === 'list'
+              ? parseListValue(raw)
+              : raw
+          }
+        }
+      }
+
+      if (Object.keys(channelUpdate).length > 0) {
+        update.channels![ch.id] = channelUpdate
+      }
+    }
+
+    await updateGatewayConfig(update)
+
+    // Refresh config from backend
+    await loadGatewayConfig()
+
+    // Clear edits
+    for (const key of Object.keys(gatewayParamEdits)) {
+      delete gatewayParamEdits[key]
+    }
+
+    gatewaySaveSuccess.value = true
+    setTimeout(() => { gatewaySaveSuccess.value = false }, 3000)
+  } catch (e: any) {
+    gatewaySaveError.value = e?.response?.data?.detail?.message || e?.message || '保存失败'
+    setTimeout(() => { gatewaySaveError.value = '' }, 5000)
+  } finally {
+    gatewaySaving.value = false
+  }
+}
+
+const gatewaySectionRef = ref<HTMLElement | null>(null)
+
 // ==================== Provider 工具函数 ====================
 
 /** 判断是否为后端返回的脱敏 Key（如 "sk-xxxx...yyyy" 或 "***"） */
@@ -686,6 +1161,21 @@ function formatContextWindow(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`
   return `${tokens}`
+}
+
+/** 获取 Provider 首字母或特殊标识 */
+function getProviderInitial(name: string): string {
+  const initials: Record<string, string> = {
+    'anthropic': 'A',
+    'openai': 'O',
+    'qwen': '通',
+    'doubao': '豆',
+    'deepseek': 'DS',
+    'zhipu': '智',
+    'kimi': 'K',
+    'minimax': 'M',
+  }
+  return initials[name] || name.charAt(0).toUpperCase()
 }
 
 function toggleProvider(name: string) {
@@ -951,7 +1441,7 @@ function applyGuideTarget(step: number) {
 // ==================== 生命周期 ====================
 
 onMounted(async () => {
-  await Promise.all([loadAll(), loadEmbeddingStatus()])
+  await Promise.all([loadAll(), loadEmbeddingStatus(), loadGatewayConfig()])
 
   // 检查是否有后台下载正在进行（用户离开设置页后再回来的场景）
   await checkAndResumeDownload()

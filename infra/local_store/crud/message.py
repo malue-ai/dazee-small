@@ -209,13 +209,16 @@ async def list_messages(
         cursor_msg = await session.get(LocalMessage, before_cursor)
         if cursor_msg:
             query = query.where(LocalMessage.created_at < cursor_msg.created_at)
-    elif offset > 0:
-        query = query.offset(offset)
-
-    if order == "desc":
+        # before_cursor: always query DESC to get the N messages
+        # closest to the cursor, caller reverses for display order
         query = query.order_by(LocalMessage.created_at.desc())
     else:
-        query = query.order_by(LocalMessage.created_at.asc())
+        if offset > 0:
+            query = query.offset(offset)
+        if order == "desc":
+            query = query.order_by(LocalMessage.created_at.desc())
+        else:
+            query = query.order_by(LocalMessage.created_at.asc())
 
     query = query.limit(limit)
 

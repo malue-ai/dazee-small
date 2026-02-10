@@ -19,7 +19,7 @@ from typing import Optional
 
 from logger import get_logger
 
-logger = get_logger("services.knowledge")
+logger = get_logger(__name__)
 
 # Global singleton
 _knowledge_manager = None
@@ -207,7 +207,8 @@ def _load_knowledge_config() -> dict:
         return {"enabled": True, "semantic_enabled": False}
 
     try:
-        config_path = Path(f"instances/{instance_name}/config/memory.yaml")
+        from utils.app_paths import get_instances_dir
+        config_path = get_instances_dir() / instance_name / "config" / "memory.yaml"
         if not config_path.exists():
             return {"enabled": True, "semantic_enabled": False}
 

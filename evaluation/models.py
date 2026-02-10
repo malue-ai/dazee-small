@@ -54,18 +54,9 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
-class TokenUsage(BaseModel):
-    """Token使用统计"""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    thinking_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    
-    @property
-    def total_tokens(self) -> int:
-        """总Token数"""
-        return self.input_tokens + self.output_tokens + self.thinking_tokens
+# Re-exported from models.usage to avoid circular dependency
+# (services/ and core/ should import from models.usage directly)
+from models.usage import TokenUsage  # noqa: F401
 
 
 class Transcript(BaseModel):

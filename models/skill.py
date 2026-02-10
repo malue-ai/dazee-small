@@ -4,7 +4,7 @@ Skill 模型
 用于 Skill 相关的请求/响应
 """
 
-from typing import Optional, List
+from typing import Dict, Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -52,8 +52,16 @@ class SkillSummary(BaseModel):
     name: str = Field(..., description="Skill 名称")
     description: str = Field("", description="描述")
     agent_id: str = Field(..., description="所属 Agent ID")
-    is_enabled: bool = Field(True, description="是否启用")
+    status: str = Field("ready", description="运行时状态: ready/need_setup/need_auth/unavailable")
+    status_message: str = Field("", description="状态说明")
     created_at: datetime = Field(..., description="创建时间")
+
+
+class EnvRequirement(BaseModel):
+    """Skill 所需的环境变量"""
+    name: str = Field(..., description="环境变量名称，如 GEMINI_API_KEY")
+    label: str = Field(..., description="显示标签，如 Gemini API Key")
+    is_set: bool = Field(False, description="是否已配置")
 
 
 class SkillDetail(BaseModel):
@@ -66,7 +74,9 @@ class SkillDetail(BaseModel):
     resources: List[str] = Field(default_factory=list, description="资源文件列表")
     content: str = Field("", description="SKILL.md 完整内容")
     agent_id: str = Field(..., description="所属 Agent ID（global 表示全局库）")
-    is_enabled: bool = Field(True, description="是否启用")
+    status: str = Field("ready", description="运行时状态: ready/need_setup/need_auth/unavailable")
+    status_message: str = Field("", description="状态说明")
+    required_env: List[EnvRequirement] = Field(default_factory=list, description="所需环境变量列表")
     created_at: Optional[datetime] = Field(None, description="创建时间")
 
 
@@ -114,15 +124,15 @@ class SkillUninstallRequest(BaseModel):
     }
 
 
-class SkillToggleRequest(BaseModel):
-    """启用/禁用 Skill 请求"""
-    skill_name: str = Field(..., description="Skill 名称")
-    agent_id: str = Field(..., description="实例 ID")
-    enabled: bool = Field(..., description="是否启用")
-
-
 class SkillUpdateContentRequest(BaseModel):
     """更新 Skill 内容请求"""
     skill_name: str = Field(..., description="Skill 名称")
     agent_id: str = Field(..., description="实例 ID")
     content: str = Field(..., description="新的 SKILL.md 内容")
+
+
+class SkillConfigureRequest(BaseModel):
+    """配置 Skill API Key 请求"""
+    skill_name: str = Field(..., description="Skill 名称")
+    agent_id: str = Field("global", description="实例 ID（global 表示全局库）")
+    env_vars: Dict[str, str] = Field(..., description="环境变量键值对，如 {GEMINI_API_KEY: 'xxx'}")

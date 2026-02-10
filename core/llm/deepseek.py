@@ -275,6 +275,22 @@ class DeepSeekLLMService(BaseLLMService):
             },
         }
 
+    @staticmethod
+    def _normalize_tool_choice(tool_choice: Any) -> Any:
+        """Convert Claude-style tool_choice to OpenAI-compatible format.
+
+        Claude format:  {"type": "tool", "name": "func_name"}
+        OpenAI format:  {"type": "function", "function": {"name": "func_name"}}
+        """
+        if isinstance(tool_choice, str):
+            return tool_choice
+        if isinstance(tool_choice, dict) and tool_choice.get("type") == "tool":
+            return {
+                "type": "function",
+                "function": {"name": tool_choice["name"]},
+            }
+        return tool_choice
+
     # ============================================================
     # Core API methods
     # ============================================================
@@ -398,7 +414,9 @@ class DeepSeekLLMService(BaseLLMService):
 
         if all_tools:
             request_params["tools"] = all_tools
-            request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+            request_params["tool_choice"] = self._normalize_tool_choice(
+                kwargs.get("tool_choice", "auto")
+            )
             logger.debug(f"Tools: {[t['function']['name'] for t in all_tools]}")
 
         # Warn if max_tokens was clamped
@@ -517,7 +535,9 @@ class DeepSeekLLMService(BaseLLMService):
 
         if all_tools:
             request_params["tools"] = all_tools
-            request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+            request_params["tool_choice"] = self._normalize_tool_choice(
+                kwargs.get("tool_choice", "auto")
+            )
 
         # Warn if clamped
         original_max_tokens = kwargs.get("max_tokens", self.config.max_tokens)
@@ -982,6 +1002,9 @@ def create_deepseek_service(
     """
     if api_key is None:
         api_key = os.getenv("DEEPSEEK_API_KEY")
+
+    if not api_key:
+        raise ValueError("DeepSeek API key is required. Set DEEPSEEK_API_KEY env var or pass api_key.")
 
     config = LLMConfig(
         provider=LLMProvider.DEEPSEEK,

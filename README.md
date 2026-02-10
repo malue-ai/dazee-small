@@ -1,17 +1,7 @@
 # ZenFlux Agent — 小搭子桌面端实例
 
-> 基于 ZenFlux Agent V9.0，为"养在电脑里的小搭子"设计的桌面端 AI 智能体。
+> "养在电脑里的小搭子"设计的桌面端 AI 智能体。
 > 100% 本地存储、Skills-First 能力体系、跨平台（macOS / Windows / Linux）。
-
-## 架构定位
-
-| 维度 | 云端版（dazee_agent） | 桌面版（xiaodazi） |
-|---|---|---|
-| 部署形态 | SaaS 服务 | Tauri 桌面应用 |
-| 存储方案 | SQLite + FTS5 + sqlite-vec | SQLite + FTS5 + sqlite-vec |
-| 能力来源 | MCP 工具 + REST API | Skills-First + 本地操作 + MCP Apps |
-| 用户画像 | 企业用户 / 技术团队 | 个人用户 / 非技术用户 |
-| 配置门槛 | 需运维部署 | 零配置开箱即用 |
 
 ## 技术架构
 

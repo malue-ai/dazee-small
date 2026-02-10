@@ -19,7 +19,7 @@ from infra.storage.local import LocalStorage
 from logger import get_logger
 from utils.app_paths import get_storage_dir
 
-logger = get_logger("files_router")
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 

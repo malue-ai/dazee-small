@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from logger import get_logger
 
-logger = get_logger("services.user_task_scheduler")
+logger = get_logger(__name__)
 
 
 class UserTaskScheduler:
@@ -479,6 +479,7 @@ class UserTaskScheduler:
                 f"❌ [Scheduler] 存储提醒消息失败: task_id={task_id}, error={e}",
                 exc_info=True,
             )
+            raise
 
     async def _action_agent_task(self, task_data: Dict[str, Any], action: Dict[str, Any]):
         """执行 Agent 任务动作"""
@@ -521,6 +522,7 @@ class UserTaskScheduler:
                 f"Agent 任务执行失败: task_id={task_id}, error={e}",
                 exc_info=True,
             )
+            raise
 
     async def _broadcast_task_notification(
         self,

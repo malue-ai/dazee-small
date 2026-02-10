@@ -65,28 +65,14 @@ class MemoryRecallTool(BaseTool):
         if self._memory_manager is None:
             from core.memory.instance_memory import InstanceMemoryManager
 
-            # Read memory config from instance config
-            _memory_enabled = True
-            _mem0_enabled = True
-            try:
-                import os
-                import yaml
-                from utils.app_paths import get_instances_dir
-                _inst = os.getenv("AGENT_INSTANCE", "default")
-                _cfg_path = get_instances_dir() / _inst / "config" / "memory.yaml"
-                if _cfg_path.exists():
-                    with open(_cfg_path) as _f:
-                        _mem_section = (yaml.safe_load(_f) or {}).get("memory", {})
-                    _memory_enabled = _mem_section.get("enabled", True)
-                    _mem0_enabled = _mem_section.get("mem0_enabled", True)
-            except Exception:
-                pass
+            from utils.memory_config import load_memory_config
+            mem_cfg = await load_memory_config()
 
             self._memory_manager = InstanceMemoryManager(
                 user_id=context.user_id,
                 instance_name=context.instance_id or None,
-                mem0_enabled=_mem0_enabled,
-                enabled=_memory_enabled,
+                mem0_enabled=mem_cfg.mem0_enabled,
+                enabled=mem_cfg.enabled,
             )
         return self._memory_manager
 

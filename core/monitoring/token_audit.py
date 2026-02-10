@@ -23,7 +23,7 @@ from utils.app_paths import get_logs_dir
 import aiofiles
 from pydantic import BaseModel, Field
 
-from evaluation.models import TokenUsage
+from models.usage import TokenUsage
 from logger import get_logger
 
 logger = get_logger(__name__)

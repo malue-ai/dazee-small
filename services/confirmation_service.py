@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Union
 from logger import get_logger
 from models.hitl import ConfirmationRequest, ConfirmationType
 
-logger = get_logger("confirmation_service")
+logger = get_logger(__name__)
 
 
 # ============================================================

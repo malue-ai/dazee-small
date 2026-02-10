@@ -50,7 +50,7 @@ from models.llm import (
     ValidatedModelInfo,
 )
 
-logger = get_logger("router.models")
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/models", tags=["Models"])
 
@@ -645,7 +645,7 @@ def _build_model_details(
             )
         else:
             details.append(
-                ValidatedModelInfo(
+                ValidatedModelInfo(  # type: ignore[call-arg]
                     model_name=name,
                     display_name=name,
                     provider=provider,

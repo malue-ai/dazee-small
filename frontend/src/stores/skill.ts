@@ -146,24 +146,6 @@ export const useSkillStore = defineStore('skill', () => {
     }
   }
 
-  /** 启用/禁用项目技能 */
-  async function toggle(skillName: string, agentId: string, enabled: boolean): Promise<{ success: boolean; message: string }> {
-    actionLoading.value = true
-    try {
-      const result = await skillsApi.toggleSkill({ skill_name: skillName, agent_id: agentId, enabled })
-      // 刷新列表以更新状态
-      if (selectedAgentId.value === agentId) {
-        await fetchProjectSkills(agentId)
-      }
-      return { success: result.success, message: result.message || (result.success ? '操作成功' : '操作失败') }
-    } catch (error: any) {
-      console.error('切换技能状态失败:', error?.response?.data || error)
-      return { success: false, message: extractErrorMessage(error, '操作失败') }
-    } finally {
-      actionLoading.value = false
-    }
-  }
-
   // ==================== 详情 ====================
 
   /** 选中技能并加载详情 */
@@ -177,6 +159,21 @@ export const useSkillStore = defineStore('skill', () => {
       skillDetail.value = await skillsApi.getSkillDetail(skill.name, agentId)
     } catch (error) {
       console.error('获取技能详情失败:', error)
+    } finally {
+      detailLoading.value = false
+    }
+  }
+
+  /** 重新加载当前选中 skill 的详情 */
+  async function reloadDetail(skillName?: string, agentId?: string): Promise<void> {
+    const name = skillName || selectedSkill.value?.name
+    if (!name) return
+    detailLoading.value = true
+    try {
+      const aid = agentId ?? (activeTab.value === 'project' ? selectedAgentId.value || undefined : undefined)
+      skillDetail.value = await skillsApi.getSkillDetail(name, aid)
+    } catch (error) {
+      console.error('刷新技能详情失败:', error)
     } finally {
       detailLoading.value = false
     }
@@ -233,10 +230,10 @@ export const useSkillStore = defineStore('skill', () => {
     fetchProjectSkills,
     install,
     uninstall,
-    toggle,
 
     // 详情
     selectSkill,
+    reloadDetail,
     clearSelection,
 
     // Tab

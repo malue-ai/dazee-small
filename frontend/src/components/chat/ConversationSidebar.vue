@@ -260,11 +260,9 @@ function setEditBtnRef(agentId: string, el: Element | ComponentPublicInstance | 
   }
 }
 
-/** 找到默认项目（优先匹配 xiaodazi，否则取第一个） */
+/** 找到默认项目（取第一个已加载的 Agent） */
 function findDefaultAgent(): typeof props.agents[number] | undefined {
-  return props.agents.find(a =>
-    a.name.includes('xiaodazi') || a.name.includes('小打字') || a.agent_id.includes('xiaodazi')
-  ) || props.agents[0]
+  return props.agents[0]
 }
 
 /** 判断某个 Agent 是否为引导步骤 11 的目标（用于保持编辑按钮可见） */

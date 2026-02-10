@@ -47,7 +47,7 @@ from utils.instance_loader import (
     load_instance_prompt,
 )
 
-logger = get_logger("agent_registry")
+logger = get_logger(__name__)
 
 
 @dataclass

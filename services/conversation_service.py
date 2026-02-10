@@ -21,7 +21,7 @@ from infra.local_store.engine import get_local_session_factory
 from logger import get_logger
 from models.database import Conversation, Message
 
-logger = get_logger("conversation_service")
+logger = get_logger(__name__)
 
 
 class ConversationServiceError(Exception):
@@ -496,7 +496,7 @@ class ConversationService:
                 session=session,
                 conversation_id=conversation_id,
                 limit=limit + 1,
-                offset=offset,
+                offset=offset if not before_cursor else 0,
                 order=order,
                 before_cursor=before_cursor,
             )
@@ -504,6 +504,11 @@ class ConversationService:
             has_more = len(messages) > limit
             if has_more:
                 messages = messages[:limit]
+
+            # before_cursor query returns DESC order (closest to cursor first),
+            # reverse to ASC for chronological display
+            if before_cursor:
+                messages = list(reversed(messages))
 
             items = [
                 Message(
@@ -518,7 +523,8 @@ class ConversationService:
                 for msg in messages
             ]
 
-            # 计算 next_cursor（最早消息的 ID，用于下次加载更早的消息）
+            # next_cursor: oldest message ID in current batch,
+            # used by client to load even older messages
             next_cursor = items[0].id if has_more and items else None
 
             # 构建 conversation_metadata

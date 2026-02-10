@@ -190,6 +190,22 @@ class OpenAILLMService(BaseLLMService):
             },
         }
 
+    @staticmethod
+    def _normalize_tool_choice(tool_choice: Any) -> Any:
+        """Convert Claude-style tool_choice to OpenAI-compatible format.
+
+        Claude format:  {"type": "tool", "name": "func_name"}
+        OpenAI format:  {"type": "function", "function": {"name": "func_name"}}
+        """
+        if isinstance(tool_choice, str):
+            return tool_choice
+        if isinstance(tool_choice, dict) and tool_choice.get("type") == "tool":
+            return {
+                "type": "function",
+                "function": {"name": tool_choice["name"]},
+            }
+        return tool_choice
+
     # ============================================================
     # 核心 API 方法
     # ============================================================
@@ -274,7 +290,9 @@ class OpenAILLMService(BaseLLMService):
 
         if all_tools:
             request_params["tools"] = all_tools
-            request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+            request_params["tool_choice"] = self._normalize_tool_choice(
+                kwargs.get("tool_choice", "auto")
+            )
 
         # 调试日志
         logger.debug(f"📤 OpenAI 请求: model={self.config.model}, messages={len(openai_messages)}")
@@ -372,7 +390,9 @@ class OpenAILLMService(BaseLLMService):
 
         if all_tools:
             request_params["tools"] = all_tools
-            request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+            request_params["tool_choice"] = self._normalize_tool_choice(
+                kwargs.get("tool_choice", "auto")
+            )
 
         logger.info(
             f"📤 OpenAI 流式请求: model={self.config.model}, messages={len(openai_messages)}"

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from core.playbook import PlaybookManager, PlaybookStatus, create_playbook_manager
 from logger import get_logger
 
-logger = get_logger("router.playbook")
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/playbook",

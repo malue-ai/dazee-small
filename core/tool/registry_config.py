@@ -15,7 +15,7 @@
 """
 
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 import aiofiles
 import yaml
@@ -150,7 +150,7 @@ async def get_tool_categories() -> Dict[str, List[str]]:
 # These read the YAML file synchronously for use at module load
 # or __init__ time where async is not available.
 
-_sync_tool_classification: Dict = None
+_sync_tool_classification: Optional[Dict] = None
 
 
 def _load_tool_classification_sync() -> Dict:

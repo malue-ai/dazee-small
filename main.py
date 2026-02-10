@@ -55,6 +55,7 @@ from routers import (
     chat_router,
     conversation_router,
     files_router,
+    gateway_router,
     human_confirmation_router,
     playbook_router,
     settings_router,
@@ -327,6 +328,49 @@ async def _stop_user_task_scheduler(scheduler: Optional[Any]) -> None:
             print(f"⚠️ 关闭用户任务调度器失败: {e}")
 
 
+async def _start_gateway():
+    """Start the multi-channel gateway if configured."""
+    try:
+        from core.gateway.loader import create_gateway, load_gateway_config
+        from routers.gateway import set_channel_manager
+
+        config = await load_gateway_config()
+        if not config.enabled:
+            return None
+
+        result = await create_gateway(config)
+        if result is None:
+            return None
+
+        manager, bridge = result
+        await manager.start_all()
+
+        # Wire up health check router
+        set_channel_manager(manager)
+
+        status = manager.get_all_status()
+        channels_str = ", ".join(f"{k}={v}" for k, v in status.items())
+        print(f"🌐 Gateway 已启动 ({channels_str})")
+
+        return manager
+    except Exception as e:
+        print(f"⚠️ Gateway 启动失败（不影响服务运行）: {e}")
+        return None
+
+
+async def _stop_gateway(manager) -> None:
+    """Stop the multi-channel gateway."""
+    if manager is not None:
+        try:
+            await manager.stop_all()
+            # Clear router reference to avoid stale state
+            from routers.gateway import set_channel_manager
+            set_channel_manager(None)
+            print("✅ Gateway 已停止")
+        except Exception as e:
+            print(f"⚠️ Gateway 停止失败: {e}")
+
+
 # ==================== 生命周期管理 ====================
 
 @asynccontextmanager
@@ -352,12 +396,14 @@ async def lifespan(app: FastAPI):
     await _warmup_embedding_model()  # Embedding 模型预热（非阻塞）
     scheduler = await _start_scheduler()
     user_task_scheduler = await _start_user_task_scheduler()  # 用户定时任务调度器
+    gateway_manager = await _start_gateway()  # 多渠道网关（可选）
     
     yield
     
     # ===== 关闭阶段 =====
     print("🛑 正在关闭服务...")
     
+    await _stop_gateway(gateway_manager)  # 先停网关，防止新消息进入
     await _cleanup_knowledge_service()
     await _cleanup_agent_registry()
     await _stop_user_task_scheduler(user_task_scheduler)  # 停止用户任务调度器
@@ -415,6 +461,9 @@ app.include_router(playbook_router)
 
 # 实时通信（WebSocket）
 app.include_router(websocket_router)
+
+# 多渠道网关
+app.include_router(gateway_router)
 
 
 # ==================== 基础路由 ====================

@@ -490,7 +490,7 @@ class PromptfooAdapter:
         try:
             json.loads(response)
             is_valid_json = True
-        except:
+        except (json.JSONDecodeError, TypeError):
             pass
         
         return GradeResult(

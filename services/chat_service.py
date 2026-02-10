@@ -21,7 +21,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
 from config.llm_config.loader import get_llm_profile
@@ -47,7 +47,7 @@ from core.routing import AgentRouter, IntentResult, RoutingDecision
 
 from core.routing.types import Complexity
 from core.schemas.validator import AgentSchema
-from evaluation.models import TokenUsage
+from models.usage import TokenUsage
 from infra.local_store import crud as local_crud
 from infra.local_store.engine import get_local_session_factory
 from infra.local_store.pools import get_local_agent_pool, get_local_session_pool
@@ -75,7 +75,7 @@ from utils.message_utils import (
 )
 from utils.query_utils import apply_conversation_delta, format_variables
 
-logger = get_logger("chat_service")
+logger = get_logger(__name__)
 
 
 # ==================== 前置处理层 ====================
@@ -250,7 +250,9 @@ class ChatService:
         agents = self.agent_registry.list_agents()
         if agents:
             return agents[0]["agent_id"]
-        return "xiaodazi"
+        raise RuntimeError(
+            "没有可用的 Agent 实例。请检查 AGENT_INSTANCE 环境变量或 instances/ 目录配置。"
+        )
 
     def __init__(
         self,
@@ -435,14 +437,12 @@ class ChatService:
             broadcaster: EventBroadcaster 实例
         """
         intent_content = {
-            "intent_id": intent.intent_id,
-            "intent_name": intent.intent_name,
             "complexity": intent.complexity.value,
             "needs_plan": intent.needs_plan,
+            "is_follow_up": intent.is_follow_up,
             "confidence": intent.confidence,
+            "relevant_skill_groups": intent.relevant_skill_groups or [],
         }
-        if intent.platform:
-            intent_content["platform"] = intent.platform
         
         await broadcaster.emit_message_delta(
             session_id=session_id,
@@ -452,7 +452,7 @@ class ChatService:
         
         logger.info(
             "Intent 事件已发送",
-            extra={"intent_id": intent.intent_id, "intent_name": intent.intent_name}
+            extra={"complexity": intent.complexity.value, "needs_plan": intent.needs_plan}
         )
     
     async def _generate_preface_stream(
@@ -463,7 +463,7 @@ class ChatService:
         message_id: str,
         broadcaster: EventBroadcaster,
         schema: Optional[AgentSchema] = None,
-        tracker: Optional["EnhancedUsageTracker"] = None
+        tracker: Optional[UsageTracker] = None
     ) -> Optional[str]:
         """
         流式生成 Preface 开场白
@@ -481,23 +481,24 @@ class ChatService:
             完整的开场白文本，失败返回 None
         """
         try:
-            if not schema or not schema.preface_template:
+            preface_config = schema.prompts.preface if schema and schema.prompts else None
+            if not preface_config or not preface_config.template:
                 logger.warning("Preface 配置缺失")
                 return None
             
-            intent_profile = get_llm_profile("intent_analyzer")
+            intent_profile = await get_llm_profile("intent_analyzer")
             preface_llm = create_llm_service(**intent_profile)
             
-            # 将 preface_template 作为系统提示词，用户消息作为 user 角色传入
+            # 将 preface template 作为系统提示词，用户消息作为 user 角色传入
             llm_messages = [
-                Message(role="system", content=schema.preface_template),
+                Message(role="system", content=preface_config.template),
                 Message(role="user", content=user_message)
             ]
             
             accumulated_text = ""
             final_response = None
             
-            max_tokens = schema.preface_max_tokens
+            max_tokens = preface_config.max_tokens
             async for chunk in preface_llm.create_message_stream(
                 messages=llm_messages,
                 max_tokens=max_tokens
@@ -517,7 +518,7 @@ class ChatService:
             if tracker and final_response:
                 tracker.record_call(
                     llm_response=final_response,
-                    model=final_response.model,
+                    model=final_response.model or "",
                     purpose="preface"
                 )
             
@@ -632,7 +633,7 @@ class ChatService:
         files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
         output_format: str = "zenflux",
-    ):
+    ) -> Union[AsyncGenerator[dict[str, Any], None], dict[str, Any]]:
         """
         统一的对话入口
 
@@ -721,11 +722,12 @@ class ChatService:
         raw_message = message
         if files:
             with log_execution_time("文件处理", logger):
-                files_data = [
-                    f.model_dump() if hasattr(f, "model_dump") else f
-                    for f in files
-                    if isinstance(f, (dict,)) or hasattr(f, "model_dump")
-                ]
+                files_data = []
+                for f in files:
+                    if isinstance(f, dict):
+                        files_data.append(f)
+                    elif hasattr(f, "model_dump"):
+                        files_data.append(f.model_dump())  # type: ignore[union-attr]
                 if files_data:
                     processed_files = await self.file_processor.process_files(files_data)
                     if processed_files:
@@ -830,7 +832,7 @@ class ChatService:
                     )
 
                     # 7.2 保存用户消息
-                    user_metadata = {"session_id": session_id}
+                    user_metadata: Dict[str, Any] = {"session_id": session_id}
                     if files_metadata:
                         user_metadata["files"] = files_metadata
 
@@ -1246,7 +1248,7 @@ class ChatService:
                 session_id=session_id,
                 conversation_id=conversation_id,
                 message_id=assistant_message_id,
-                model=agent.model,
+                model=agent.model or "",
                 output_format=events.output_format,
                 adapter=events.adapter,
             )
@@ -1517,6 +1519,8 @@ class ChatService:
             agent._wait_intent_clarify_async = (
                 lambda s=session_id: self.session_service.wait_intent_clarify(s)
             )
+
+            _assistant_text_for_tasks = ""
 
             async for event in agent.chat(
                 messages=history_messages,
@@ -1886,40 +1890,68 @@ class ChatService:
             f"🤖 执行定时 Agent 任务: task_id={task_id}, prompt={prompt[:50]}..."
         )
 
+        agent_id = self.default_agent_key
+        agent = None
+
         try:
-            # 获取默认 Agent
-            agent_id = "xiaodazi"  # 使用默认 Agent
-            agent_config = await self.agent_registry.get_agent(agent_id)
+            # 存储用户消息到会话（记录定时任务的 prompt）
+            from datetime import datetime as _dt
 
-            if not agent_config:
-                return {
-                    "success": False,
-                    "error": f"Agent 不存在: {agent_id}",
-                    "task_id": task_id,
-                }
-
-            # 创建 Agent 实例
-            agent = await self._create_agent(
-                agent_config=agent_config,
-                session_id=f"scheduled_{task_id}",
+            user_msg = await self.conversation_service.create_message(
                 conversation_id=conversation_id,
-                user_id=user_id,
+                role="user",
+                content=[{"type": "text", "text": prompt}],
+                metadata={
+                    "type": "scheduled_task_prompt",
+                    "task_id": task_id,
+                    "triggered_at": _dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+                },
             )
 
-            # 构造消息
-            messages = [Message(role="user", content=prompt)]
+            # 通过 agent_pool 获取 Agent 实例（与 chat() 一致的路径）
+            agent = await self.agent_pool.acquire(
+                agent_id=agent_id,
+                event_manager=self.session_service.events,
+                conversation_service=self.conversation_service,
+            )
 
-            # 执行 Agent（非流式）
-            response = await agent.chat(messages=messages)
+            # 注入 session_context（Agent 要求在调用 execute() 之前注入）
+            agent.inject_session_context(
+                {
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "message_id": None,
+                    "tracer": None,
+                    "plan": None,
+                }
+            )
 
-            # 提取响应文本
+            # 构造简单意图（定时任务默认 simple 复杂度）
+            from core.routing.types import Complexity, IntentResult
+
+            intent = IntentResult(
+                complexity=Complexity.SIMPLE,
+                skip_memory=True,
+                is_follow_up=False,
+                relevant_skill_groups=[],
+            )
+
+            # 构造消息（使用 dict 格式，与 _extract_user_query 兼容）
+            messages = [{"role": "user", "content": prompt}]
+
+            # 执行 Agent（流式消费，收集文本）
             response_text = ""
-            if hasattr(response, "content"):
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        response_text += block.text
+            async for event in agent.chat(messages=messages, intent=intent):
+                event_type = event.get("type", "")
+                if event_type == "content_delta":
+                    response_text += event.get("data", {}).get("text", "")
+                elif event_type == "content":
+                    response_text += event.get("data", {}).get("text", "")
+                elif event_type == "error":
+                    error_msg = event.get("data", {}).get("message", "Agent 执行出错")
+                    raise RuntimeError(error_msg)
 
-            # 存储响应到会话
+            # 存储 Agent 响应到会话
             await self.conversation_service.create_message(
                 conversation_id=conversation_id,
                 role="assistant",
@@ -1935,16 +1967,18 @@ class ChatService:
             return {
                 "success": True,
                 "task_id": task_id,
-                "response": response_text[:500],  # 截断长响应
+                "response": response_text[:500],
             }
 
         except Exception as e:
             logger.error(f"❌ 定时 Agent 任务失败: task_id={task_id}, error={e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e),
-                "task_id": task_id,
-            }
+            raise
+        finally:
+            if agent is not None:
+                try:
+                    await self.agent_pool.release(agent_id)
+                except Exception as release_err:
+                    logger.warning(f"释放定时任务 Agent 失败: {release_err}")
 
 
 _default_service: Optional[ChatService] = None

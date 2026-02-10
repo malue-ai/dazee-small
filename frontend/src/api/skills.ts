@@ -12,8 +12,10 @@ import type {
   SkillSummary,
   SkillInstallRequest,
   SkillUninstallRequest,
-  SkillToggleRequest,
-  SkillUpdateContentRequest
+  SkillUpdateContentRequest,
+  SkillConfigureRequest,
+  EnvRequirement,
+  SkillRuntimeStatus
 } from '@/types'
 
 // ==================== 新版 API（全局/实例分离）====================
@@ -61,18 +63,28 @@ export async function uninstallSkill(data: SkillUninstallRequest): Promise<{ suc
 }
 
 /**
- * 启用/禁用 Skill
- */
-export async function toggleSkill(data: SkillToggleRequest): Promise<{ success: boolean; enabled: boolean; message: string }> {
-  const response = await api.post<{ success: boolean; enabled: boolean; message: string }>('/v1/skills/toggle', data)
-  return response.data
-}
-
-/**
  * 更新 Skill 内容
  */
 export async function updateSkillContent(data: SkillUpdateContentRequest): Promise<{ success: boolean; message: string }> {
   const response = await api.post<{ success: boolean; message: string }>('/v1/skills/update_content', data)
+  return response.data
+}
+
+/**
+ * 配置 Skill API Key
+ */
+export async function configureSkill(data: SkillConfigureRequest): Promise<{
+  success: boolean
+  status: SkillRuntimeStatus
+  status_message: string
+  message: string
+}> {
+  const response = await api.post<{
+    success: boolean
+    status: SkillRuntimeStatus
+    status_message: string
+    message: string
+  }>('/v1/skills/configure', data)
   return response.data
 }
 
@@ -127,7 +139,9 @@ export interface SkillDetailResponse {
   resources: string[]
   content: string
   agent_id: string
-  is_enabled: boolean
+  status: SkillRuntimeStatus
+  status_message: string
+  required_env: EnvRequirement[]
   is_registered: boolean
   skill_id: string | null
   registered_at: string | null

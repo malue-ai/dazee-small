@@ -10,7 +10,24 @@ export type SkillPriority = 'high' | 'medium' | 'low'
 /**
  * Skill 状态
  */
-export type SkillStatus = 'registered' | 'pending' | 'disabled'
+export type SkillStatus = 'registered' | 'pending'
+
+/**
+ * Skill 运行时状态
+ */
+export type SkillRuntimeStatus = 'ready' | 'need_setup' | 'need_auth' | 'unavailable'
+
+/**
+ * Skill 所需的环境变量
+ */
+export interface EnvRequirement {
+  /** 环境变量名称，如 GEMINI_API_KEY */
+  name: string
+  /** 显示标签，如 Gemini API Key */
+  label: string
+  /** 是否已配置 */
+  is_set: boolean
+}
 
 /**
  * Skill 基础信息（旧版兼容）
@@ -46,8 +63,10 @@ export interface SkillSummary {
   description: string
   /** 所属实例 ID（global 表示全局库） */
   agent_id: string
-  /** 是否启用 */
-  is_enabled: boolean
+  /** 运行时状态 */
+  status: SkillRuntimeStatus
+  /** 状态说明 */
+  status_message: string
   /** 是否已注册到 Claude API */
   is_registered: boolean
   /** Claude API 的 skill_id */
@@ -74,21 +93,21 @@ export interface SkillUninstallRequest {
 }
 
 /**
- * 切换 Skill 状态请求
- */
-export interface SkillToggleRequest {
-  skill_name: string
-  agent_id: string
-  enabled: boolean
-}
-
-/**
  * 更新 Skill 内容请求
  */
 export interface SkillUpdateContentRequest {
   skill_name: string
   agent_id: string
   content: string
+}
+
+/**
+ * 配置 Skill API Key 请求
+ */
+export interface SkillConfigureRequest {
+  skill_name: string
+  agent_id: string
+  env_vars: Record<string, string>
 }
 
 /**

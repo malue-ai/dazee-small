@@ -176,16 +176,18 @@
           >
             <div class="flex items-start justify-between gap-2 mb-1">
               <h3 class="font-medium text-foreground text-sm truncate">{{ skill.name }}</h3>
-              <!-- 项目技能 tab：启用状态标识 -->
               <span
-                v-if="skillStore.activeTab === 'project'"
-                class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                :class="skill.is_enabled
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                  : 'bg-muted text-muted-foreground'"
-              >
-                {{ skill.is_enabled ? '已启用' : '已禁用' }}
-              </span>
+                v-if="skill.status === 'need_setup'"
+                class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium"
+              >需配置</span>
+              <span
+                v-else-if="skill.status === 'need_auth'"
+                class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
+              >需授权</span>
+              <span
+                v-else-if="skill.status === 'unavailable'"
+                class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium"
+              >不可用</span>
             </div>
             <p class="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{{ skill.description || '暂无描述' }}</p>
           </div>
@@ -251,19 +253,8 @@
                 </div>
               </template>
 
-              <!-- 项目技能 tab：启停 + 卸载 -->
+              <!-- 项目技能 tab：卸载 -->
               <template v-if="skillStore.activeTab === 'project' && skillStore.selectedAgentId">
-                <button
-                  @click="handleToggle"
-                  :disabled="skillStore.actionLoading"
-                  class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all disabled:opacity-50"
-                  :class="skillStore.selectedSkill.is_enabled
-                    ? 'border-border text-muted-foreground hover:bg-muted'
-                    : 'border-primary/30 text-primary bg-primary/5 hover:bg-primary/10'"
-                >
-                  <Power class="w-4 h-4" />
-                  {{ skillStore.selectedSkill.is_enabled ? '禁用' : '启用' }}
-                </button>
                 <button
                   @click="handleUninstall"
                   :disabled="skillStore.actionLoading"
@@ -307,6 +298,58 @@
                           {{ tag }}
                         </span>
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- API Key 配置 -->
+                <div
+                  v-if="skillStore.skillDetail.required_env?.length"
+                  class="bg-muted/50 rounded-xl border border-border p-5"
+                  :class="{ 'border-primary/30 bg-primary/5': hasUnconfiguredEnv }"
+                >
+                  <h3 class="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider flex items-center gap-2">
+                    <Key class="w-3.5 h-3.5" /> API Key 配置
+                    <span
+                      v-if="hasUnconfiguredEnv"
+                      class="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium normal-case tracking-normal"
+                    >需配置</span>
+                  </h3>
+                  <div class="space-y-3">
+                    <div
+                      v-for="env in skillStore.skillDetail.required_env"
+                      :key="env.name"
+                      class="flex items-center gap-3"
+                    >
+                      <label class="text-xs font-medium text-muted-foreground w-40 flex-shrink-0 flex items-center gap-1.5">
+                        {{ env.label }}
+                        <CheckCircle v-if="env.is_set" class="w-3 h-3 text-success" />
+                      </label>
+                      <div class="relative flex-1">
+                        <input
+                          :type="showEnvSecrets[env.name] ? 'text' : 'password'"
+                          v-model="envInputs[env.name]"
+                          :placeholder="env.is_set ? '已配置（留空保持不变）' : `输入 ${env.label}`"
+                          class="w-full px-3 py-1.5 text-xs border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 transition-shadow font-mono pr-8"
+                        />
+                        <button
+                          @click="showEnvSecrets[env.name] = !showEnvSecrets[env.name]"
+                          class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          <Eye v-if="!showEnvSecrets[env.name]" class="w-3 h-3" />
+                          <EyeOff v-else class="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-end pt-1">
+                      <button
+                        @click="handleSaveConfig"
+                        :disabled="!hasEnvInputs || configSaving"
+                        class="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover disabled:opacity-50 transition-all"
+                      >
+                        <Loader2 v-if="configSaving" class="w-3 h-3 animate-spin" />
+                        保存配置
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -544,12 +587,13 @@ import {
   Upload,
   Download,
   ChevronDown,
-  Power,
+  Key,
+  Eye,
+  EyeOff,
   FileCode,
   FileJson,
   FileText,
   FolderOpen,
-  Eye,
   Copy,
   FileWarning,
   CheckCircle,
@@ -594,6 +638,19 @@ const fileLoading = ref(false)
 const currentFileType = ref<'scripts' | 'resources'>('scripts')
 const currentFileName = ref('')
 const fileContent = ref<SkillFileContentResponse | null>(null)
+
+// API Key 配置
+const envInputs = ref<Record<string, string>>({})
+const showEnvSecrets = ref<Record<string, boolean>>({})
+const configSaving = ref(false)
+
+const hasUnconfiguredEnv = computed(() => {
+  return skillStore.skillDetail?.required_env?.some(e => !e.is_set) ?? false
+})
+
+const hasEnvInputs = computed(() => {
+  return Object.values(envInputs.value).some(v => v.trim())
+})
 
 // Toast 提示
 const toastMessage = ref('')
@@ -715,23 +772,39 @@ async function handleUninstall() {
   }
 }
 
-async function handleToggle() {
-  if (!skillStore.selectedSkill || !skillStore.selectedAgentId) return
+// ==================== API Key 配置 ====================
 
-  const newEnabled = !skillStore.selectedSkill.is_enabled
-  const result = await skillStore.toggle(
-    skillStore.selectedSkill.name,
-    skillStore.selectedAgentId,
-    newEnabled
-  )
-  if (result.success) {
-    // 更新本地选中技能的状态
-    if (skillStore.selectedSkill) {
-      skillStore.selectedSkill.is_enabled = newEnabled
+async function handleSaveConfig() {
+  const detail = skillStore.skillDetail
+  if (!detail) return
+
+  // Filter out empty inputs
+  const vars: Record<string, string> = {}
+  for (const [key, val] of Object.entries(envInputs.value)) {
+    if (val.trim()) vars[key] = val.trim()
+  }
+  if (!Object.keys(vars).length) return
+
+  configSaving.value = true
+  try {
+    const result = await skillsApi.configureSkill({
+      skill_name: detail.name,
+      agent_id: detail.agent_id || 'global',
+      env_vars: vars,
+    })
+    if (result.success) {
+      showToast(result.message || '配置已保存', 'success')
+      // Clear inputs and refresh detail
+      envInputs.value = {}
+      await skillStore.reloadDetail(detail.name, detail.agent_id !== 'global' ? detail.agent_id : undefined)
+    } else {
+      showToast('保存失败', 'error')
     }
-    showToast(newEnabled ? '已启用' : '已禁用', 'success')
-  } else {
-    showToast(result.message, 'error')
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '保存失败'
+    showToast(msg, 'error')
+  } finally {
+    configSaving.value = false
   }
 }
 

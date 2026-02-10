@@ -301,25 +301,10 @@ Do NOT say "not found" or make up alternatives. Try reading `instances/xiaodazi/
         """
         Parse YAML frontmatter from SKILL.md content.
 
-        Args:
-            content: SKILL.md 文件完整文本
-
-        Returns:
-            解析后的 dict，或 None
+        Delegates to core.skill.frontmatter.parse_skill_frontmatter.
         """
-        if not content.startswith("---"):
-            return None
-
-        parts = content.split("---", 2)
-        if len(parts) < 3:
-            return None
-
-        try:
-            meta = yaml.safe_load(parts[1])
-            return meta if isinstance(meta, dict) else None
-        except yaml.YAMLError as e:
-            logger.debug(f"YAML frontmatter 解析失败: {e}")
-            return None
+        from core.skill.frontmatter import parse_skill_frontmatter
+        return parse_skill_frontmatter(content)
 
     @classmethod
     def _parse_skill_summary(cls, skill_file: Path) -> Optional[SkillSummary]:
@@ -358,9 +343,17 @@ Do NOT say "not found" or make up alternatives. Try reading `instances/xiaodazi/
                 emoji = str(meta.get("emoji", ""))[:2]
 
             # requires: bins / env
+            # 优先顶层 requires，fallback 到 metadata.moltbot.requires
             requires = meta.get("requires") or {}
             if not isinstance(requires, dict):
                 requires = {}
+
+            if not requires and isinstance(metadata_block, dict):
+                moltbot = metadata_block.get("moltbot", {})
+                if isinstance(moltbot, dict):
+                    moltbot_req = moltbot.get("requires", {})
+                    if isinstance(moltbot_req, dict):
+                        requires = moltbot_req
 
             requires_bins = _ensure_str_list(requires.get("bins"))
             requires_env = _ensure_str_list(requires.get("env"))

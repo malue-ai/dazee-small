@@ -25,7 +25,7 @@ from core.events import create_event_manager
 from infra.local_store.session_store import LocalSessionStore, get_local_session_store
 from logger import get_logger
 
-logger = get_logger("session_service")
+logger = get_logger(__name__)
 
 
 def extract_message_text(message: List[Dict[str, str]]) -> str:

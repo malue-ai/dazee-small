@@ -438,7 +438,8 @@ class BaseLLMService(ABC):
         Yields:
             LLMResponse 片段
         """
-        pass
+        raise NotImplementedError
+        yield  # type hint: mark as async generator
 
     def count_tokens(self, text: str) -> int:
         """

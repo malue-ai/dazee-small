@@ -47,7 +47,7 @@ from services.agent_registry import AgentNotFoundError
 
 # ==================== 配置初始化 ====================
 
-logger = get_logger("chat_router")
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/api/v1",

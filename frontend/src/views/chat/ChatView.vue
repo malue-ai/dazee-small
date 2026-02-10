@@ -627,6 +627,12 @@ onMounted(async () => {
     router.replace({ name: 'agent', params: { agentId: firstAgent.agent_id } })
   }
 
+  // 同步 localStorage 缓存：移除后端已不存在的对话 ID
+  if (routeAgentId && conversationStore.conversations.length > 0) {
+    const validIds = new Set(conversationStore.conversations.map(c => c.id))
+    agentStore.syncConversations(routeAgentId, validIds)
+  }
+
   // 根据路由加载会话
   const conversationId = route.params.conversationId
   if (conversationId && typeof conversationId === 'string') {
@@ -832,6 +838,12 @@ watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
 
       // 切换 Agent 并加载详情
       await agentStore.selectAgent(newAgentId)
+
+      // 同步 localStorage 缓存：移除失效对话 ID
+      if (conversationStore.conversations.length > 0) {
+        const validIds = new Set(conversationStore.conversations.map(c => c.id))
+        agentStore.syncConversations(newAgentId, validIds)
+      }
 
       // 重置聊天加载状态
       chat.isLoading.value = false

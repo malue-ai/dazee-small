@@ -452,7 +452,8 @@ class FailureDetector:
         """
         try:
             # 构建 Transcript 对象（如果传入的是字典）
-            from evaluation.models import Message, TokenUsage, ToolCall, Transcript
+            from evaluation.models import Message, ToolCall, Transcript
+            from models.usage import TokenUsage
 
             if isinstance(transcript, dict):
                 # 从字典构建 Transcript

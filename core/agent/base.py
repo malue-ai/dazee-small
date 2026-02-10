@@ -183,6 +183,13 @@ class Agent:
         self._instance_skills: List = []
         self.workers_config: List = []
 
+        # 外部注入的异步确认等待回调（由 ChatService 在执行前设置）
+        self._wait_long_run_confirm_async: Optional[Any] = None
+        self._wait_hitl_confirm_async: Optional[Any] = None
+        self._wait_backtrack_confirm_async: Optional[Any] = None
+        self._wait_cost_confirm_async: Optional[Any] = None
+        self._wait_intent_clarify_async: Optional[Any] = None
+
         executor_name = executor.name if executor else "None"
         logger.info(f"✅ Agent 初始化完成: executor={executor_name}")
 

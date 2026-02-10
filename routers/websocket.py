@@ -31,7 +31,7 @@ from services.agent_registry import AgentNotFoundError
 
 # ==================== 配置初始化 ====================
 
-logger = get_logger("ws_router")
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/api/v1",
@@ -355,8 +355,10 @@ async def websocket_chat(websocket: WebSocket):
                         active_stream_task.cancel()
                         try:
                             await active_stream_task
-                        except (asyncio.CancelledError, Exception):
+                        except asyncio.CancelledError:
                             pass
+                        except Exception as e:
+                            logger.warning(f"取消流任务时异常: {e}", exc_info=True)
 
                     active_stream_task = asyncio.create_task(
                         _handle_chat_send(
@@ -396,8 +398,10 @@ async def websocket_chat(websocket: WebSocket):
             active_stream_task.cancel()
             try:
                 await active_stream_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.warning(f"断开时取消流任务异常: {e}", exc_info=True)
 
         logger.info("WebSocket 已断开", extra={"conn_id": conn_id})
 
@@ -468,10 +472,17 @@ async def _handle_chat_send(
     files = params.get("files")
     variables = params.get("variables")
 
-    if not message or not user_id:
+    if not user_id:
         await send_response(req_id, False, error={
             "code": "VALIDATION_ERROR",
-            "message": "message 和 user_id 为必填参数",
+            "message": "user_id 为必填参数",
+        })
+        return
+
+    if not message and not files:
+        await send_response(req_id, False, error={
+            "code": "VALIDATION_ERROR",
+            "message": "message 和 files 至少提供其一",
         })
         return
 

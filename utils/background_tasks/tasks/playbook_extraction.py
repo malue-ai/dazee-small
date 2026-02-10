@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 logger = get_logger("background_tasks.playbook_extraction")
 
 # Minimum thresholds for extraction (format checks, not semantic judgment)
-_MIN_ASSISTANT_CHARS = 100  # Skip if assistant response is too short
-_MIN_USER_CHARS = 10  # Skip if user message is trivial
+_MIN_ASSISTANT_CHARS = 10  # TEMP: lowered from 100 for testing
+_MIN_USER_CHARS = 5  # TEMP: lowered from 10 for testing
 
 
 def _should_skip(ctx: "TaskContext") -> str:
@@ -61,9 +61,54 @@ async def playbook_extraction_task(
     4. Call PlaybookManager.extract_from_session()
     5. Emit playbook_suggestion event if extraction succeeds
     """
+    # If assistant_response is empty (e.g. accumulator only had tool blocks),
+    # try to extract from conversation messages before giving up
+    if not ctx.assistant_response and ctx.conversation_service and ctx.conversation_id:
+        try:
+            import asyncio
+            await asyncio.sleep(1)  # TEMP: wait for DB commit
+            msgs = await ctx.conversation_service.get_messages(ctx.conversation_id, limit=5)
+            logger.info(
+                f"[PLAYBOOK] fallback get_messages: {len(msgs or [])} msgs, "
+                f"roles={[m.get('role') for m in (msgs or [])]}"
+            )
+            for msg in reversed(msgs or []):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    # Content may be a JSON-encoded string of blocks
+                    blocks = content
+                    if isinstance(content, str) and content.startswith("["):
+                        try:
+                            import json
+                            blocks = json.loads(content)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                    if isinstance(blocks, list):
+                        texts = []
+                        for b in blocks:
+                            if isinstance(b, dict):
+                                if b.get("type") == "text":
+                                    texts.append(b.get("text", ""))
+                                elif b.get("type") == "thinking":
+                                    texts.append(b.get("thinking", ""))
+                        if texts:
+                            ctx.assistant_response = " ".join(texts)
+                            break
+                    elif isinstance(content, str) and content:
+                        ctx.assistant_response = content
+                        break
+        except Exception as e:
+            logger.debug(f"Failed to fetch assistant response from messages: {e}")
+
+    logger.info(
+        f"[PLAYBOOK] pre-filter: "
+        f"assistant_response={len(ctx.assistant_response or '')} chars, "
+        f"user_message={len(ctx.user_message or '')} chars"
+    )
+
     skip_reason = _should_skip(ctx)
     if skip_reason:
-        logger.debug(f"Playbook extraction skipped: {skip_reason}")
+        logger.info(f"[PLAYBOOK] skipped: {skip_reason}")
         return
 
     try:
@@ -79,6 +124,20 @@ async def playbook_extraction_task(
             logger.debug("Playbook extraction skipped: no messages")
             return
 
+        # TEMP DEBUG: log message structure
+        logger.info(f"[PLAYBOOK DEBUG] Total messages: {len(messages)}")
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            content_type = type(content).__name__
+            if isinstance(content, list):
+                block_types = [b.get("type", "?") if isinstance(b, dict) else type(b).__name__ for b in content]
+                logger.info(f"[PLAYBOOK DEBUG] msg[{i}] role={role}, content=list({len(content)}), block_types={block_types}")
+            elif isinstance(content, str):
+                logger.info(f"[PLAYBOOK DEBUG] msg[{i}] role={role}, content=str({len(content)} chars), preview={content[:80]}")
+            else:
+                logger.info(f"[PLAYBOOK DEBUG] msg[{i}] role={role}, content_type={content_type}")
+
         # Check if session had meaningful tool usage
         tool_calls = []
         for msg in messages:
@@ -90,8 +149,10 @@ async def playbook_extraction_task(
             elif isinstance(content, str) and "tool_use" in content:
                 tool_calls.append("unknown_tool")
 
+        logger.info(f"[PLAYBOOK DEBUG] tool_calls found: {tool_calls}")
+
         if not tool_calls:
-            logger.debug("Playbook extraction skipped: no tool calls in session")
+            logger.info("Playbook extraction skipped: no tool calls in session")
             return
 
         # Build a lightweight SessionReward (without full RewardAttribution)

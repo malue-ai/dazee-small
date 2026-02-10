@@ -51,8 +51,9 @@ from .skill import (
     SkillListResponse,
     SkillInstallRequest,
     SkillUninstallRequest,
-    SkillToggleRequest,
     SkillUpdateContentRequest,
+    SkillConfigureRequest,
+    EnvRequirement,
 )
 
 # Agent 模型
@@ -112,8 +113,9 @@ __all__ = [
     "SkillListResponse",
     "SkillInstallRequest",
     "SkillUninstallRequest",
-    "SkillToggleRequest",
     "SkillUpdateContentRequest",
+    "SkillConfigureRequest",
+    "EnvRequirement",
     # Agent 模型
     "AgentStatus",
     "APIAuthConfig",

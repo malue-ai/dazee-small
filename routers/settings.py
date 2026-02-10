@@ -27,7 +27,7 @@ from services.settings_service import (
     update_settings,
 )
 
-logger = get_logger("settings_router")
+logger = get_logger(__name__)
 
 
 class SemanticSearchSetupRequest(BaseModel):

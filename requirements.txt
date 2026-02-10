@@ -39,6 +39,7 @@ json5>=0.9.0
 # Mem0 记忆系统
 mem0ai>=0.1.0
 sqlite-vec>=0.1.1         # SQLite 向量搜索扩展（本地向量存储）
+huggingface-hub>=0.20.0   # HuggingFace 模型下载（嵌入模型 GGUF）
 
 # 文件处理
 Pillow>=10.0.0            # 图片压缩
@@ -68,3 +69,8 @@ psutil>=5.9.0
 pyinstaller==6.11.1
 # WebSocket（实时通信）
 websockets>=12.0
+
+# Multi-channel gateway (optional)
+python-telegram-bot>=21.0     # Telegram bot long polling
+lark-oapi>=1.3.0              # Feishu (Lark) WebSocket + API
+python-socks[asyncio]>=2.0    # SOCKS proxy support for WebSocket

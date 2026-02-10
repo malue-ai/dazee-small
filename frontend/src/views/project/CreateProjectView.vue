@@ -1037,26 +1037,24 @@ function startTypewriter(text: string) {
 // ==================== 创建项目 ====================
 
 /**
- * 检查默认项目 xiaodazi 是否需要配置 AI 模型。
+ * 检查默认项目是否需要配置 AI 模型。
  * 用于创建成功后判断是否需要强制进入编辑引导。
- * @returns true 表示 xiaodazi 存在且未配置模型
+ * @returns true 表示默认项目存在且未配置模型
  */
-async function checkXiaodaziNeedsModel(): Promise<boolean> {
+async function checkDefaultAgentNeedsModel(): Promise<boolean> {
   try {
     // 刷新 agent 列表，确保包含刚创建的项目
     await agentStore.fetchList()
 
-    // 查找默认项目（优先匹配 xiaodazi）
-    const defaultAgent = agentStore.agents.find(a =>
-      a.name.includes('xiaodazi') || a.name.includes('小打字') || a.agent_id.includes('xiaodazi')
-    )
+    // 取第一个 Agent 作为默认项目
+    const defaultAgent = agentStore.agents[0]
 
     if (defaultAgent) {
       const detail = await getAgentDetail(defaultAgent.agent_id)
       return !detail.model
     }
 
-    return false // 没有默认项目 → 无需配置
+    return false // 没有项目 → 无需配置
   } catch (e) {
     console.warn('⚠️ 检查默认项目模型配置失败:', e)
     return false // 检查失败 → 不阻塞用户
@@ -1084,15 +1082,15 @@ async function handleCreate() {
     // Start tracking creation progress (global notification + WS)
     agentCreationStore.startCreation(agent_id, name)
 
-    // 引导：创建成功后检查默认项目 xiaodazi 是否需要配置模型
+    // 引导：创建成功后检查默认项目是否需要配置模型
     if (guideStore.isActive) {
-      const needsModel = await checkXiaodaziNeedsModel()
+      const needsModel = await checkDefaultAgentNeedsModel()
       if (needsModel) {
-        // xiaodazi 没有 AI 模型 → 强制进入编辑引导，不可跳过
+        // 默认项目没有 AI 模型 → 强制进入编辑引导，不可跳过
         guideStore.canSkip = false
         guideStore.goToStep(11)
       } else {
-        // xiaodazi 已有模型（或不存在）→ 引导完成
+        // 默认项目已有模型（或不存在）→ 引导完成
         guideStore.completeGuide()
       }
     }

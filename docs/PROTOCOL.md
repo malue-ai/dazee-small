@@ -891,7 +891,6 @@ delta 是简化的字符串格式，类型由前序 `content_start` 的 `content
 | GET | `/api/v1/skills/instance/{agent_id}` | 实例已安装 Skills |
 | POST | `/api/v1/skills/install` | 安装 Skill |
 | POST | `/api/v1/skills/uninstall` | 卸载 Skill |
-| POST | `/api/v1/skills/toggle` | 启用/禁用 Skill |
 | POST | `/api/v1/skills/update_content` | 更新 Skill 内容 |
 | GET | `/api/v1/skills/detail/{name}` | Skill 详情 |
 | GET | `/api/v1/skills/file/{name}/{type}/{file}` | Skill 文件内容 |

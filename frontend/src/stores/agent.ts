@@ -265,6 +265,43 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
+   * 同步 localStorage 中的对话映射，移除后端已不存在的对话 ID
+   * @param agentId - Agent ID
+   * @param validIds - 后端返回的有效对话 ID 集合
+   */
+  function syncConversations(agentId: string, validIds: Set<string>): void {
+    let changed = false
+
+    // 清理对话历史中的失效 ID
+    if (agentConversations.value[agentId]) {
+      const before = agentConversations.value[agentId].length
+      agentConversations.value[agentId] = agentConversations.value[agentId].filter(
+        id => validIds.has(id)
+      )
+      if (agentConversations.value[agentId].length !== before) {
+        saveMapping(AGENT_CONVERSATIONS_KEY, agentConversations.value)
+        changed = true
+      }
+    }
+
+    // 清理打开标签页中的失效 ID
+    if (agentOpenTabs.value[agentId]) {
+      const before = agentOpenTabs.value[agentId].length
+      agentOpenTabs.value[agentId] = agentOpenTabs.value[agentId].filter(
+        id => validIds.has(id)
+      )
+      if (agentOpenTabs.value[agentId].length !== before) {
+        saveMapping(AGENT_OPEN_TABS_KEY, agentOpenTabs.value)
+        changed = true
+      }
+    }
+
+    if (changed) {
+      storeLog.info(`已清理 Agent ${agentId} 的失效对话缓存`)
+    }
+  }
+
+  /**
    * 重置状态
    */
   function reset(): void {
@@ -296,6 +333,7 @@ export const useAgentStore = defineStore('agent', () => {
     linkConversation,
     unlinkConversation,
     getConversationIds,
+    syncConversations,
     openTab,
     closeTab,
     getOpenTabIds,

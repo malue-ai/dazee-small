@@ -86,17 +86,19 @@ export { WORKSPACE_API_PATHS } from './workspace'
 export type {
   SkillPriority,
   SkillStatus,
+  SkillRuntimeStatus,
+  EnvRequirement,
   Skill,
   SkillSummary,
   SkillListResponse,
   SkillCreateRequest,
   SkillUpdateRequest,
   SkillUpdateContentRequest,
+  SkillConfigureRequest,
   SkillScript,
   SkillResource,
   SkillInstallRequest,
-  SkillUninstallRequest,
-  SkillToggleRequest
+  SkillUninstallRequest
 } from './skills'
 
 // 从 agent.ts 导出 Agent（项目）相关类型

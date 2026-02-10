@@ -1,69 +1,21 @@
-# ============================================================
-# 记忆、知识检索与状态一致性配置
-# ============================================================
-#
-# 包含三部分：
-#   1. semantic_search — 语义搜索（知识检索方式）
-#   2. memory          — 用户记忆（跨对话持久保存偏好/习惯）
-#   3. state_consistency — 文件操作安全网（快照 → 回滚）
-#
-# ============================================================
-
-# ==================== 语义搜索 ====================
-#
-# 语义搜索能理解"意思"而非只匹配关键词：
-#   搜"天气"也能找到"气候"相关内容
-#
-# 三种模式：
-#   disabled — 仅关键词搜索，无需下载任何东西
-#   local    — 本地模型（推荐），438MB，离线可用，中英文双语
-#   cloud    — 云端向量模型，需要 API Key，按量计费
-#
 semantic_search:
-  mode: local             # disabled | local | cloud — BGE-M3 Q4 GGUF (418MB, 已下载)
-
-  # local 模式配置（mode 为 local 时生效）
-  # 默认使用 BGE-M3 Q4 GGUF（1024 维，438MB，中英文双语，MIT 开源）
+  mode: local
   local:
-    repo: ""              # 留空 = lm-kit/bge-m3-gguf
-    model: ""             # 留空 = bge-m3-Q4_K_M.gguf
-
-  # cloud 模式配置（mode 为 cloud 时生效）
-  # 默认使用 OpenAI text-embedding-3-small（1536 维，$0.02/1M tokens）
-  # 也支持任何兼容 OpenAI 接口的服务（如硅基流动、智谱等）
+    repo: ''
+    model: ''
   cloud:
-    model: ""             # 留空 = text-embedding-3-small
-    # base_url: ""        # 留空 = OPENAI_BASE_URL 环境变量或 https://api.openai.com/v1
-    # api_key: ""         # 留空 = OPENAI_API_KEY 环境变量
-
-# ==================== 用户记忆 ====================
-#
-# Agent 会记住用户偏好、习惯等信息，跨对话持久保存。
-#
+    model: ''
 memory:
-  enabled: true           # 是否启用用户记忆
-  mem0_enabled: true      # 是否启用 Mem0 向量记忆
-  # smart_retrieval: true   # [未实现] 智能检索（语义相关性过滤），代码未读取此配置
-  # retention_policy: user  # [未实现] 记忆保留策略，代码未读取此配置
-
-# ==================== 状态一致性（文件安全网）====================
-#
-# 操作本地文件前自动快照，异常/用户中止时可回滚恢复。
-# 文档承诺：「修改前自动备份，出错自动恢复」
-#
-# 快照存储位置：
-#   storage_path 留空 → 自动使用实例隔离路径
-#   例: data/instances/xiaodazi/snapshots/
-#
+  enabled: true
+  mem0_enabled: true
 state_consistency:
   enabled: true
   snapshot:
-    # storage_path 留空则使用实例隔离路径 data/instances/xiaodazi/snapshots/
-    retention_hours: 24     # 快照保留时间（小时），超过自动清理
-    capture_files: true     # 工具执行前自动备份即将修改的文件
-    capture_cwd: true       # 记录当前工作目录
-    capture_clipboard: false # 不备份剪贴板（隐私考虑）
+    retention_hours: 24
+    capture_files: true
+    capture_cwd: true
+    capture_clipboard: false
   rollback:
-    auto_rollback_on_consecutive_failures: 3   # 连续失败 N 次后自动回滚
-    auto_rollback_on_critical_error: true      # 严重错误（OOM 等）立即回滚
-    rollback_timeout_seconds: 60               # 回滚操作超时保护
+    auto_rollback_on_consecutive_failures: 3
+    auto_rollback_on_critical_error: true
+    rollback_timeout_seconds: 60

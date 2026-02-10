@@ -33,7 +33,7 @@ from services import (
 )
 from utils.instance_loader import get_instances_dir
 
-logger = get_logger("router.agents")
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/agents", tags=["Agent 管理"])
 

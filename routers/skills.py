@@ -5,29 +5,31 @@ Skills 管理路由
 """
 
 import asyncio
+import os
 import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import aiofiles
 from fastapi import APIRouter, HTTPException, Query, UploadFile, status
 
 from logger import get_logger
 from models.skill import (
+    EnvRequirement,
+    SkillConfigureRequest,
     SkillCreateRequest,
     SkillDetail,
     SkillInstallRequest,
     SkillListResponse,
     SkillSummary,
-    SkillToggleRequest,
     SkillUninstallRequest,
     SkillUpdateContentRequest,
     SkillUpdateRequest,
-)  # SkillStatus / SkillSyncResponse removed — no Claude Skill ID registration
+)
 
-logger = get_logger("router.skills")
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/skills", tags=["Skills 管理"])
 
@@ -121,6 +123,71 @@ def _parse_skill_metadata(skill_md_path: Path) -> dict:
         return {"name": skill_md_path.parent.name, "description": ""}
 
 
+def _parse_required_env(skill_md_path: Path) -> List[EnvRequirement]:
+    """
+    Parse required env vars from SKILL.md frontmatter.
+
+    Checks both top-level `requires.env` and `metadata.moltbot.requires.env`.
+
+    Returns:
+        List of EnvRequirement with is_set indicating if the var is in os.environ.
+    """
+    metadata = _parse_skill_metadata(skill_md_path)
+    if not metadata:
+        return []
+
+    # top-level requires
+    requires = metadata.get("requires") or {}
+    if not isinstance(requires, dict):
+        requires = {}
+
+    # fallback: metadata.moltbot.requires
+    if not requires:
+        meta_block = metadata.get("metadata", {})
+        if isinstance(meta_block, dict):
+            moltbot = meta_block.get("moltbot", {})
+            if isinstance(moltbot, dict):
+                moltbot_req = moltbot.get("requires", {})
+                if isinstance(moltbot_req, dict):
+                    requires = moltbot_req
+
+    env_list = requires.get("env") or []
+    if isinstance(env_list, str):
+        env_list = [env_list]
+    if not isinstance(env_list, list):
+        return []
+
+    result = []
+    for var_name in env_list:
+        if not isinstance(var_name, str):
+            continue
+        # Generate label: GEMINI_API_KEY -> Gemini API Key
+        label = var_name.replace("_", " ").title()
+        result.append(EnvRequirement(
+            name=var_name,
+            label=label,
+            is_set=bool(os.getenv(var_name)),
+        ))
+    return result
+
+
+def _compute_skill_status(
+    skill_md_path: Path,
+    required_env: List[EnvRequirement],
+) -> tuple:
+    """
+    Compute skill runtime status based on requirements.
+
+    Returns:
+        (status: str, status_message: str)
+    """
+    missing_env = [e for e in required_env if not e.is_set]
+    if missing_env:
+        names = ", ".join(e.name for e in missing_env)
+        return "need_setup", f"需要配置: {names}"
+    return "ready", ""
+
+
 async def _load_skills_yaml_descriptions(agent_id: str) -> dict[str, str]:
     """
     从实例的 skills.yaml 加载所有 skill 的 description 映射
@@ -167,7 +234,7 @@ async def _load_skills_yaml_descriptions(agent_id: str) -> dict[str, str]:
     return desc_map
 
 
-def _scan_skills_in_dir(skills_dir: Path, agent_id: str = None) -> List[dict]:
+def _scan_skills_in_dir(skills_dir: Path, agent_id: Optional[str] = None) -> List[dict]:
     """
     扫描目录中的所有 Skills
 
@@ -199,13 +266,19 @@ def _scan_skills_in_dir(skills_dir: Path, agent_id: str = None) -> List[dict]:
         try:
             metadata = _parse_skill_metadata(skill_md_path)
 
+            required_env = _parse_required_env(skill_md_path)
+            scan_status, scan_status_msg = _compute_skill_status(
+                skill_md_path, required_env
+            )
+
             skills.append(
                 {
                     "name": metadata.get("name", skill_dir.name),
                     "description": metadata.get("description", ""),
                     "agent_id": agent_id or "global",
                     "path": str(skill_dir),
-                    "is_enabled": True,
+                    "status": scan_status,
+                    "status_message": scan_status_msg,
                     "created_at": datetime.fromtimestamp(skill_md_path.stat().st_mtime),
                 }
             )
@@ -264,7 +337,8 @@ async def list_skills(
             name=s["name"],
             description=s["description"],
             agent_id=s["agent_id"],
-            is_enabled=s["is_enabled"],
+            status=s.get("status", "ready"),
+            status_message=s.get("status_message", ""),
             created_at=s["created_at"],
         )
         for s in skills
@@ -376,7 +450,8 @@ async def list_global_skills():
             name=s["name"],
             description=s["description"],
             agent_id="global",
-            is_enabled=True,
+            status=s.get("status", "ready"),
+            status_message=s.get("status_message", ""),
             created_at=s["created_at"],
         )
         for s in global_skills
@@ -416,21 +491,31 @@ async def list_instance_skills(agent_id: str):
     summaries = []
     for s in skills:
         description = s.description
+        inst_status = "ready"
+        inst_status_msg = ""
+
         # 描述为空时：优先从 skills.yaml 补充，其次从 SKILL.md frontmatter 补充
         if not description:
             description = desc_map.get(s.name, "")
-        if not description and s.skill_path:
+
+        # 尝试从 SKILL.md 获取描述和状态
+        skill_md: Optional[Path] = None
+        if s.skill_path:
             skill_md = Path(s.skill_path) / "SKILL.md"
-            if skill_md.exists():
+        if skill_md and skill_md.exists():
+            if not description:
                 metadata = _parse_skill_metadata(skill_md)
                 description = metadata.get("description", "")
+            req_env = _parse_required_env(skill_md)
+            inst_status, inst_status_msg = _compute_skill_status(skill_md, req_env)
 
         summaries.append(
             SkillSummary(
                 name=s.name,
                 description=description,
                 agent_id=agent_id,
-                is_enabled=s.enabled,
+                status=inst_status,
+                status_message=inst_status_msg,
                 created_at=datetime.now(),
             )
         )
@@ -503,20 +588,15 @@ async def get_skill_detail(
             if f.is_file() and not f.name.startswith("_"):
                 resources.append(f.name)
 
-    # 获取启用状态（仅实例 Skill）
-    is_enabled = True
-
-    if agent_id:
-        from utils.instance_loader import load_skill_registry
-
-        try:
-            registry_skills = await load_skill_registry(agent_id)
-            for s in registry_skills:
-                if s.name == skill_name:
-                    is_enabled = s.enabled
-                    break
-        except Exception as e:
-            logger.warning(f"加载 skill_registry 失败: {e}")
+    # 解析所需环境变量并计算状态
+    required_env: List[EnvRequirement] = []
+    skill_status = "ready"
+    skill_status_message = ""
+    if skill_md_path.exists():
+        required_env = _parse_required_env(skill_md_path)
+        skill_status, skill_status_message = _compute_skill_status(
+            skill_md_path, required_env
+        )
 
     return SkillDetail(
         name=metadata.get("name", skill_name),
@@ -527,7 +607,9 @@ async def get_skill_detail(
         resources=resources,
         content=content,
         agent_id=agent_id or "global",
-        is_enabled=is_enabled,
+        status=skill_status,
+        status_message=skill_status_message,
+        required_env=required_env,
         created_at=(
             datetime.fromtimestamp(skill_md_path.stat().st_mtime)
             if skill_md_path.exists()
@@ -892,65 +974,109 @@ async def uninstall_skill(request: SkillUninstallRequest):
 
 
 @router.post(
-    "/toggle",
+    "/configure",
     response_model=dict,
-    summary="启用/禁用 Skill",
-    description="切换实例中 Skill 的启用状态",
+    summary="配置 Skill API Key",
+    description="为 Skill 配置所需的 API Key / 环境变量，保存后立刻生效",
 )
-async def toggle_skill(request: SkillToggleRequest):
+async def configure_skill(request: SkillConfigureRequest):
     """
-    启用/禁用 Skill
+    Configure API keys for a skill.
 
-    更新 skill_registry.yaml 中的 enabled 字段
+    Flow:
+    1. Validate env_vars against the skill's declared requirements
+    2. Save to config.yaml api_keys section
+    3. Inject into os.environ
+    4. Re-check skill status and return
     """
     _validate_name(request.skill_name, "Skill 名称")
-    _validate_name(request.agent_id, "agent_id")
 
-    from utils.instance_loader import _update_skill_registry, load_skill_registry
+    # Locate skill directory
+    if request.agent_id and request.agent_id != "global":
+        _validate_name(request.agent_id, "agent_id")
+        skill_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
+    else:
+        skill_dir = _get_skills_library_dir() / request.skill_name
+
+    skill_md_path = skill_dir / "SKILL.md"
+    if not skill_md_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "SKILL_NOT_FOUND",
+                "message": f"Skill '{request.skill_name}' 不存在",
+            },
+        )
+
+    # Parse declared env requirements for security validation
+    declared_env = _parse_required_env(skill_md_path)
+    declared_names = {e.name for e in declared_env}
+
+    if not declared_names:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "NO_ENV_REQUIRED",
+                "message": f"Skill '{request.skill_name}' 不需要配置环境变量",
+            },
+        )
+
+    # Only accept keys that the skill actually declares
+    rejected = [k for k in request.env_vars if k not in declared_names]
+    if rejected:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "INVALID_ENV_VARS",
+                "message": f"不允许的环境变量: {', '.join(rejected)}。"
+                f"该 Skill 仅需要: {', '.join(declared_names)}",
+            },
+        )
 
     try:
-        skills = await load_skill_registry(request.agent_id)
+        import yaml as _yaml
 
-        # 查找目标 Skill
-        target_skill = None
-        for skill in skills:
-            if skill.name == request.skill_name:
-                target_skill = skill
-                break
+        from services.settings_service import _load_settings, _save_settings
 
-        if not target_skill:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "code": "SKILL_NOT_FOUND",
-                    "message": f"实例 '{request.agent_id}' 中不存在 Skill '{request.skill_name}'",
-                },
-            )
+        # Load existing config, merge into api_keys section
+        settings = _load_settings()
+        if "api_keys" not in settings:
+            settings["api_keys"] = {}
 
-        # 更新状态
-        target_skill.enabled = request.enabled
-        await _update_skill_registry(request.agent_id, skills)
+        for key, value in request.env_vars.items():
+            if value:  # skip empty values
+                settings["api_keys"][key] = value
+                # Immediately inject into os.environ
+                os.environ[key] = value
 
-        status_text = "启用" if request.enabled else "禁用"
-        logger.info(f"✅ {status_text} Skill: {request.skill_name} (实例: {request.agent_id})")
+        await _save_settings(settings)
+
+        logger.info(
+            f"✅ 配置 Skill API Key: {request.skill_name}, "
+            f"keys={list(request.env_vars.keys())}"
+        )
+
+        # Re-check status
+        updated_env = _parse_required_env(skill_md_path)
+        new_status, new_msg = _compute_skill_status(skill_md_path, updated_env)
 
         return {
             "success": True,
             "skill_name": request.skill_name,
-            "agent_id": request.agent_id,
-            "enabled": request.enabled,
-            "message": f"Skill '{request.skill_name}' 已{status_text}",
+            "status": new_status,
+            "status_message": new_msg,
+            "message": f"Skill '{request.skill_name}' 配置已保存",
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"切换 Skill 状态失败: {e}", exc_info=True)
+        logger.error(f"配置 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "INTERNAL_ERROR",
-                "message": f"切换 Skill 状态失败: {str(e)}",
+                "message": f"配置 Skill 失败: {str(e)}",
             },
         )
 
@@ -1203,6 +1329,10 @@ async def get_skill_legacy(
 
     if skill_md_path.exists():
         metadata = _parse_skill_metadata(skill_md_path)
+        required_env = _parse_required_env(skill_md_path)
+        legacy_status, legacy_msg = _compute_skill_status(
+            skill_md_path, required_env
+        )
 
         return SkillDetail(
             name=metadata.get("name", skill_name),
@@ -1213,7 +1343,9 @@ async def get_skill_legacy(
             resources=[],
             content="",
             agent_id=agent_id or "global",
-            is_enabled=True,
+            status=legacy_status,
+            status_message=legacy_msg,
+            required_env=required_env,
             created_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime),
         )
 

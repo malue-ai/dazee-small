@@ -62,9 +62,9 @@ class ModelNotAvailableError(RuntimeError):
         )
 
 
-def _detect_hf_endpoint(timeout: float = 3.0) -> str:
+def _detect_hf_endpoint_sync(timeout: float = 3.0) -> str:
     """
-    Auto-detect the best HuggingFace endpoint.
+    Auto-detect the best HuggingFace endpoint (synchronous, for use in threads).
 
     Priority:
     1. HF_ENDPOINT env var (user explicit override)
@@ -107,6 +107,20 @@ def _detect_hf_endpoint(timeout: float = 3.0) -> str:
         )
 
     return _hf_endpoint_cache
+
+
+async def _detect_hf_endpoint(timeout: float = 3.0) -> str:
+    """
+    Async wrapper for HuggingFace endpoint detection.
+
+    Offloads the blocking HTTP probe to a thread to avoid blocking the event loop.
+    """
+    import asyncio
+
+    if _hf_endpoint_cache is not None:
+        return _hf_endpoint_cache
+
+    return await asyncio.to_thread(_detect_hf_endpoint_sync, timeout)
 
 
 def is_gguf_model_downloaded(
@@ -154,7 +168,7 @@ async def download_gguf_model(
         logger.info(f"Model already exists: {local_path}")
         return str(local_path)
 
-    endpoint = _detect_hf_endpoint()
+    endpoint = await _detect_hf_endpoint()
     source_label = (
         "mirror (hf-mirror.com)"
         if endpoint == HF_MIRROR_ENDPOINT

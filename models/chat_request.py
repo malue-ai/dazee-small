@@ -147,12 +147,12 @@ class Message(BaseModel):
     message_id: Optional[str] = Field(None, description="消息ID（可选）")
     
     @classmethod
-    def from_text(cls, role: str, text: str, **kwargs) -> "Message":
+    def from_text(cls, role: Literal["user", "assistant"], text: str, **kwargs) -> "Message":
         """从纯文本创建消息"""
         return cls(role=role, content=text, **kwargs)
     
     @classmethod
-    def from_blocks(cls, role: str, blocks: List[ContentBlock], **kwargs) -> "Message":
+    def from_blocks(cls, role: Literal["user", "assistant"], blocks: List[ContentBlock], **kwargs) -> "Message":
         """从内容块列表创建消息"""
         return cls(role=role, content=blocks, **kwargs)
 
@@ -240,7 +240,10 @@ class EnhancedChatRequest(BaseModel):
     """
     # ===== 基础字段 =====
     # 当前用户消息
-    message: Union[str, Message] = Field(..., description="用户消息（字符串或Message对象）")
+    message: Optional[Union[str, Message]] = Field(
+        None, 
+        description="用户消息（字符串或Message对象，上传文件时可为空）"
+    )
     
     # 用户标识
     user_id: str = Field("local", alias="userId", description="用户ID（桌面端默认 local）")
@@ -299,6 +302,13 @@ class EnhancedChatRequest(BaseModel):
             return Message.from_text("user", v)
         return v
     
+    @model_validator(mode='after')
+    def validate_message_or_attachments(self):
+        """确保至少提供了消息或文件附件之一"""
+        if not self.message and not self.attachments:
+            raise ValueError("必须提供 message（文本消息）或 attachments（文件附件）之一")
+        return self
+    
     def get_all_messages(self) -> List[Message]:
         """
         获取所有消息（历史+当前）
@@ -312,11 +322,12 @@ class EnhancedChatRequest(BaseModel):
         if self.history:
             messages.extend(self.history)
         
-        # 添加当前消息
-        if isinstance(self.message, Message):
-            messages.append(self.message)
-        else:
-            messages.append(Message.from_text("user", self.message))
+        # 添加当前消息（如果有）
+        if self.message:
+            if isinstance(self.message, Message):
+                messages.append(self.message)
+            else:
+                messages.append(Message.from_text("user", self.message))
         
         return messages
     
@@ -327,7 +338,7 @@ class EnhancedChatRequest(BaseModel):
         Returns:
             ChatOptions 对象
         """
-        return self.options or ChatOptions()
+        return self.options or ChatOptions()  # type: ignore[call-arg]
     
     model_config = {
         "populate_by_name": True,
@@ -349,10 +360,24 @@ class EnhancedChatRequest(BaseModel):
                     ]
                 },
                 {
-                    # 示例 3: 带文件附件的请求
-                    "message": "请帮我总结这份PDF报告的要点",
+                    # 示例 3: 只上传文件（无文本消息）
                     "userId": "user_001",
                     "conversationId": "conv_20240114_002",
+                    "attachments": [
+                        {
+                            "file_id": "file_xyz789",
+                            "file_name": "截图.png",
+                            "file_size": 524288,
+                            "file_type": "image",
+                            "source": "upload"
+                        }
+                    ]
+                },
+                {
+                    # 示例 4: 带文件附件和文本消息的请求
+                    "message": "请帮我总结这份PDF报告的要点",
+                    "userId": "user_001",
+                    "conversationId": "conv_20240114_003",
                     "attachments": [
                         {
                             "file_id": "file_abc123",
@@ -366,10 +391,10 @@ class EnhancedChatRequest(BaseModel):
                     ]
                 },
                 {
-                    # 示例 4: 完整的请求（包含所有选项）
+                    # 示例 5: 完整的请求（包含所有选项）
                     "message": "根据当前位置，推荐附近的餐厅",
                     "userId": "user_001",
-                    "conversationId": "conv_20240114_003",
+                    "conversationId": "conv_20240114_004",
                     "agentId": "recommendation_agent",
                     "context": {
                         "location": "北京市朝阳区",

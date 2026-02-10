@@ -22,7 +22,7 @@ import yaml
 from logger import get_logger
 from utils.app_paths import get_bundle_dir, get_user_config_path
 
-logger = get_logger("settings_service")
+logger = get_logger(__name__)
 
 # ==================== 后台下载任务状态 ====================
 
@@ -164,8 +164,8 @@ def load_config_to_env() -> None:
         logger.info(f"从 config.yaml 注入 {injected_count} 个环境变量")
 
 
-def _load_settings() -> Dict[str, Any]:
-    """加载配置文件内容（带缓存）"""
+async def _load_settings() -> Dict[str, Any]:
+    """加载配置文件内容（带缓存，async I/O）"""
     global _settings_cache
     if _settings_cache is not None:
         return _settings_cache
@@ -176,8 +176,9 @@ def _load_settings() -> Dict[str, Any]:
         return _settings_cache
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            _settings_cache = yaml.safe_load(f) or {}
+        async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+        _settings_cache = yaml.safe_load(content) or {}
     except Exception as e:
         logger.error(f"加载配置失败: {e}", exc_info=True)
         _settings_cache = {}
@@ -225,7 +226,7 @@ async def get_settings() -> Dict[str, Any]:
     Returns:
         按分组返回的配置
     """
-    settings = _load_settings()
+    settings = await _load_settings()
     result = {}
 
     for group_key, group_schema in SETTINGS_SCHEMA.items():
@@ -256,7 +257,7 @@ async def update_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         更新后的配置
     """
-    settings = _load_settings()
+    settings = await _load_settings()
 
     for group_key, group_updates in updates.items():
         if group_key not in SETTINGS_SCHEMA:
@@ -288,7 +289,7 @@ async def get_settings_status() -> Dict[str, Any]:
     Returns:
         {"configured": bool, "missing": [...], "summary": {...}}
     """
-    settings = _load_settings()
+    settings = await _load_settings()
     missing = []
 
     for key in REQUIRED_KEYS:
@@ -469,7 +470,7 @@ async def download_embedding_model() -> Dict[str, Any]:
         }
 
     try:
-        endpoint = _detect_hf_endpoint()
+        endpoint = await _detect_hf_endpoint()
         source = "mirror" if endpoint == HF_MIRROR_ENDPOINT else "official"
 
         model_path = await download_gguf_model()
@@ -726,13 +727,15 @@ async def _write_instance_memory_config(mode: str) -> None:
         logger.warning("AGENT_INSTANCE not set, cannot write instance config")
         return
 
-    config_path = Path(f"instances/{instance_name}/config/memory.yaml")
+    from utils.app_paths import get_instances_dir
+    config_path = get_instances_dir() / instance_name / "config" / "memory.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Read existing config (preserve comments are lost with yaml.dump, acceptable)
     if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
+        async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+        config = yaml.safe_load(content) or {}
     else:
         config = {}
 
