@@ -120,6 +120,42 @@ if (Test-Cmd "node") {
     Ok "Node.js installed"
 }
 
+# --- MSVC Build Tools (required by Rust on Windows) ---
+$hasMSVC = $false
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $vsWhere) {
+    $vsPath = (& $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>&1) | Out-String
+    if ($vsPath.Trim()) { $hasMSVC = $true }
+}
+# Also check for standalone Build Tools via registry
+if (-not $hasMSVC) {
+    $clExe = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "cl.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $clExe) {
+        $clExe = Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio" -Recurse -Filter "cl.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    if ($clExe) { $hasMSVC = $true }
+}
+
+if ($hasMSVC) {
+    Ok "MSVC Build Tools found"
+} else {
+    Info "MSVC Build Tools not found (required by Rust compiler)"
+    Info "  Installing Visual Studio Build Tools..."
+    if ($hasWinget) {
+        & winget install Microsoft.VisualStudio.2022.BuildTools --accept-source-agreements --accept-package-agreements --silent --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+    } else {
+        $vsUrl = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+        $vsTmp = Join-Path $env:TEMP "vs_BuildTools.exe"
+        Info "  Downloading Build Tools installer..."
+        Invoke-WebRequest -Uri $vsUrl -OutFile $vsTmp -UseBasicParsing
+        Start-Process -FilePath $vsTmp -ArgumentList "--wait", "--passive", "--add", "Microsoft.VisualStudio.Workload.VCTools", "--includeRecommended" -Wait
+        Remove-Item $vsTmp -Force -ErrorAction SilentlyContinue
+    }
+    Refresh-Path
+    $installed = $true
+    Ok "MSVC Build Tools installed (may need restart if Rust compile fails)"
+}
+
 # --- Rust ---
 Refresh-Path
 if ((Test-Cmd "rustc") -and (Test-Cmd "cargo")) {
@@ -159,15 +195,59 @@ if (-not (Test-Path $VenvPy)) {
     Ok "venv exists"
 }
 
+# --- Configure pip mirror (China-friendly, permanent) ---
+# Set pip mirror globally so ALL pip commands use it automatically.
+# This avoids SSL issues when connecting to pypi.org from China.
+Info "Configuring pip mirror..."
+$pipMirrors = @(
+    @{ url = "https://pypi.tuna.tsinghua.edu.cn/simple"; host = "pypi.tuna.tsinghua.edu.cn" },
+    @{ url = "https://mirrors.aliyun.com/pypi/simple"; host = "mirrors.aliyun.com" },
+    @{ url = "https://pypi.douban.com/simple"; host = "pypi.douban.com" }
+)
+
+$mirrorSet = $false
+foreach ($m in $pipMirrors) {
+    try {
+        $wr = [System.Net.HttpWebRequest]::Create($m.url)
+        $wr.Timeout = 8000
+        $wr.UserAgent = "pip/24.0"
+        $resp = $wr.GetResponse()
+        $resp.Close()
+        # Mirror reachable - configure pip permanently
+        & $VenvPip config set global.index-url $m.url 2>&1 | Out-Null
+        & $VenvPip config set global.trusted-host $m.host 2>&1 | Out-Null
+        Ok "pip mirror: $($m.host)"
+        $mirrorSet = $true
+        break
+    } catch {
+        continue
+    }
+}
+if (-not $mirrorSet) {
+    Warn "No China pip mirror reachable, using default PyPI (may be slow)"
+}
+
+# --- Install Python dependencies ---
 Info "Installing Python dependencies (this may take a few minutes)..."
 $reqFile = Join-Path $ProjectRoot "requirements.txt"
-& $VenvPip install -r $reqFile -q 2>&1 | Where-Object { $_ -match "error|ERROR|Failed|Could not" } | ForEach-Object { Warn "  $_" }
-if ($LASTEXITCODE -ne 0) {
-    Warn "Some pip packages may have failed. Retrying with verbose output..."
-    & $VenvPip install -r $reqFile 2>&1 | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" }
+& $VenvPip install -r $reqFile 2>&1 | ForEach-Object {
+    $line = $_.ToString()
+    if ($line -match "error|ERROR|Failed|Could not") { Warn "  $line" }
 }
-Ok "Python deps ready"
 
+# Verify critical packages are installed
+$criticalPkgs = @("fastapi", "uvicorn", "pydantic")
+$missingPkgs = @()
+foreach ($pkg in $criticalPkgs) {
+    $chk = & $VenvPy -c "import $pkg" 2>&1
+    if ($LASTEXITCODE -ne 0) { $missingPkgs += $pkg }
+}
+if ($missingPkgs.Count -gt 0) {
+    Fail "Critical packages missing: $($missingPkgs -join ', '). pip install failed - check your network connection."
+}
+Ok "Python deps verified"
+
+# --- Install PyInstaller ---
 Info "Checking PyInstaller..."
 $pyiCheck = & $VenvPy -c "import PyInstaller; print(PyInstaller.__version__)" 2>&1
 if ($pyiCheck -match "^\d+\.\d+") {
@@ -175,26 +255,69 @@ if ($pyiCheck -match "^\d+\.\d+") {
 } else {
     Info "  Installing PyInstaller..."
     & $VenvPip install pyinstaller 2>&1 | ForEach-Object { Write-Host "    $_" }
-    # Verify installation
+    # Verify
     $pyiCheck2 = & $VenvPy -c "import PyInstaller; print(PyInstaller.__version__)" 2>&1
     if ($pyiCheck2 -match "^\d+\.\d+") {
         Ok "PyInstaller $($pyiCheck2.Trim()) installed"
     } else {
-        Fail "PyInstaller installation failed. Try manually: .venv\Scripts\pip install pyinstaller"
+        Fail "PyInstaller install failed. Check network and try: .venv\Scripts\pip install pyinstaller"
     }
 }
 
-# --- npm ---
+# --- Configure npm mirror (China-friendly) ---
+Info "Configuring npm mirror..."
+$currentRegistry = (& npm config get registry 2>&1).ToString().Trim()
+if ($currentRegistry -match "npmmirror|taobao|cnpm") {
+    Ok "npm mirror: $currentRegistry"
+} else {
+    & npm config set registry https://registry.npmmirror.com 2>&1 | Out-Null
+    Ok "npm mirror: registry.npmmirror.com"
+}
+
+# --- Install npm deps ---
 $nm = Join-Path $FrontendDir "node_modules"
 if (-not (Test-Path $nm)) {
     Info "Installing frontend npm deps..."
     Push-Location $FrontendDir
     & npm install
+    if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "npm install failed. Check your network." }
     Pop-Location
     $installed = $true
     Ok "npm deps installed"
 } else {
     Ok "npm deps exist"
+}
+
+# --- Configure Rust cargo mirror (China-friendly) ---
+$cargoConfigDir = Join-Path $env:USERPROFILE ".cargo"
+$cargoConfigFile = Join-Path $cargoConfigDir "config.toml"
+if (-not (Test-Path $cargoConfigFile)) {
+    Info "Configuring cargo mirror (rsproxy.cn)..."
+    New-Item -ItemType Directory -Force -Path $cargoConfigDir | Out-Null
+    @"
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+
+[source.rsproxy]
+registry = "https://rsproxy.cn/crates.io-index"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+
+[net]
+git-fetch-with-cli = true
+"@ | Set-Content -Path $cargoConfigFile -Encoding UTF8
+    Ok "cargo mirror: rsproxy.cn"
+} else {
+    $cargoContent = Get-Content $cargoConfigFile -Raw -ErrorAction SilentlyContinue
+    if ($cargoContent -match "rsproxy|ustc|tuna") {
+        Ok "cargo mirror: already configured"
+    } else {
+        Ok "cargo config: using existing config"
+    }
 }
 
 Write-Host ""
