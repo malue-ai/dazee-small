@@ -1,408 +1,211 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-ZenFlux Backend PyInstaller Spec (onedir mode)
+PyInstaller 打包配置（onedir 模式）
 
-打包 Python FastAPI 后端为可执行文件 + _internal/ 依赖目录。
-Tauri sidecar 机制会启动此可执行文件作为后端服务。
+将 ZenFlux Agent FastAPI 后端打包为目录结构：
+  dist/zenflux-backend/
+    zenflux-backend        # 主可执行文件
+    _internal/             # 所有依赖（.so/.dylib/数据文件）
 
-用法:
-    python -m PyInstaller zenflux-backend.spec --noconfirm --clean
+使用 onedir 而非 onefile 的原因：
+  macOS AMFI（代码签名验证）会阻止 onefile 模式在运行时
+  解压到 /tmp 的动态库。onedir 模式允许在构建阶段对所有
+  文件进行代码签名，从而通过 Spotlight/Finder 启动时的安全检查。
+
+执行: pyinstaller zenflux-backend.spec --noconfirm
 """
 
-import os
 import sys
-import platform
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
 block_cipher = None
+project_root = Path(SPECPATH)
 
-PROJECT_ROOT = os.path.abspath(".")
+# ==================== 原生扩展（binaries）====================
+# 包含 C 扩展 .so/.dylib 文件，PyInstaller 无法通过 import 链发现
 
-# ==================== 数据文件（打包进 bundle）====================
-# 这些目录会被复制到 _MEIPASS 中，供 get_bundle_dir() 读取
+binaries = []
+
+# sqlite-vec: SQLite 向量搜索扩展（包含原生 .so/.dylib）
+try:
+    _sv_datas, _sv_binaries, _sv_hiddenimports = collect_all('sqlite_vec')
+    binaries += _sv_binaries
+except Exception:
+    pass  # sqlite-vec 未安装时跳过
+
+# ==================== 数据文件（只读资源）====================
+# 这些文件会被打包到临时目录，运行时通过 sys._MEIPASS 访问
+
 datas = [
-    ("config", "config"),
-    ("prompts", "prompts"),
-    ("instances", "instances"),
-    ("skills/library", "skills/library"),
-    ("skills/__init__.py", "skills"),
-    ("VERSION", "."),
+    # 版本号（单一来源）
+    (str(project_root / 'VERSION'), '.'),
+    # 配置文件
+    (str(project_root / 'config'), 'config'),
+    # 提示词
+    (str(project_root / 'prompts'), 'prompts'),
+    # 智能体实例配置
+    (str(project_root / 'instances'), 'instances'),
+    # Skill 库
+    (str(project_root / 'skills' / 'library'), 'skills/library'),
 ]
+
+# sqlite-vec 数据文件（与上方 binaries 配合，确保 loadable_path() 能找到扩展）
+try:
+    datas += _sv_datas
+except NameError:
+    pass
+
+# ==================== C 扩展包完整收集 ====================
+# 问题：含 C 扩展（.so）的包，PyInstaller 将 .so 解压到目录但纯 Python 文件
+# 放入 PYZ 归档。运行时 Python 找到目录后不再查 PYZ，导致 ModuleNotFoundError。
+# 解决：对这些包使用 collect_all() 将 .py 文件也复制到输出目录。
+hiddenimports = []
+_native_packages = [
+    # Rust / C 扩展类
+    'pydantic_core',   # Rust 扩展 + core_schema.py
+    'yaml',            # _yaml.so + error.py 等
+    'aiohttp',         # _http_parser.so 等
+    'asyncpg',         # PostgreSQL C 扩展
+    'charset_normalizer',
+    'cryptography',    # Rust 扩展
+    'frozenlist',
+    'greenlet',
+    'httptools',
+    'jiter',
+    'lxml',
+    'multidict',
+    'numpy',
+    'propcache',
+    'psutil',
+    'regex',
+    'rpds',
+    'tiktoken',
+    'uvloop',
+    'watchfiles',
+    'websockets',
+    'yarl',
+    'PIL',             # Pillow
+    # 数据文件类（有 .py 时区数据 / JSON schema / 模板文件导致建目录）
+    'pytz',
+    'jsonschema',
+    'jsonschema_specifications',
+    'Crypto',          # pycryptodome
+    'boto3',
+    'botocore',
+    'docx',            # python-docx
+    'google',          # google-* 命名空间
+    'grpc',
+    'grpc_tools',
+]
+
+for _pkg in _native_packages:
+    try:
+        _d, _b, _h = collect_all(_pkg)
+        datas += _d
+        binaries += _b
+        hiddenimports += _h
+    except Exception:
+        pass  # 未安装的包跳过
 
 # ==================== 隐式导入 ====================
-# PyInstaller 静态分析无法发现的动态导入
-hiddenimports = [
-    # --- 本地业务模块 ---
-    "routers",
-    "routers.agents",
-    "routers.chat",
-    "routers.conversation",
-    "routers.files",
-    "routers.human_confirmation",
-    "routers.settings",
-    "routers.skills",
-    "routers.models",
-    "routers.websocket",
-    "services",
-    "services.agent_registry",
-    "services.chat_service",
-    "services.confirmation_service",
-    "services.conversation_service",
-    "services.knowledge_service",
-    "services.session_service",
-    "services.settings_service",
-    "services.user_task_scheduler",
-    "models",
-    "models.agent",
-    "models.api",
-    "models.chat",
-    "models.chat_request",
-    "models.database",
-    "models.docs",
-    "models.hitl",
-    "models.llm",
-    "models.scheduled_task",
-    "models.skill",
-    "models.usage",
-    "tools",
-    "tools.base",
-    "tools.api_calling",
-    "tools.browser",
-    "tools.knowledge_search",
-    "tools.nodes_tool",
-    "tools.observe_screen",
-    "tools.plan_todo_tool",
-    "tools.request_human_confirmation",
-    "tools.scheduled_task_tool",
-    "utils",
-    "utils.app_paths",
-    "utils.cache_utils",
-    "utils.file_handler",
-    "utils.file_processor",
-    "utils.instance_loader",
-    "utils.json_file_store",
-    "utils.json_utils",
-    "utils.message_utils",
-    "utils.query_utils",
-    "utils.background_tasks",
-    "utils.background_tasks.context",
-    "utils.background_tasks.registry",
-    "utils.background_tasks.scheduler",
-    "utils.background_tasks.service",
-    "utils.background_tasks.tasks",
-    "utils.background_tasks.tasks.mem0_update",
-    "utils.background_tasks.tasks.memory_flush",
-    "utils.background_tasks.tasks.recommended_questions",
-    "utils.background_tasks.tasks.title_generation",
-    "infra",
-    "infra.local_store",
-    "infra.local_store.engine",
-    "infra.local_store.fts",
-    "infra.local_store.generic_fts",
-    "infra.local_store.models",
-    "infra.local_store.pools",
-    "infra.local_store.session_store",
-    "infra.local_store.skills_cache",
-    "infra.local_store.vector",
-    "infra.local_store.workspace",
-    "infra.local_store.crud",
-    "infra.local_store.crud.conversation",
-    "infra.local_store.crud.message",
-    "infra.local_store.crud.scheduled_task",
-    "infra.resilience",
-    "infra.resilience.circuit_breaker",
-    "infra.resilience.config",
-    "infra.resilience.fallback",
-    "infra.resilience.retry",
-    "infra.resilience.timeout",
-    "infra.storage",
-    "infra.storage.async_writer",
-    "infra.storage.base",
-    "infra.storage.batch_writer",
-    "infra.storage.local",
-    "infra.storage.storage_manager",
-    "logger",
-    "config.llm_config",
-    "config.llm_config.loader",
-    # --- core 模块（大量子包）---
-    "core",
-    "core.agent",
-    "core.agent.base",
-    "core.agent.content_handler",
-    "core.agent.errors",
-    "core.agent.factory",
-    "core.agent.models",
-    "core.agent.protocol",
-    "core.agent.backtrack",
-    "core.agent.backtrack.error_classifier",
-    "core.agent.backtrack.manager",
-    "core.agent.components",
-    "core.agent.context",
-    "core.agent.context.prompt_builder",
-    "core.agent.execution",
-    "core.agent.execution.protocol",
-    "core.agent.execution.rvr",
-    "core.agent.execution.rvrb",
-    "core.agent.tools",
-    "core.agent.tools.flow",
-    "core.agent.tools.special",
-    "core.config",
-    "core.config.loader",
-    "core.context",
-    "core.discovery",
-    "core.discovery.app_scanner",
-    "core.evaluation",
-    "core.evaluation.reward_attribution",
-    "core.events",
-    "core.events.base",
-    "core.events.broadcaster",
-    "core.events.content_events",
-    "core.events.conversation_events",
-    "core.events.dispatcher",
-    "core.events.manager",
-    "core.events.message_events",
-    "core.events.session_events",
-    "core.events.storage",
-    "core.events.system_events",
-    "core.events.user_events",
-    "core.events.adapters",
-    "core.events.adapters.base",
-    "core.events.adapters.dingtalk",
-    "core.events.adapters.feishu",
-    "core.events.adapters.slack",
-    "core.events.adapters.webhook",
-    "core.guardrails",
-    "core.guardrails.adaptive",
-    "core.inference",
-    "core.inference.semantic_inference",
-    "core.knowledge",
-    "core.knowledge.embeddings",
-    "core.knowledge.file_indexer",
-    "core.knowledge.local_search",
-    "core.llm",
-    "core.llm.adaptor",
-    "core.llm.base",
-    "core.llm.claude",
-    "core.llm.gemini",
-    "core.llm.health_monitor",
-    "core.llm.model_registry",
-    "core.llm.openai",
-    "core.llm.qwen",
-    "core.llm.registry",
-    "core.llm.router",
-    "core.llm.tool_call_utils",
-    "core.memory",
-    "core.memory.base",
-    "core.memory.instance_memory",
-    "core.memory.manager",
-    "core.memory.markdown_layer",
-    "core.memory.working",
-    "core.memory.system",
-    "core.memory.system.cache",
-    "core.memory.system.skill",
-    "core.memory.user",
-    "core.memory.user.episodic",
-    "core.memory.user.plan",
-    "core.memory.user.preference",
-    "core.memory.mem0",
-    "core.memory.mem0.config",
-    "core.memory.mem0.pool",
-    "core.memory.mem0.sqlite_vec_store",
-    "core.memory.mem0.extraction",
-    "core.memory.mem0.extraction.extractor",
-    "core.memory.mem0.retrieval",
-    "core.memory.mem0.retrieval.formatter",
-    "core.memory.mem0.retrieval.reranker",
-    "core.memory.mem0.schemas",
-    "core.memory.mem0.schemas.behavior",
-    "core.memory.mem0.schemas.emotion",
-    "core.memory.mem0.schemas.explicit_memory",
-    "core.memory.mem0.schemas.fragment",
-    "core.memory.mem0.schemas.persona",
-    "core.memory.mem0.schemas.plan",
-    "core.memory.mem0.update",
-    "core.memory.mem0.update.aggregator",
-    "core.memory.mem0.update.analyzer",
-    "core.memory.mem0.update.persona_builder",
-    "core.memory.mem0.update.planner",
-    "core.memory.mem0.update.prompts",
-    "core.memory.mem0.update.quality_control",
-    "core.memory.mem0.update.reminder",
-    "core.memory.mem0.update.reporter",
-    "core.monitoring",
-    "core.monitoring.case_converter",
-    "core.monitoring.failure_case_db",
-    "core.monitoring.failure_detector",
-    "core.monitoring.production_monitor",
-    "core.monitoring.quality_scanner",
-    "core.monitoring.token_audit",
-    "core.nodes",
-    "core.nodes.executors",
-    "core.nodes.executors.base",
-    "core.nodes.executors.shell",
-    "core.nodes.local",
-    "core.nodes.local.base",
-    "core.nodes.local.macos",
-    "core.nodes.local.windows",
-    "core.nodes.manager",
-    "core.nodes.protocol",
-    "core.orchestration",
-    "core.orchestration.code_orchestrator",
-    "core.orchestration.code_validator",
-    "core.orchestration.pipeline_tracer",
-    "core.output",
-    "core.output.formatter",
-    "core.planning",
-    "core.planning.dag_scheduler",
-    "core.planning.progress_transformer",
-    "core.planning.protocol",
-    "core.planning.storage",
-    "core.planning.validators",
-    "core.playbook",
-    "core.playbook.manager",
-    "core.playbook.storage",
-    "core.prompt",
-    "core.prompt.complexity_detector",
-    "core.prompt.framework_rules",
-    "core.prompt.instance_cache",
-    "core.prompt.intent_prompt_generator",
-    "core.prompt.llm_analyzer",
-    "core.prompt.prompt_layer",
-    "core.prompt.prompt_results_writer",
-    "core.prompt.runtime_context_builder",
-    "core.prompt.skill_prompt_builder",
-    "core.routing",
-    "core.routing.intent_analyzer",
-    "core.routing.intent_cache",
-    "core.routing.router",
-    "core.routing.types",
-    "core.schemas",
-    "core.schemas.validator",
-    "core.skill",
-    "core.skill.dynamic_loader",
-    "core.skill.group_registry",
-    "core.skill.loader",
-    "core.skill.models",
-    "core.skill.os_compatibility",
-    "core.state",
-    "core.state.consistency_manager",
-    "core.state.operation_log",
-    "core.termination",
-    "core.termination.adaptive",
-    "core.termination.protocol",
-    "core.tool",
-    "core.tool.capability",
-    "core.tool.capability.skill_loader",
-    "core.tool.executor",
-    "core.tool.llm_description",
-    "core.tool.loader",
-    "core.tool.registry",
-    "core.tool.registry_config",
-    "core.tool.selector",
-    "core.tool.types",
-    "core.tool.validator",
-    # --- 第三方库隐式导入 ---
-    "uvicorn",
-    "uvicorn.logging",
-    "uvicorn.loops",
-    "uvicorn.loops.auto",
-    "uvicorn.protocols",
-    "uvicorn.protocols.http",
-    "uvicorn.protocols.http.auto",
-    "uvicorn.protocols.websockets",
-    "uvicorn.protocols.websockets.auto",
-    "uvicorn.lifespan",
-    "uvicorn.lifespan.on",
-    "uvicorn.lifespan.off",
-    "fastapi",
-    "pydantic",
-    "pydantic.deprecated",
-    "pydantic.deprecated.decorator",
-    "starlette",
-    "starlette.responses",
-    "starlette.websockets",
-    "starlette.middleware",
-    "starlette.middleware.cors",
-    "anyio",
-    "anyio._backends",
-    "anyio._backends._asyncio",
-    "anthropic",
-    "openai",
-    "dashscope",
-    "httpx",
-    "httpcore",
-    "h11",
-    "sniffio",
-    "tiktoken",
-    "tiktoken_ext",
-    "tiktoken_ext.openai_public",
-    "numpy",
-    "numpy._core",
-    "numpy._core._exceptions",
-    "numpy._core._methods",
-    "numpy._core.multiarray",
-    "numpy._core.umath",
-    "numpy._core._internal",
-    "numpy._core._dtype",
-    "numpy._core._type_aliases",
-    "numpy.core",
-    "numpy.core._exceptions",
-    "numpy.core._methods",
-    "numpy.core.multiarray",
-    "numpy.core.umath",
-    "numpy.linalg",
-    "numpy.fft",
-    "numpy.random",
-    "aiofiles",
-    "aiohttp",
-    "aiosqlite",
-    "sqlalchemy",
-    "sqlalchemy.ext.asyncio",
-    "sqlalchemy.dialects.sqlite",
-    "greenlet",
-    "yaml",
-    "json5",
-    "PIL",
-    "PyPDF2",
-    "docx",
-    "pptx",
-    "openpyxl",
-    "odf",
-    "apscheduler",
-    "apscheduler.schedulers.asyncio",
-    "apscheduler.triggers.cron",
-    "apscheduler.triggers.interval",
-    "croniter",
-    "mem0ai",
-    "mem0",
-    "sqlite_vec",
-    "filetype",
-    "multipart",
-    "psutil",
-    "websockets",
-    "google.genai",
+# 使用 collect_submodules() 自动递归收集，不再手动维护模块列表。
+# 新增项目模块时无需修改此文件，PyInstaller 会自动发现。
+
+hiddenimports = list(set(hiddenimports))  # 去重 collect_all 结果
+
+# --- 项目模块：自动递归收集所有子模块 ---
+_project_packages = [
+    'routers', 'services', 'core', 'infra', 'utils', 'models', 'tools',
+]
+for _pkg in _project_packages:
+    hiddenimports += collect_submodules(_pkg)
+
+# 单文件模块（不属于任何包）
+hiddenimports += ['logger', 'main']
+
+# --- 第三方库：仅声明 PyInstaller 无法通过 import 链自动发现的 ---
+# uvicorn/anyio 使用动态导入选择后端，需要显式收集
+hiddenimports += collect_submodules('uvicorn')
+hiddenimports += collect_submodules('anyio')
+
+hiddenimports += collect_submodules('pydantic')
+
+hiddenimports += [
+    # Web 框架
+    'fastapi', 'starlette',
+    # LLM 客户端
+    'anthropic', 'openai',
+    # 数据库
+    'aiosqlite', 'sqlalchemy', 'sqlalchemy.ext.asyncio',
+    # 异步 I/O
+    'aiofiles', 'httpx',
+    # 配置
+    'yaml',
+    # tiktoken（编码数据通过 entry_points 插件发现，PyInstaller 需要显式声明）
+    'tiktoken', 'tiktoken_ext', 'tiktoken_ext.openai_public',
 ]
 
-# ==================== 排除不需要的大包 ====================
+# --- 延迟导入 / 条件导入的第三方库 ---
+# 这些库在代码中通过函数内 import 或 try/except 导入，
+# PyInstaller 静态分析无法通过 import 链自动发现。
+
+
+# 记忆系统 mem0（core/memory/mem0/pool.py 全部 lazy import）
+hiddenimports += collect_submodules('mem0')
+
+# sqlite-vec Python 模块（配合上方 binaries/datas 一起打包）
+try:
+    hiddenimports += _sv_hiddenimports
+except NameError:
+    hiddenimports += ['sqlite_vec']
+
+# 定时任务 APScheduler（services/user_task_scheduler.py 等 lazy import）
+hiddenimports += collect_submodules('apscheduler')
+
+# 文件处理（utils/file_handler.py try/except, core/knowledge/file_indexer.py lazy import）
+hiddenimports += ['PyPDF2', 'docx']
+
+
+# macOS 原生 OCR（tools/observe_screen.py 函数内 lazy import）
+if sys.platform == 'darwin':
+    hiddenimports += [
+        'objc', 'Vision', 'Quartz', 'Foundation',
+    ]
+
+# 去重
+hiddenimports = list(set(hiddenimports))
+
+# ==================== 排除包（减小体积）====================
+
 excludes = [
-    "tkinter",
-    "matplotlib",
-    "scipy",
-    "pandas",
-    "notebook",
-    "IPython",
-    "jupyter",
-    "pytest",
-    "pyinstaller",
-    "PyInstaller",
-    "_pytest",
+    # 科学计算 / 机器学习（服务端不需要）
+    # 注意：不排除 numpy（intent_cache 需要）和 PIL（file_handler 需要图片压缩）
+    'matplotlib', 'pandas', 'scipy',
+    'cv2',
+    'torch', 'tensorflow',
+    # 开发/测试工具
+    'jupyter', 'notebook', 'IPython',
+    'pytest', 'test', 'tests', 'unittest',
+    # 构建/包管理工具（运行时不需要）
+    # pkg_resources 依赖 jaraco.text（setuptools 80.x），项目代码不使用，直接排除
+    # 注意：保留 setuptools（Python 3.12 的 distutils 来自 setuptools）
+    'pkg_resources', 'jaraco',
+    'pip', '_distutils_hack',
+    'ensurepip', 'venv',
+    # GUI 工具包（服务端不需要）
+    'tkinter', '_tkinter', 'tcl', 'tk',
+    # 其他不需要的标准库模块
+    'xmlrpc', 'pydoc', 'doctest', 'lib2to3',
 ]
 
-# ==================== Analysis ====================
+# ==================== 分析 ====================
+
 a = Analysis(
-    ["main.py"],
-    pathex=[PROJECT_ROOT],
-    binaries=[],
+    [str(project_root / 'main.py')],
+    pathex=[str(project_root)],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -412,27 +215,39 @@ a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=False,
+    noarchive=True,  # 关键：不用 PYZ 归档，所有 .pyc 直接提取到文件系统
+                      # 避免 C 扩展包目录存在但纯 Python 文件在 PYZ 中导致 ModuleNotFoundError
 )
+
+# ==================== 打包（onedir 模式）====================
+# 使用 onedir 模式：所有 .so/.dylib 在构建时就存在于磁盘上，
+# 可以在打包阶段统一签名，避免 macOS AMFI 代码签名验证失败。
+# （onefile 模式会在运行时解压到 /tmp，无法预先签名）
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# onedir 模式下 EXE 只包含引导脚本，不包含 binaries/zipfiles/datas
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="zenflux-backend",
+    name='zenflux-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,          # sidecar 需要 console 输出给 Tauri 读取
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    icon=os.path.join("frontend", "src-tauri", "icons", "icon.ico"),
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
 )
 
+# COLLECT 将所有依赖文件收集到 dist/zenflux-backend/ 目录
 coll = COLLECT(
     exe,
     a.binaries,
@@ -441,5 +256,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="zenflux-backend",
+    name='zenflux-backend',
 )
