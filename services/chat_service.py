@@ -1355,6 +1355,18 @@ class ChatService:
                 logger.info("意图分析: 用户希望停止/取消，设置停止标志")
                 self.session_service.get_stop_event(session_id).set()
 
+            # 设置输出格式（必须在事件发送前完成，回滚也需要）
+            if hasattr(agent, "broadcaster") and agent.broadcaster:
+                agent.broadcaster.set_output_format(output_format, conversation_id)
+
+            # 更新 Session context（必须在事件发送前完成）
+            await store.set_session_context(
+                session_id=session_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                message_id=assistant_message_id,
+            )
+
             # V11.1: 用户回滚意图检测 — 框架直接回滚，短路 Agent 执行
             #
             # 安全保护（防止回滚短路误触发）：
@@ -1424,18 +1436,6 @@ class ChatService:
                                 logger.warning(f"回滚执行失败，回退到 Agent: {e}", exc_info=True)
                     else:
                         logger.info("用户回滚意图: 无可用快照，交给 Agent 处理")
-
-            # 设置输出格式
-            if hasattr(agent, "broadcaster") and agent.broadcaster:
-                agent.broadcaster.set_output_format(output_format, conversation_id)
-
-            # 更新 Session context
-            await store.set_session_context(
-                session_id=session_id,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                message_id=assistant_message_id,
-            )
 
             if not _rollback_handled:
                 _assistant_text_for_tasks = ""

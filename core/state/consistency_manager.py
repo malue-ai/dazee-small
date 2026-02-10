@@ -696,6 +696,37 @@ class StateConsistencyManager:
         )
         return recent.snapshot_id
 
+    def clear_all_snapshots(self) -> int:
+        """
+        Clear all snapshots from memory and disk.
+
+        Called after a successful user-initiated rollback to prevent
+        re-triggering on subsequent messages.
+
+        Returns:
+            Number of snapshots cleared.
+        """
+        count = len(self._snapshots)
+
+        # Clear memory
+        snapshot_ids = list(self._snapshots.keys())
+        for sid in snapshot_ids:
+            del self._snapshots[sid]
+
+        # Clear disk
+        if self._storage_path and self._storage_path.exists():
+            for snap_dir in self._storage_path.iterdir():
+                if snap_dir.is_dir() and snap_dir.name.startswith("snap_"):
+                    try:
+                        shutil.rmtree(snap_dir)
+                        count = max(count, 1)
+                    except Exception as e:
+                        logger.warning(f"清理快照失败 {snap_dir.name}: {e}")
+
+        if count > 0:
+            logger.info(f"已清理所有快照: {count} 个")
+        return count
+
     def get_snapshot_file_list(self, snapshot_id: str) -> List[str]:
         """获取快照中备份的文件路径列表"""
         snap = self._snapshots.get(snapshot_id)

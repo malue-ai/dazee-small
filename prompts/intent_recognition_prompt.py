@@ -31,6 +31,7 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
   "skip_memory": true|false,
   "is_follow_up": true|false,
   "wants_to_stop": true|false,
+  "wants_rollback": true|false,
   "relevant_skill_groups": ["group1", "group2"]
 }}
 ```
@@ -80,6 +81,22 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 ---
 
+## wants_rollback（用户是否要求恢复/撤销）
+
+- **true**: 用户**当前这条消息**明确要求恢复、撤销、回退之前的文件操作
+  - 例: "帮我恢复一下"、"撤销刚才的修改"、"把文件还原回去"
+- **false**: 其他一切情况，包括：
+  - 致谢/确认: "OK 感谢"、"好的"、"收到"、"谢谢"
+  - 追问: "还有别的吗"、"继续"
+  - 新请求: 任何不涉及恢复/撤销的新任务
+  - 已完成的回滚后续: 用户说"好的"确认回滚结果
+
+**关键判断**：只看**当前消息**是否包含恢复/撤销的动作请求。即使上文讨论过回滚，如果当前消息只是致谢或确认，也必须为 false。
+
+**默认: false**
+
+---
+
 ## relevant_skill_groups（需要哪些技能分组）
 
 从以下分组中选择**所有可能相关的**（可多选，宁多勿漏）：
@@ -96,92 +113,107 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 <example>
 <query>今天上海天气怎么样？</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
 </example>
 
 <example>
 <query>帮我写一篇关于咖啡文化的文章</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
 </example>
 
 <example>
 <query>分析这个 Excel 数据，找出销售趋势，写一段总结</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["data_analysis", "writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "writing"]}}</output>
 </example>
 
 <example>
 <query>打开飞书给合伙人群发一句问候</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
 <example>
 <query>帮我整理下载文件夹，按类型分类</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["file_operation"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"]}}</output>
 </example>
 
 <example>
 <query>把这段话翻译成英文</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["translation"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["translation"]}}</output>
 </example>
 
 <example>
 <query>把第二段改短一点</query>
-<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
 </example>
 
 <example>
 <query>算了不做了</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": true, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": true, "wants_rollback": false, "relevant_skill_groups": []}}</output>
+</example>
+
+<example>
+<query>帮我恢复一下刚才删的文件</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": true, "relevant_skill_groups": ["file_operation"]}}</output>
+</example>
+
+<example>
+<query>OK 感谢</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
+</example>
+
+<example>
+<query>好的 谢谢你</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
 </example>
 
 <example>
 <query>Python 是什么？</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
 </example>
 
 <example>
 <query>帮我搜一下最近的 transformer 论文</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["research"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research"]}}</output>
 </example>
 
 <example>
 <query>截个图给我看看桌面</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
 <example>
 <query>5分钟后提醒我喝水</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["productivity"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["productivity"]}}</output>
 </example>
 
 <example>
 <query>帮我分析这份会议记录，提取行动项</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["meeting"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["meeting"]}}</output>
 </example>
 
 <example>
 <query>帮我头脑风暴一下，公众号怎么涨粉</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["creative"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["creative"]}}</output>
 </example>
 
 <example>
 <query>帮我画一个项目开发流程图</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["diagram"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["diagram"]}}</output>
 </example>
 
 <example>
 <query>帮我分析这个职位描述，优化简历</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["career"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["career"]}}</output>
 </example>
 
 <example>
 <query>教我学数据分析，从零开始</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["learning"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["learning"]}}</output>
 </example>
 
 <example>
 <query>帮我把这篇文章去掉 AI 味，然后生成一份 PDF 报告</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
 </example>
 
 ---
@@ -191,6 +223,7 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 - 只输出 JSON，不要解释
 - 不确定 skip_memory 时选 false（保守）
 - 不确定 is_follow_up 时选 false（保守）
+- 不确定 wants_rollback 时选 false（保守，只有明确恢复/撤销请求才为 true）
 - relevant_skill_groups 宁多勿漏，不确定时多选
 
 现在分析用户的请求，只输出 JSON："""
