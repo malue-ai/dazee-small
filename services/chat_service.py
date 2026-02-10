@@ -1413,18 +1413,38 @@ class ChatService:
                                 _rollback_handled = True
                                 _assistant_text_for_tasks = confirm_text
 
-                                # 尝试通过 broadcaster 发送确认（失败不影响短路）
+                                # 通过 broadcaster 发送确认（走正确的 content 累积流程，确保持久化）
                                 try:
+                                    # 1. 初始化累积器（关键：不调则 content 无法持久化）
+                                    agent.broadcaster.start_message(session_id, assistant_message_id)
+
+                                    # 2. 发送 message_start SSE 事件
                                     await agent.broadcaster.emit_message_start(
                                         session_id=session_id,
                                         message_id=assistant_message_id,
                                         model=getattr(agent, "model", "system"),
                                     )
-                                    await agent.broadcaster.emit_message_delta(
+
+                                    # 3. 通过 content 事件流发送文本（会被 accumulator 累积并持久化）
+                                    await agent.broadcaster.emit_content_start(
                                         session_id=session_id,
-                                        delta={"type": "text", "content": confirm_text},
+                                        index=0,
+                                        content_block={"type": "text", "text": ""},
                                         message_id=assistant_message_id,
                                     )
+                                    await agent.broadcaster.emit_content_delta(
+                                        session_id=session_id,
+                                        index=0,
+                                        delta=confirm_text,
+                                        message_id=assistant_message_id,
+                                    )
+                                    await agent.broadcaster.emit_content_stop(
+                                        session_id=session_id,
+                                        index=0,
+                                        message_id=assistant_message_id,
+                                    )
+
+                                    # 4. 完成消息（持久化 content 到数据库 + 发送 message_stop SSE）
                                     await agent.broadcaster.emit_message_stop(
                                         session_id=session_id,
                                         message_id=assistant_message_id,
@@ -1464,6 +1484,21 @@ class ChatService:
                 lambda s=session_id: self.session_service.wait_hitl_confirm(s)
             )
 
+            # V12: 回溯耗尽确认等待（执行器 yield backtrack_confirm 后 await 此函数）
+            agent._wait_backtrack_confirm_async = (
+                lambda s=session_id: self.session_service.wait_backtrack_confirm(s)
+            )
+
+            # V12: 费用确认等待（执行器 yield cost_limit_confirm 后 await 此函数）
+            agent._wait_cost_confirm_async = (
+                lambda s=session_id: self.session_service.wait_cost_confirm(s)
+            )
+
+            # V12: 意图澄清等待（执行器 yield intent_clarify_request 后 await 此函数）
+            agent._wait_intent_clarify_async = (
+                lambda s=session_id: self.session_service.wait_intent_clarify(s)
+            )
+
             async for event in agent.chat(
                 messages=history_messages,
                 session_id=session_id,
@@ -1497,7 +1532,7 @@ class ChatService:
                             )
                             logger.info(
                                 "中止时已发送 billing 事件",
-                                extra={"total_price": usage_response.total_price},
+                                extra={"total_tokens": usage_response.total_tokens},
                             )
 
                             await agent.broadcaster.accumulate_usage(

@@ -80,6 +80,10 @@ class RVRBState:
     # 最近的错误
     last_error: Optional[ClassifiedError] = None
 
+    # 断路器：工具调用历史（检测重复调用死循环）
+    recent_tool_names: List[str] = field(default_factory=list)
+    _force_text_count: int = 0  # 连续强制文本回复次数（用于硬停止）
+
     def record_execution(
         self, action: str, success: bool, result: Any = None, error: Optional[Exception] = None
     ):
@@ -223,6 +227,71 @@ class RVRBExecutor(RVRExecutor):
         """清除 RVR-B 状态"""
         if session_id in self._rvrb_states:
             del self._rvrb_states[session_id]
+
+    # ==================== 断路器：重复工具调用检测 ====================
+
+    # 复杂度 → 软轮次限制（超过后注入 wrap-up 指令并移除工具，强制文本回复）
+    _SOFT_TURN_LIMITS = {"simple": 5, "medium": 15, "complex": 30}
+    # 同一工具连续调用 N 次触发断路
+    _CONSECUTIVE_SAME_TOOL_LIMIT = 3
+    # 强制文本回复后仍调用工具 → 硬停止
+    _FORCE_TEXT_HARD_STOP = 2
+
+    def _check_circuit_breaker(
+        self,
+        state: RVRBState,
+        turn: int,
+        intent: Optional[Any] = None,
+    ) -> tuple:
+        """
+        断路器检测：是否需要强制文本回复
+
+        检测两种死循环模式：
+        1. 同一工具连续调用 N 次（Agent 对结果不满意反复重试）
+        2. 简单任务超过软轮次限制（Agent 过度探索）
+
+        Args:
+            state: RVR-B 状态
+            turn: 当前轮次（0-based）
+            intent: 意图识别结果（含 complexity）
+
+        Returns:
+            (should_force_text: bool, reason: str)
+        """
+        # 已经多次强制文本但仍进入工具调用 → 硬停止
+        if state._force_text_count >= self._FORCE_TEXT_HARD_STOP:
+            return True, (
+                f"已强制文本回复 {state._force_text_count} 次仍未结束，"
+                "请立即总结已获得的全部信息并回复用户"
+            )
+
+        # 检测 1: 同一工具连续调用 N 次
+        limit = self._CONSECUTIVE_SAME_TOOL_LIMIT
+        if len(state.recent_tool_names) >= limit:
+            last_n = state.recent_tool_names[-limit:]
+            if len(set(last_n)) == 1:
+                return True, (
+                    f"工具 {last_n[0]} 已连续调用 {limit} 次，"
+                    "信息收集已充分，请直接回复用户"
+                )
+
+        # 检测 2: 复杂度感知的软轮次限制
+        complexity = "medium"
+        if intent and hasattr(intent, "complexity"):
+            complexity = (
+                intent.complexity.value
+                if hasattr(intent.complexity, "value")
+                else str(intent.complexity)
+            )
+        soft_limit = self._SOFT_TURN_LIMITS.get(complexity, 15)
+
+        if turn >= soft_limit:
+            return True, (
+                f"已执行 {turn + 1} 轮（complexity={complexity}，"
+                f"软限制={soft_limit}），请总结已有信息并回复用户"
+            )
+
+        return False, ""
 
     async def _evaluate_backtrack(
         self, error: Exception, tool_name: str, tool_input: Dict[str, Any], state: RVRBState, llm
@@ -658,6 +727,27 @@ class RVRBExecutor(RVRExecutor):
             ctx.touch_activity()  # 更新活动时间（用于 idle_timeout 检测）
             state.turn = turn
 
+            # === 断路器：重复工具调用检测 ===
+            # 检测 Agent 是否陷入重复调用同一工具的死循环
+            _current_tools = tools_for_llm
+            _force_text, _cb_reason = self._check_circuit_breaker(
+                state, turn, intent
+            )
+            if _force_text:
+                state._force_text_count += 1
+                _current_tools = []  # 移除工具 → 模型只能生成文本回复
+                # 追加独立的 user 消息（不修改现有 tool_result 消息，避免格式破坏）
+                # 注意：不能向 tool_result 消息注入 text block，否则 OpenAI 格式转换会丢失 tool 响应
+                _cb_guidance = (
+                    f"[系统提示] {_cb_reason}。"
+                    "请基于你已经收集到的信息，直接用自然语言回复用户。"
+                    "即使信息不完整，也请将已获得的部分信息告知用户。"
+                )
+                append_user_message(llm_messages, _cb_guidance)
+                logger.warning(
+                    f"🔌 断路器触发 (turn={turn + 1}): {_cb_reason}"
+                )
+
             logger.info(f"{'='*60}")
             logger.info(
                 f"🔄 RVR-B Turn {turn + 1} (backtracks: {state.backtrack_count}/{state.max_backtracks})"
@@ -670,7 +760,7 @@ class RVRBExecutor(RVRExecutor):
                     llm=llm,
                     messages=llm_messages,
                     system_prompt=system_prompt,
-                    tools=tools_for_llm,
+                    tools=_current_tools,
                     ctx=ctx,
                     session_id=session_id,
                     broadcaster=broadcaster,
@@ -681,6 +771,14 @@ class RVRBExecutor(RVRExecutor):
                 response = ctx.last_llm_response
                 if response:
                     if response.stop_reason == "tool_use" and response.tool_calls:
+                        # 记录工具调用名称（供断路器检测）
+                        for _tc in response.tool_calls:
+                            _tc_name = _tc.get("name", "unknown")
+                            state.recent_tool_names.append(_tc_name)
+                        # 截断历史避免内存膨胀
+                        if len(state.recent_tool_names) > 50:
+                            state.recent_tool_names = state.recent_tool_names[-20:]
+
                         # V11.1: HITL 危险操作确认（执行前拦截，等待用户决策）
                         hitl_rejected = False
                         if cfg.terminator:
@@ -799,7 +897,7 @@ class RVRBExecutor(RVRExecutor):
             else:
                 # 非流式处理
                 response = await llm.create_message_async(
-                    messages=llm_messages, system=system_prompt, tools=tools_for_llm
+                    messages=llm_messages, system=system_prompt, tools=_current_tools
                 )
 
                 usage_tracker.accumulate(response)
@@ -811,6 +909,13 @@ class RVRBExecutor(RVRExecutor):
                     ctx.set_completed(response.content, response.stop_reason)
                     state.record_execution("complete", True, response.content)
                     break
+
+                # 记录工具调用名称（供断路器检测，非流式路径）
+                if response.tool_calls:
+                    for _tc in response.tool_calls:
+                        state.recent_tool_names.append(_tc.get("name", "unknown"))
+                    if len(state.recent_tool_names) > 50:
+                        state.recent_tool_names = state.recent_tool_names[-20:]
 
                 # V11.1: HITL 危险操作确认（非流式，等待用户决策）
                 hitl_rejected_ns = False
@@ -1256,8 +1361,9 @@ class RVRBExecutor(RVRExecutor):
                 _content_lower = _tr_content.lower()
                 if any(ind in _content_lower for ind in _empty_indicators):
                     _reflection = (
-                        "\n\n[提示] 上一步没有找到目标。请尝试替代方案："
-                        "1) 换一种搜索路径或关键词 "
+                        "\n\n[提示] 上一步没有找到目标。"
+                        "如果你已经通过其他方式获得了足够信息，请直接回复用户。"
+                        "否则可以尝试：1) 换一种搜索路径或关键词 "
                         "2) 如果用户上传了文件，直接使用消息中的 file:/// 路径 "
                         "3) 使用 nodes 工具的 find 命令搜索文件系统"
                     )
@@ -1379,8 +1485,9 @@ class RVRBExecutor(RVRExecutor):
                 _content_lower = _tr_content.lower()
                 if any(ind in _content_lower for ind in _empty_indicators):
                     _reflection = (
-                        "\n\n[提示] 上一步没有找到目标。请尝试替代方案："
-                        "1) 换一种搜索路径或关键词 "
+                        "\n\n[提示] 上一步没有找到目标。"
+                        "如果你已经通过其他方式获得了足够信息，请直接回复用户。"
+                        "否则可以尝试：1) 换一种搜索路径或关键词 "
                         "2) 如果用户上传了文件，直接使用消息中的 file:/// 路径 "
                         "3) 使用 nodes 工具的 find 命令搜索文件系统"
                     )

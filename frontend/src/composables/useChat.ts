@@ -56,6 +56,9 @@ export function useChat() {
     options: { id: string; action: string; target: string }[]
     error?: string
     reason?: string
+    /** V11.2: Diff 预览数据 */
+    preview?: sessionApi.RollbackPreview | null
+    previewLoading?: boolean
   } | null>(null)
   const rollbackLoading = ref(false)
 
@@ -335,9 +338,36 @@ export function useChat() {
   }
 
   /**
-   * V11: 确认回滚
+   * V11.2: 加载回滚 Diff 预览
    */
-  async function confirmRollback(): Promise<void> {
+  async function loadRollbackPreview(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId) ||
+      rollbackData.value?.task_id
+    if (!sessionId || !rollbackData.value) return
+
+    rollbackData.value.previewLoading = true
+    rollbackData.value.preview = null
+    try {
+      const preview = await sessionApi.previewRollback(sessionId)
+      if (rollbackData.value) {
+        rollbackData.value.preview = preview
+      }
+    } catch (e) {
+      console.error('预览加载失败:', e)
+      // 预览失败不影响回滚功能，仅 log
+    } finally {
+      if (rollbackData.value) {
+        rollbackData.value.previewLoading = false
+      }
+    }
+  }
+
+  /**
+   * V11: 确认回滚（V11.2: 支持选择性回滚）
+   */
+  async function confirmRollback(selectedFiles?: string[]): Promise<void> {
     const sessionId =
       sessionStore.currentSessionId ||
       sessionStore.getSessionIdByConversation(conversationStore.currentId) ||
@@ -346,7 +376,7 @@ export function useChat() {
 
     rollbackLoading.value = true
     try {
-      await sessionApi.rollbackSession(sessionId)
+      await sessionApi.rollbackSession(sessionId, selectedFiles)
       showRollbackModal.value = false
       rollbackData.value = null
     } catch (e) {
@@ -581,7 +611,7 @@ export function useChat() {
        }
     }
 
-    // V11: 回滚选项
+    // V11: 回滚选项（V11.2: 初始化 preview 状态以触发 Diff 预览加载）
     if (type === 'rollback_options') {
       const taskId = data?.task_id || sessionStore.currentSessionId
       const options = Array.isArray(data?.options) ? data.options : []
@@ -589,7 +619,9 @@ export function useChat() {
         task_id: taskId || '',
         options,
         error: data?.error,
-        reason: data?.reason
+        reason: data?.reason,
+        preview: null,
+        previewLoading: false,
       }
       showRollbackModal.value = true
     }
@@ -980,10 +1012,11 @@ export function useChat() {
     isStopping,
     hitl,
 
-    // V11: 回滚
+    // V11: 回滚（V11.2: Diff 预览 + 选择性回滚）
     showRollbackModal,
     rollbackData,
     rollbackLoading,
+    loadRollbackPreview,
     confirmRollback,
     dismissRollback,
 

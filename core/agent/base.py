@@ -426,6 +426,15 @@ class Agent:
                 "wait_hitl_confirm_async": getattr(
                     self, "_wait_hitl_confirm_async", None
                 ),
+                "wait_backtrack_confirm_async": getattr(
+                    self, "_wait_backtrack_confirm_async", None
+                ),
+                "wait_cost_confirm_async": getattr(
+                    self, "_wait_cost_confirm_async", None
+                ),
+                "wait_intent_clarify_async": getattr(
+                    self, "_wait_intent_clarify_async", None
+                ),
                 "state_manager": state_mgr_ref,
             },
         )

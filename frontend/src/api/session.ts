@@ -50,14 +50,53 @@ export async function confirmContinueSession(sessionId: string): Promise<void> {
 }
 
 /**
- * 回滚会话状态（V11 状态一致性）
- * 将文件与环境恢复到任务开始前的快照
+ * 预览回滚变更（V11.2）
+ * 返回每个文件与磁盘当前状态的对比，不执行写操作
  */
-export async function rollbackSession(
+export async function previewRollback(
   sessionId: string
-): Promise<{ session_id: string; messages: string[] }> {
-  const response = await api.post<ApiResponse<{ session_id: string; messages: string[] }>>(
-    `/v1/session/${sessionId}/rollback`
+): Promise<RollbackPreview> {
+  const response = await api.get<ApiResponse<RollbackPreview>>(
+    `/v1/session/${sessionId}/rollback/preview`
   )
   return response.data.data
+}
+
+/**
+ * 回滚会话状态（V11 状态一致性，V11.2 支持选择性回滚）
+ * 将文件与环境恢复到任务开始前的快照
+ * 传入 filePaths 则只回滚指定文件
+ */
+export async function rollbackSession(
+  sessionId: string,
+  filePaths?: string[]
+): Promise<{ session_id: string; messages: string[] }> {
+  const response = await api.post<ApiResponse<{ session_id: string; messages: string[] }>>(
+    `/v1/session/${sessionId}/rollback`,
+    filePaths !== undefined ? { file_paths: filePaths } : undefined
+  )
+  return response.data.data
+}
+
+/** 回滚预览中单个文件的变更信息 */
+export interface RollbackFilePreview {
+  path: string
+  status: 'modified' | 'deleted' | 'unchanged'
+  current_size: number | null
+  backup_size: number
+  selected: boolean
+}
+
+/** 回滚预览响应 */
+export interface RollbackPreview {
+  snapshot_id: string
+  task_id: string
+  created_at: string
+  files: RollbackFilePreview[]
+  summary: {
+    total: number
+    modified: number
+    deleted: number
+    unchanged: number
+  }
 }

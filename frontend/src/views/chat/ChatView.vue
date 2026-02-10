@@ -296,14 +296,19 @@
       @cancel="handleHITLCancel"
     />
 
-    <!-- V11: 回滚选项模态框 -->
+    <!-- V11: 回滚选项模态框（V11.2: Diff 预览 + 选择性回滚） -->
     <RollbackOptionsModal
       :show="chat.showRollbackModal.value"
       :options="chat.rollbackData.value?.options"
       :error="chat.rollbackData.value?.error"
       :loading="chat.rollbackLoading.value"
+      :reason="chat.rollbackData.value?.reason"
+      :preview="chat.rollbackData.value?.preview !== undefined
+        ? { ...chat.rollbackData.value.preview, previewLoading: chat.rollbackData.value?.previewLoading }
+        : null"
       @confirm="chat.confirmRollback"
       @dismiss="chat.dismissRollback"
+      @load-preview="chat.loadRollbackPreview"
     />
 
     <!-- V11.1: HITL 危险操作确认模态框 -->

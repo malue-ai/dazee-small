@@ -23,7 +23,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, Optional, TypeVar
 
 # ==================== 第三方库 ====================
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 # ==================== 本地模块 ====================
@@ -650,21 +650,128 @@ async def submit_hitl_confirm(session_id: str, approved: bool = True):
     return APIResponse(code=200, message=action, data={"session_id": session_id, "approved": approved})
 
 
+@router.post("/session/{session_id}/backtrack_confirm", response_model=APIResponse[Dict])
+@handle_exceptions("回溯耗尽确认")
+async def submit_backtrack_confirm(session_id: str, choice: str = "stop"):
+    """
+    用户提交回溯耗尽后的选择（V12 HITL）
+
+    当执行器回溯次数用尽并发出 backtrack_confirm 事件后，
+    前端调用此接口提交用户选择。
+
+    - choice="retry": 重置回溯计数，继续尝试
+    - choice="rollback": 触发回滚流程
+    - choice="stop": 停止任务
+    """
+    logger.info(f"📨 回溯确认: session_id={session_id}, choice={choice}")
+    session_service.submit_backtrack_confirm(session_id, choice)
+    return APIResponse(
+        code=200,
+        message=f"回溯确认: {choice}",
+        data={"session_id": session_id, "choice": choice},
+    )
+
+
+@router.post("/session/{session_id}/cost_confirm", response_model=APIResponse[Dict])
+@handle_exceptions("费用确认")
+async def submit_cost_confirm(session_id: str, choice: str = "stop"):
+    """
+    用户提交费用确认选择（V12 HITL 阶梯式提醒）
+
+    当执行器检测到费用超阈值并发出 cost_limit_confirm / cost_urgent_confirm 事件后，
+    前端调用此接口提交用户选择。
+
+    - choice="continue": 确认继续执行
+    - choice="stop": 停止任务
+    """
+    logger.info(f"📨 费用确认: session_id={session_id}, choice={choice}")
+    session_service.submit_cost_confirm(session_id, choice)
+    return APIResponse(
+        code=200,
+        message=f"费用确认: {choice}",
+        data={"session_id": session_id, "choice": choice},
+    )
+
+
+@router.post("/session/{session_id}/intent_clarify", response_model=APIResponse[Dict])
+@handle_exceptions("意图澄清")
+async def submit_intent_clarify(session_id: str, text: str = ""):
+    """
+    用户提交意图澄清文本（V12 HITL）
+
+    当执行器无法理解用户意图并发出 intent_clarify_request 事件后，
+    前端调用此接口提交澄清内容。
+    """
+    logger.info(f"📨 意图澄清: session_id={session_id}, text={text[:50]}...")
+    session_service.submit_intent_clarify(session_id, text)
+    return APIResponse(
+        code=200,
+        message="意图澄清已提交",
+        data={"session_id": session_id},
+    )
+
+
+@router.get("/session/{session_id}/rollback/preview", response_model=APIResponse[Dict])
+@handle_exceptions("预览回滚变更")
+async def preview_rollback(session_id: str):
+    """
+    预览回滚将要改变的内容（不执行任何写操作）
+
+    返回每个快照文件与当前磁盘文件的对比：modified / deleted / unchanged。
+    前端据此展示 Diff 预览，用户可选择回滚哪些文件。
+
+    ## 参数
+    - **session_id**: 会话 ID
+
+    ## 返回
+    - **files**: 文件变更列表（含 path / status / current_size / backup_size / selected）
+    - **summary**: 变更统计（total / modified / deleted / unchanged）
+    """
+    state_mgr = session_service.get_state_manager(session_id)
+    if not state_mgr:
+        raise HTTPException(
+            status_code=404,
+            detail="无可用快照或会话已结束",
+        )
+
+    snapshot_id = state_mgr.get_snapshot_for_task(session_id)
+    if not snapshot_id:
+        raise HTTPException(
+            status_code=404,
+            detail="未找到该任务对应的快照",
+        )
+
+    preview = state_mgr.preview_rollback(snapshot_id)
+    if "error" in preview:
+        raise HTTPException(status_code=404, detail=preview["error"])
+
+    return APIResponse(code=200, message="预览成功", data=preview)
+
+
 @router.post("/session/{session_id}/rollback", response_model=APIResponse[Dict])
 @handle_exceptions("回滚会话状态")
-async def rollback_session(session_id: str):
+async def rollback_session(
+    session_id: str,
+    file_paths: Optional[list[str]] = Body(default=None, embed=True),
+):
     """
-    执行状态回滚（V11 状态一致性）
+    执行状态回滚（V11 状态一致性，支持选择性回滚）
 
     当任务异常或用户选择回滚时，将文件与环境恢复到任务开始前的快照。
+    如果传入 file_paths 则只回滚指定文件，否则回滚全部。
 
     ## 参数
     - **session_id**: 会话 ID（与 execute 时使用的 session_id 一致）
+    - **file_paths**: 可选，要回滚的文件路径列表（body JSON）
 
     ## 返回
     - **messages**: 回滚结果消息列表（如 "已恢复: /path/to/file"）
     """
-    logger.info(f"📨 回滚请求: session_id={session_id}")
+    logger.info(
+        f"📨 回滚请求: session_id={session_id}, "
+        f"selective={file_paths is not None}, "
+        f"count={len(file_paths) if file_paths else 'all'}"
+    )
 
     state_mgr = session_service.get_state_manager(session_id)
     if not state_mgr:
@@ -680,7 +787,11 @@ async def rollback_session(session_id: str):
             detail="未找到该任务对应的快照",
         )
 
-    messages = state_mgr.rollback(snapshot_id)
+    if file_paths is not None:
+        messages = state_mgr.rollback_selective(snapshot_id, file_paths)
+    else:
+        messages = state_mgr.rollback(snapshot_id)
+
     session_service.unregister_state_manager(session_id)
 
     logger.info(f"✅ 回滚完成: session_id={session_id}, 结果数={len(messages)}")

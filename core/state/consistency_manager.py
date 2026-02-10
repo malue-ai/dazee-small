@@ -736,6 +736,201 @@ class StateConsistencyManager:
             return []
         return list(snap.file_contents.keys())
 
+    # ==================== Diff 预览 + 选择性回滚 ====================
+
+    def preview_rollback(self, snapshot_id: str) -> Dict[str, Any]:
+        """
+        预览回滚将要改变的内容（不执行任何写操作）
+
+        对比快照备份内容与当前磁盘文件，返回每个文件的变更状态：
+        - modified: 文件内容已变更，回滚会恢复
+        - deleted: 文件已被删除，回滚会重建
+        - unchanged: 文件未变，回滚无影响
+        - created_after: 文件在快照后新建（快照中无备份），不受回滚影响
+
+        Args:
+            snapshot_id: 快照 ID
+
+        Returns:
+            {
+                "snapshot_id": str,
+                "task_id": str,
+                "created_at": str,
+                "files": [
+                    {
+                        "path": str,
+                        "status": "modified" | "deleted" | "unchanged",
+                        "current_size": int | None,
+                        "backup_size": int,
+                        "selected": bool  (默认 True, 前端可取消)
+                    }
+                ],
+                "summary": {
+                    "total": int,
+                    "modified": int,
+                    "deleted": int,
+                    "unchanged": int
+                }
+            }
+        """
+        snap = self._snapshots.get(snapshot_id)
+        if not snap:
+            snap = self._load_snapshot_from_disk(snapshot_id)
+        if not snap:
+            return {"error": f"快照不存在: {snapshot_id}"}
+
+        files_info: List[Dict[str, Any]] = []
+        counts = {"modified": 0, "deleted": 0, "unchanged": 0}
+
+        for path, backup_content in snap.file_contents.items():
+            target = Path(path)
+            backup_size = len(backup_content)
+
+            if not target.exists():
+                # 文件已被删除，回滚会重建
+                files_info.append({
+                    "path": path,
+                    "status": "deleted",
+                    "current_size": None,
+                    "backup_size": backup_size,
+                    "selected": True,
+                })
+                counts["deleted"] += 1
+            else:
+                try:
+                    current_content = target.read_bytes()
+                    current_size = len(current_content)
+
+                    if current_content == backup_content:
+                        files_info.append({
+                            "path": path,
+                            "status": "unchanged",
+                            "current_size": current_size,
+                            "backup_size": backup_size,
+                            "selected": False,
+                        })
+                        counts["unchanged"] += 1
+                    else:
+                        files_info.append({
+                            "path": path,
+                            "status": "modified",
+                            "current_size": current_size,
+                            "backup_size": backup_size,
+                            "selected": True,
+                        })
+                        counts["modified"] += 1
+                except Exception as e:
+                    logger.warning(f"预览时读取文件失败 {path}: {e}")
+                    files_info.append({
+                        "path": path,
+                        "status": "modified",
+                        "current_size": None,
+                        "backup_size": backup_size,
+                        "selected": True,
+                    })
+                    counts["modified"] += 1
+
+        # 按状态排序: deleted > modified > unchanged
+        status_order = {"deleted": 0, "modified": 1, "unchanged": 2}
+        files_info.sort(key=lambda f: status_order.get(f["status"], 99))
+
+        return {
+            "snapshot_id": snapshot_id,
+            "task_id": snap.task_id,
+            "created_at": snap.created_at or "",
+            "files": files_info,
+            "summary": {
+                "total": len(files_info),
+                **counts,
+            },
+        }
+
+    def rollback_selective(
+        self, snapshot_id: str, file_paths: Optional[List[str]] = None
+    ) -> List[str]:
+        """
+        选择性回滚：只恢复指定文件，其余不动
+
+        如果 file_paths 为 None 则回滚所有文件（等价于 rollback()）。
+        回滚后根据策略清理快照。
+
+        Args:
+            snapshot_id: 快照 ID
+            file_paths: 要回滚的文件路径列表，None 表示全部
+
+        Returns:
+            回滚结果消息列表
+        """
+        if file_paths is None:
+            return self.rollback(snapshot_id)
+
+        snap = self._snapshots.get(snapshot_id)
+        if not snap:
+            snap = self._load_snapshot_from_disk(snapshot_id)
+        if not snap:
+            return [f"快照不存在: {snapshot_id}"]
+
+        messages: List[str] = []
+        start_time = time.monotonic()
+        timeout = self._config.rollback.rollback_timeout_seconds
+        restored_count = 0
+
+        logger.info(
+            f"开始选择性回滚: {snapshot_id}, "
+            f"选中 {len(file_paths)}/{len(snap.file_contents)} 个文件"
+        )
+
+        for path in file_paths:
+            elapsed = time.monotonic() - start_time
+            if elapsed >= timeout:
+                messages.append(f"回滚超时: 文件 {path} 恢复被跳过")
+                logger.warning(f"选择性回滚超时，跳过: {path}")
+                continue
+
+            if path not in snap.file_contents:
+                messages.append(f"快照中无此文件: {path}")
+                continue
+
+            try:
+                content = snap.file_contents[path]
+                target = Path(path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+                messages.append(f"已恢复: {path}")
+                restored_count += 1
+            except Exception as e:
+                logger.error(f"选择性回滚文件失败 {path}: {e}", exc_info=True)
+                messages.append(f"恢复失败: {path} - {e}")
+
+        total_elapsed = time.monotonic() - start_time
+
+        # 检查是否所有可回滚文件都已恢复 → 清理快照
+        all_rollbackable = {
+            p for p, c in snap.file_contents.items()
+            if not Path(p).exists() or Path(p).read_bytes() != c
+        }
+        selected_set = set(file_paths)
+        if all_rollbackable.issubset(selected_set):
+            # 所有有变更的文件都被选择回滚了 → 等同于全量回滚，清理快照
+            if snapshot_id in self._snapshots:
+                del self._snapshots[snapshot_id]
+            self._remove_snapshot_from_disk(snapshot_id)
+            logger.info("选择性回滚: 所有变更文件已恢复，快照已清理")
+
+        logger.info(
+            f"选择性回滚完成: {snapshot_id}, "
+            f"恢复 {restored_count}/{len(file_paths)} 个文件, "
+            f"耗时 {total_elapsed:.2f}s"
+        )
+
+        for cb in self._listeners:
+            try:
+                cb("rollback", snap.task_id, snapshot_id, messages)
+            except Exception as e:
+                logger.debug(f"StateConsistencyManager 监听器异常: {e}")
+
+        return messages
+
     def _load_snapshots_from_disk(self) -> None:
         """从磁盘加载所有快照到内存（用于跨 session 查找）"""
         if not self._storage_path or not self._storage_path.exists():

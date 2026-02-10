@@ -74,8 +74,8 @@ def _get_skills_library_dir() -> Path:
 
 def _get_instance_skills_dir(agent_id: str) -> Path:
     """获取 instances/{agent_id}/skills 目录路径"""
-    from utils.app_paths import get_bundle_dir
-    instances_dir = get_bundle_dir() / "instances"
+    from utils.app_paths import get_instances_dir
+    instances_dir = get_instances_dir()
     skills_dir = instances_dir / agent_id / "skills"
     return _ensure_within(instances_dir, skills_dir, "agent_id")
 
@@ -133,9 +133,9 @@ async def _load_skills_yaml_descriptions(agent_id: str) -> dict[str, str]:
     """
     import yaml as _yaml
 
-    from utils.app_paths import get_bundle_dir
+    from utils.app_paths import get_instances_dir
 
-    config_path = get_bundle_dir() / "instances" / agent_id / "config" / "skills.yaml"
+    config_path = get_instances_dir() / agent_id / "config" / "skills.yaml"
     if not config_path.exists():
         return {}
 

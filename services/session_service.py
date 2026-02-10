@@ -89,6 +89,18 @@ class SessionService:
         self._hitl_confirm_events: Dict[str, asyncio.Event] = {}
         self._hitl_confirm_results: Dict[str, str] = {}  # "approve" / "reject"
 
+        # V12: 回溯耗尽确认（用户选择 retry/rollback/stop）
+        self._backtrack_confirm_events: Dict[str, asyncio.Event] = {}
+        self._backtrack_confirm_results: Dict[str, str] = {}
+
+        # V12: 费用确认（用户选择 continue/stop）
+        self._cost_confirm_events: Dict[str, asyncio.Event] = {}
+        self._cost_confirm_results: Dict[str, str] = {}
+
+        # V12: 意图澄清（用户输入澄清文本）
+        self._intent_clarify_events: Dict[str, asyncio.Event] = {}
+        self._intent_clarify_results: Dict[str, str] = {}
+
     # ==================== Session 生命周期 ====================
 
     async def create_session(
@@ -298,6 +310,130 @@ class SessionService:
             ev.clear()
             self._hitl_confirm_events.pop(session_id, None)
             self._hitl_confirm_results.pop(session_id, None)
+
+    # ==================== V12: 回溯耗尽确认 ====================
+
+    def submit_backtrack_confirm(self, session_id: str, choice: str) -> None:
+        """
+        User submits backtrack-exhausted choice (retry / rollback / stop).
+
+        Args:
+            session_id: Session ID
+            choice: "retry" / "rollback" / "stop"
+        """
+        self._backtrack_confirm_results[session_id] = choice
+        ev = self._backtrack_confirm_events.get(session_id)
+        if ev:
+            ev.set()
+            logger.info(
+                f"回溯确认已提交: session_id={session_id}, choice={choice}"
+            )
+
+    async def wait_backtrack_confirm(
+        self, session_id: str, timeout: float = 300.0
+    ) -> str:
+        """
+        Wait for user backtrack-exhausted choice (executor awaits after yield).
+
+        Returns:
+            "retry" / "rollback" / "stop"; defaults to "stop" on timeout.
+        """
+        if session_id not in self._backtrack_confirm_events:
+            self._backtrack_confirm_events[session_id] = asyncio.Event()
+        ev = self._backtrack_confirm_events[session_id]
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return self._backtrack_confirm_results.get(session_id, "stop")
+        except asyncio.TimeoutError:
+            logger.warning(f"回溯确认超时（默认停止）: session_id={session_id}")
+            return "stop"
+        finally:
+            ev.clear()
+            self._backtrack_confirm_events.pop(session_id, None)
+            self._backtrack_confirm_results.pop(session_id, None)
+
+    # ==================== V12: 费用确认 ====================
+
+    def submit_cost_confirm(self, session_id: str, choice: str) -> None:
+        """
+        User submits cost-limit choice (continue / stop).
+
+        Args:
+            session_id: Session ID
+            choice: "continue" / "stop"
+        """
+        self._cost_confirm_results[session_id] = choice
+        ev = self._cost_confirm_events.get(session_id)
+        if ev:
+            ev.set()
+            logger.info(
+                f"费用确认已提交: session_id={session_id}, choice={choice}"
+            )
+
+    async def wait_cost_confirm(
+        self, session_id: str, timeout: float = 300.0
+    ) -> str:
+        """
+        Wait for user cost-limit choice (executor awaits after yield).
+
+        Returns:
+            "continue" / "stop"; defaults to "stop" on timeout.
+        """
+        if session_id not in self._cost_confirm_events:
+            self._cost_confirm_events[session_id] = asyncio.Event()
+        ev = self._cost_confirm_events[session_id]
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return self._cost_confirm_results.get(session_id, "stop")
+        except asyncio.TimeoutError:
+            logger.warning(f"费用确认超时（默认停止）: session_id={session_id}")
+            return "stop"
+        finally:
+            ev.clear()
+            self._cost_confirm_events.pop(session_id, None)
+            self._cost_confirm_results.pop(session_id, None)
+
+    # ==================== V12: 意图澄清 ====================
+
+    def submit_intent_clarify(self, session_id: str, text: str) -> None:
+        """
+        User submits clarification text for ambiguous intent.
+
+        Args:
+            session_id: Session ID
+            text: User clarification text
+        """
+        self._intent_clarify_results[session_id] = text
+        ev = self._intent_clarify_events.get(session_id)
+        if ev:
+            ev.set()
+            logger.info(
+                f"意图澄清已提交: session_id={session_id}, "
+                f"text={text[:50]}..."
+            )
+
+    async def wait_intent_clarify(
+        self, session_id: str, timeout: float = 300.0
+    ) -> str:
+        """
+        Wait for user intent clarification (executor awaits after yield).
+
+        Returns:
+            User clarification text; defaults to empty string on timeout.
+        """
+        if session_id not in self._intent_clarify_events:
+            self._intent_clarify_events[session_id] = asyncio.Event()
+        ev = self._intent_clarify_events[session_id]
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return self._intent_clarify_results.get(session_id, "")
+        except asyncio.TimeoutError:
+            logger.warning(f"意图澄清超时: session_id={session_id}")
+            return ""
+        finally:
+            ev.clear()
+            self._intent_clarify_events.pop(session_id, None)
+            self._intent_clarify_results.pop(session_id, None)
 
     async def stop_session(self, session_id: str) -> Dict[str, Any]:
         """

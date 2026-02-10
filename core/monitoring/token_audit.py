@@ -288,6 +288,23 @@ class TokenAuditor:
 
         return record
 
+    async def _write_to_log(self, record: TokenAuditRecord) -> None:
+        """
+        Write a token audit record to a JSON Lines billing log file.
+
+        File naming: {user_id}_{date}.jsonl (e.g. local_2026-02-10.jsonl)
+        """
+        try:
+            user_id = record.user_id or "unknown"
+            date_str = record.timestamp.strftime("%Y-%m-%d")
+            log_file = self.log_dir / f"{user_id}_{date_str}.jsonl"
+
+            line = record.model_dump_json(exclude_none=True) + "\n"
+            async with aiofiles.open(log_file, mode="a", encoding="utf-8") as f:
+                await f.write(line)
+        except Exception as e:
+            logger.warning(f"⚠️ 计费日志写入失败: {e}")
+
     def get_stats(
         self,
         *,
