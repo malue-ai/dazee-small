@@ -4,7 +4,6 @@ Prompt Builder - System Blocks 构建器
 职责：
 - 使用 Injector 编排器构建 system blocks
 - 管理多层缓存的 System Prompt
-- 用户画像检索（Mem0）
 - 任务复杂度判断
 
 架构位置：
@@ -18,10 +17,13 @@ Prompt Builder - System Blocks 构建器
     build_system_blocks_with_injector()
         ↓
     core.context.injectors.InjectorOrchestrator
+
+注意：
+- 用户画像检索（Mem0 + MEMORY.md）由 UserMemoryInjector 统一归口
+- prompt_builder 不再直接接触 Mem0，职责仅为 Injector 编排
 """
 
-import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from logger import get_logger
 
@@ -70,54 +72,6 @@ def get_task_complexity(intent: Optional["IntentResult"]):
     return complexity_map.get(complexity_str.lower(), TaskComplexity.MEDIUM)
 
 
-# Short-lived cache so Phase 1 and Phase 2 share the same Mem0 result
-# within a single request, avoiding a duplicate search.
-_profile_cache: Tuple[str, str, float, Optional[str]] = ("", "", 0.0, None)
-_PROFILE_CACHE_TTL = 10.0  # seconds
-
-
-def fetch_user_profile(user_id: str, user_query: str, skip_memory: bool = False) -> Optional[str]:
-    """
-    获取 Mem0 用户画像（同一请求内自动缓存复用）
-
-    Args:
-        user_id: 用户 ID
-        user_query: 用户查询（用于语义检索）
-        skip_memory: 是否跳过 Mem0 检索
-
-    Returns:
-        用户画像字符串，失败时返回 None
-    """
-    global _profile_cache
-
-    if skip_memory or not user_id or not user_query:
-        return None
-
-    # Check short-lived cache (same user + query within TTL)
-    cached_uid, cached_query, cached_ts, cached_result = _profile_cache
-    if (
-        cached_uid == user_id
-        and cached_query == user_query
-        and (time.time() - cached_ts) < _PROFILE_CACHE_TTL
-    ):
-        logger.debug(f"📝 Mem0 用户画像 (缓存命中): {len(cached_result or '')} 字符")
-        return cached_result
-
-    try:
-        from prompts.universal_agent_prompt import _fetch_user_profile
-
-        user_profile = _fetch_user_profile(user_id, user_query)
-        if user_profile:
-            logger.debug(f"📝 Mem0 用户画像: {len(user_profile)} 字符")
-
-        # Store in short-lived cache
-        _profile_cache = (user_id, user_query, time.time(), user_profile)
-        return user_profile
-    except Exception as e:
-        logger.warning(f"⚠️ Mem0 检索失败: {e}")
-        return None
-
-
 # ============================================================
 # V9.0+ Injector 编排器集成
 # ============================================================
@@ -163,7 +117,6 @@ async def build_system_blocks_with_injector(
 
     # 获取任务复杂度
     task_complexity = get_task_complexity(intent)
-    skip_memory = getattr(intent, "skip_memory", False)
 
     # 构建 InjectionContext
     context = InjectionContext(
@@ -180,13 +133,7 @@ async def build_system_blocks_with_injector(
         metadata=metadata or {},
     )
 
-    # 预加载用户画像（如果不跳过）
-    if not skip_memory and user_id and user_query:
-        user_profile = fetch_user_profile(user_id, user_query, skip_memory)
-        if user_profile:
-            context.set("user_profile", user_profile)
-
-    # 创建编排器并执行
+    # 创建编排器并执行（用户画像由 UserMemoryInjector 在 Phase 2 自行获取）
     orchestrator = create_default_orchestrator()
     system_blocks = await orchestrator.build_system_blocks(context)
 
@@ -223,7 +170,7 @@ async def build_user_context_with_injector(
     执行 Phase 2 Injectors，返回 user context 内容
 
     Phase 2 包括：
-    - UserMemoryInjector: 用户记忆
+    - UserMemoryInjector: 用户记忆（MEMORY.md + Mem0 融合）
     - PlaybookHintInjector: 匹配的 Playbook 策略提示
     - KnowledgeContextInjector: 本地知识库上下文
 
@@ -247,7 +194,6 @@ async def build_user_context_with_injector(
     )
 
     task_complexity = get_task_complexity(intent)
-    skip_memory = getattr(intent, "skip_memory", False)
 
     context = InjectionContext(
         user_id=user_id,
@@ -261,12 +207,7 @@ async def build_user_context_with_injector(
         history_messages=history_messages or [],
     )
 
-    # 预加载用户画像（如果不跳过）
-    if not skip_memory and user_id and user_query:
-        user_profile = fetch_user_profile(user_id, user_query, skip_memory)
-        if user_profile:
-            context.set("user_profile", user_profile)
-
+    # 用户画像由 UserMemoryInjector 在 inject() 中自行获取，无需预加载
     orchestrator = create_default_orchestrator()
     user_context = await orchestrator.build_user_context_content(context)
 
@@ -322,7 +263,6 @@ async def build_messages_with_injector(
 
     # 获取任务复杂度
     task_complexity = get_task_complexity(intent)
-    skip_memory = getattr(intent, "skip_memory", False)
 
     # 构建 InjectionContext
     context = InjectionContext(
@@ -339,13 +279,7 @@ async def build_messages_with_injector(
         metadata=metadata or {},
     )
 
-    # 预加载用户画像（如果不跳过）
-    if not skip_memory and user_id and user_query:
-        user_profile = fetch_user_profile(user_id, user_query, skip_memory)
-        if user_profile:
-            context.set("user_profile", user_profile)
-
-    # 创建编排器并执行
+    # 创建编排器并执行（用户画像由 UserMemoryInjector 在 Phase 2 自行获取）
     orchestrator = create_default_orchestrator()
     messages = await orchestrator.build_messages(
         context=context, user_message=user_message or user_query

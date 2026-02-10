@@ -438,7 +438,7 @@ async def test_user_memory_injector():
     print("验证 4: UserMemoryInjector 画像注入链路")
     print("=" * 60)
 
-    # 4a: 确认旧的错误路径已不存在，新路径可用
+    # 4a: 确认旧路径已废弃
     old_path_exists = False
     try:
         from core.memory.system.profile import fetch_user_profile  # noqa: F401
@@ -450,18 +450,8 @@ async def test_user_memory_injector():
         not old_path_exists,
     )
 
-    # 4b: 正确的导入路径
-    try:
-        from core.agent.context.prompt_builder import fetch_user_profile  # noqa: F401
-        check("core.agent.context.prompt_builder.fetch_user_profile 可导入", True)
-    except ImportError as e:
-        check(
-            "core.agent.context.prompt_builder.fetch_user_profile 可导入",
-            False,
-            str(e),
-        )
-
-    # 4c: 注入器初始化
+    # 4b: UserMemoryInjector 是记忆检索的唯一归口（fetch_user_profile 已删除）
+    # 注入器初始化
     try:
         from core.context.injectors.phase2.user_memory import UserMemoryInjector
 

@@ -247,21 +247,32 @@ class Mem0MemoryPool:
             raise
 
     def search(
-        self, user_id: str, query: str, limit: Optional[int] = None
+        self,
+        user_id: str,
+        query: str,
+        limit: Optional[int] = None,
+        min_score: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """
-        搜索用户相关记忆
+        混合搜索用户相关记忆（向量语义 + FTS5 关键词）
+
+        搜索策略：
+        1. 向量搜索（Mem0 原生）：语义相似度 top-2K
+        2. FTS5 关键词搜索：BM25 精确匹配 top-2K
+        3. 加权合并去重：score = 0.6 * vec_score + 0.4 * text_score
+        4. min_score 阈值过滤（方向 C：减少噪音）
 
         Args:
             user_id: 用户 ID
             query: 搜索查询（通常是用户当前问题）
             limit: 返回数量限制（默认使用配置值）
+            min_score: 最低分阈值（低于此分数的结果被过滤，默认 0.0 不过滤）
 
         Returns:
             记忆列表，每个记忆包含：
             - id: 记忆 ID
             - memory: 记忆内容
-            - score: 相关性分数
+            - score: 相关性分数（混合加权后）
             - user_id: 用户 ID
             - created_at: 创建时间
             - metadata: 元数据
@@ -273,27 +284,140 @@ class Mem0MemoryPool:
         try:
             search_limit = limit or self.config.default_search_limit
 
-            result = self.memory.search(
-                query=query, user_id=user_id, limit=search_limit
+            # ── 1. 向量语义搜索（Mem0 原生，取 2 倍量用于合并） ──
+            vec_memories = []
+            try:
+                result = self.memory.search(
+                    query=query, user_id=user_id, limit=search_limit * 2
+                )
+                if isinstance(result, dict) and "results" in result:
+                    vec_memories = result["results"]
+                elif isinstance(result, list):
+                    vec_memories = result
+            except Exception as e:
+                logger.warning(f"[Mem0Pool] 向量搜索失败 (降级): {e}")
+
+            # ── 2. FTS5 关键词搜索（补充通路） ──
+            fts_memories = []
+            try:
+                from core.memory.mem0.sqlite_vec_store import SqliteVecVectorStore
+
+                vector_store = self.memory.vector_store
+                if isinstance(vector_store, SqliteVecVectorStore):
+                    fts_results = vector_store.keyword_search(
+                        query=query,
+                        user_id=user_id,
+                        limit=search_limit * 2,
+                    )
+                    # 转换为 Mem0 标准格式
+                    for r in fts_results:
+                        fts_memories.append({
+                            "id": r.id,
+                            "memory": r.payload.get("data", r.payload.get("memory", "")),
+                            "score": r.score,
+                            "user_id": r.payload.get("user_id", user_id),
+                            "created_at": r.payload.get("created_at", ""),
+                            "metadata": r.payload.get("metadata", {}),
+                        })
+            except Exception as e:
+                logger.debug(f"[Mem0Pool] FTS5 搜索失败 (non-fatal): {e}")
+
+            # ── 3. 加权合并去重 ──
+            memories = self._merge_hybrid_results(
+                vec_memories, fts_memories, search_limit
             )
 
-            # 处理返回格式（Mem0 返回 {"results": [...]} 或直接列表）
-            if isinstance(result, dict) and "results" in result:
-                memories = result["results"]
-            elif isinstance(result, list):
-                memories = result
-            else:
-                memories = []
+            # ── 4. min_score 阈值过滤（方向 C） ──
+            if min_score > 0:
+                before_count = len(memories)
+                memories = [
+                    m for m in memories if m.get("score", 0) >= min_score
+                ]
+                filtered = before_count - len(memories)
+                if filtered > 0:
+                    logger.debug(
+                        f"[Mem0Pool] min_score={min_score} 过滤了 {filtered} 条低分记忆"
+                    )
 
             logger.info(
-                f"[Mem0Pool] 搜索完成: user_id={user_id}, "
-                f"query={query[:30]}..., 结果数={len(memories)}"
+                f"[Mem0Pool] 混合搜索完成: user_id={user_id}, "
+                f"query={query[:30]}..., "
+                f"vec={len(vec_memories)}, fts={len(fts_memories)}, "
+                f"merged={len(memories)}"
             )
             return memories
 
         except Exception as e:
             logger.error(f"[Mem0Pool] 搜索失败: {e}")
             return []
+
+    @staticmethod
+    def _merge_hybrid_results(
+        vec_memories: List[Dict[str, Any]],
+        fts_memories: List[Dict[str, Any]],
+        limit: int,
+        vector_weight: float = 0.6,
+        text_weight: float = 0.4,
+    ) -> List[Dict[str, Any]]:
+        """
+        混合搜索加权合并去重。
+
+        策略（与 knowledge/local_search.py 一致）：
+        1. 以 memory id 为 key 去重
+        2. 同 id 合并分数：score = vector_weight * vec_score + text_weight * fts_score
+        3. 按加权分数降序排列
+
+        Args:
+            vec_memories: 向量搜索结果
+            fts_memories: FTS5 搜索结果
+            limit: 返回数量上限
+            vector_weight: 向量搜索权重（默认 0.6）
+            text_weight: 关键词搜索权重（默认 0.4）
+
+        Returns:
+            合并后的记忆列表（按分数降序）
+        """
+        by_id: Dict[str, Dict[str, Any]] = {}
+
+        # 向量搜索结果
+        for m in vec_memories:
+            mid = m.get("id", "")
+            if not mid:
+                continue
+            by_id[mid] = {
+                **m,
+                "_vec_score": m.get("score", 0),
+                "_fts_score": 0.0,
+            }
+
+        # FTS5 搜索结果：合并或新增
+        for m in fts_memories:
+            mid = m.get("id", "")
+            if not mid:
+                continue
+            if mid in by_id:
+                by_id[mid]["_fts_score"] = m.get("score", 0)
+            else:
+                by_id[mid] = {
+                    **m,
+                    "_vec_score": 0.0,
+                    "_fts_score": m.get("score", 0),
+                }
+
+        # 加权合并 + 排序
+        merged = []
+        for mid, entry in by_id.items():
+            weighted_score = (
+                vector_weight * entry["_vec_score"]
+                + text_weight * entry["_fts_score"]
+            )
+            # 清理内部字段
+            result = {k: v for k, v in entry.items() if not k.startswith("_")}
+            result["score"] = weighted_score
+            merged.append(result)
+
+        merged.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return merged[:limit]
 
     def add(
         self,

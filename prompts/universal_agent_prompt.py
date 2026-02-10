@@ -1106,83 +1106,9 @@ React+Validation+Reflection循环是核心，Plan根据任务动态生成。
 """
 
 
-# ==================== Mem0 用户画像检索 ====================
-
-def _fetch_user_profile(user_id: str, user_query: str, max_memories: int = 10) -> str:
-    """
-    从 Mem0 检索用户相关记忆，格式化为 System Prompt 注入段
-    
-    Args:
-        user_id: 用户 ID
-        user_query: 用户当前查询（用于语义搜索）
-        max_memories: 最大返回记忆数量（增加到 10 条以提升召回覆盖）
-        
-    Returns:
-        格式化的用户画像字符串，如果检索失败则返回空字符串
-        
-    优化点：
-    - 增强 Prompt 注入格式，明确要求 Agent 引用具体信息
-    - 要求使用记忆中的人名、数字、时间，禁止模糊化
-    """
-    if not user_id:
-        return ""
-    
-    try:
-        from core.memory.mem0.pool import get_mem0_pool
-        
-        pool = get_mem0_pool()
-        memories = pool.search(
-            user_id=user_id,
-            query=user_query,
-            limit=max_memories
-        )
-        
-        if not memories:
-            return ""
-        
-        # 格式化记忆为 System Prompt 段落
-        memory_lines = []
-        for mem in memories:
-            content = mem.get("memory", "")
-            if content:
-                memory_lines.append(f"- {content}")
-        
-        if not memory_lines:
-            return ""
-        
-        # 增强的 Prompt 注入格式，明确要求引用具体信息
-        profile_section = f"""
----
-
-## 用户画像（重要！必须参考）
-
-以下是与用户当前问题相关的历史信息，回答时**必须**引用具体细节：
-
-### 关键信息
-{chr(10).join(memory_lines)}
-
-### 使用要求（强制执行）
-1. **人名**：直接使用记忆中的名字（如"老张"而非"那位负责人"、"某人"）
-2. **数字**：引用具体数值（如"150万"而非"一笔金额"、"较大金额"）
-3. **时间**：使用具体时间（如"周三"、"下午两点"而非"某天"、"某个时间"）
-4. **事件**：引用具体事件（如"永辉合同签约"而非"那件事"）
-5. **优先级**：如果记忆中有答案，**优先使用记忆内容**，不要猜测或编造
-
-⚠️ 禁止使用模糊词：某人、某天、那时候、一笔钱、那件事 等
-"""
-        return profile_section
-        
-    except ImportError:
-        # Mem0 模块未安装，静默跳过
-        return ""
-    except Exception as e:
-        # 检索失败不影响主流程，静默跳过
-        import logging
-        logging.getLogger("memory.mem0").warning(f"[Mem0] 用户画像检索失败: {e}")
-        return ""
-
-
 # ==================== 获取完整系统提示词 ====================
+# 注意：Mem0 用户画像检索已迁移到 UserMemoryInjector 统一归口
+# （core/context/injectors/phase2/user_memory.py）
 
 async def get_universal_agent_prompt(
     session_summary: Optional[str] = None,
@@ -1196,21 +1122,19 @@ async def get_universal_agent_prompt(
     Skills 提示词由路径 B 注入：SkillsLoader.build_skills_prompt() -> runtime_context["skills_prompt"]。
     不在此处拼接 Skills 内容。
 
+    注意：用户画像（Mem0 + MEMORY.md）由 UserMemoryInjector 在 Phase 2 统一注入，
+    本函数不再负责 Mem0 检索。
+
     Args:
         session_summary: Session 进度恢复摘要（框架自动注入）
-        user_id: 用户 ID（用于 Mem0 记忆检索）
-        user_query: 用户查询（用于 Mem0 语义搜索）
-        skip_memory_retrieval: 是否跳过 Mem0 记忆检索
+        user_id: 保留参数（向后兼容，不再使用）
+        user_query: 保留参数（向后兼容，不再使用）
+        skip_memory_retrieval: 保留参数（向后兼容，不再使用）
 
     Returns:
         完整的系统提示词
     """
     prompt = UNIVERSAL_AGENT_PROMPT
-
-    if user_id and user_query and not skip_memory_retrieval:
-        user_profile = _fetch_user_profile(user_id, user_query)
-        if user_profile:
-            prompt += user_profile
 
     if session_summary:
         prompt += "\n\n" + session_summary
