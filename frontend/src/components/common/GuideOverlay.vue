@@ -24,7 +24,7 @@ const isCheckingSkip = ref(false)
  * 处理跳过引导：
  * 1. 查找默认 xiaodazi 项目
  * 2. 通过 API 检查其是否已配置 AI 模型
- * 3. 如果没有模型 → 跳转到编辑引导（Step 10），不允许跳过
+ * 3. 如果没有模型 → 跳转到编辑引导（Step 11），不允许跳过
  * 4. 如果有模型 → 正常跳过
  */
 async function handleSkip() {
@@ -48,7 +48,7 @@ async function handleSkip() {
         if (!detail.model) {
           // 没有配置模型 → 强制进入编辑引导，不允许跳过
           guideStore.canSkip = false
-          guideStore.goToStep(10)
+          guideStore.goToStep(11)
           router.push({ name: 'chat' })
           return
         }
@@ -239,8 +239,16 @@ const tooltipStyle = computed(() => {
     }
   }
 
-  // 可滚动模式：tooltip 紧贴高亮区域底部下方，不遮挡高亮内容
+  // 可滚动模式：根据 position 决定 tooltip 在高亮区域上方或下方
   if (isScrollable.value && padRect.value) {
+    const pos = guideStore.currentConfig.position
+    if (pos === 'top') {
+      return {
+        bottom: `${window.innerHeight - padRect.value.top + GAP}px`,
+        left: '50%',
+        transform: 'translateX(-50%)',
+      }
+    }
     return {
       top: `${padRect.value.bottom + GAP}px`,
       left: '50%',

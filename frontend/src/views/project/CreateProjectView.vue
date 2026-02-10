@@ -720,9 +720,9 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
   }
   if (!canSend.value) return
 
-  // 引导 Step 7：用户点击发送后，暂时隐藏遮罩（等 AI 回复）
-  if (guideStore.isActive && guideStore.currentStep === 7) {
-    guideStore.setTarget(null)
+  // 引导 Step 8：发送后切换提示文案为等待状态
+  if (guideStore.isActive && guideStore.currentStep === 8) {
+    guideStore.tooltipOverride = 'AI 正在为你生成项目配置，请稍候...'
   }
 
   const text = inputText.value.trim()
@@ -775,10 +775,10 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
           parseAndFillForm(currentAssistantMsg.content)
           currentAssistantMsg = null
         }
-        // 引导 Step 7 → Step 8：AI 回复完成后，高亮配置区域
-        if (guideStore.isActive && guideStore.currentStep === 7) {
+        // 引导 Step 8 → Step 9：AI 回复完成后，高亮配置区域
+        if (guideStore.isActive && guideStore.currentStep === 8) {
           setTimeout(() => {
-            guideStore.nextStep() // → step 8
+            guideStore.nextStep() // → step 9
             nextTick(() => {
               if (configAreaRef.value) {
                 guideStore.setTarget(configAreaRef.value)
@@ -997,12 +997,12 @@ function startTypewriter(text: string) {
       clearInterval(typewriterTimer!)
       typewriterTimer = null
       isTypewriting.value = false
-      // 打字完成 → Step 7：高亮发送按钮
+      // 打字完成 → Step 8：高亮左侧对话面板，展示已输入的消息
       if (guideStore.isActive) {
-        guideStore.nextStep() // → step 7
+        guideStore.nextStep() // → step 8
         nextTick(() => {
-          if (sendBtnRef.value) {
-            guideStore.setTarget(sendBtnRef.value)
+          if (leftPanelRef.value) {
+            guideStore.setTarget(leftPanelRef.value)
           }
         })
       }
@@ -1011,6 +1011,33 @@ function startTypewriter(text: string) {
 }
 
 // ==================== 创建项目 ====================
+
+/**
+ * 检查默认项目 xiaodazi 是否需要配置 AI 模型。
+ * 用于创建成功后判断是否需要强制进入编辑引导。
+ * @returns true 表示 xiaodazi 存在且未配置模型
+ */
+async function checkXiaodaziNeedsModel(): Promise<boolean> {
+  try {
+    // 刷新 agent 列表，确保包含刚创建的项目
+    await agentStore.fetchList()
+
+    // 查找默认项目（优先匹配 xiaodazi）
+    const defaultAgent = agentStore.agents.find(a =>
+      a.name.includes('xiaodazi') || a.name.includes('小打字') || a.agent_id.includes('xiaodazi')
+    )
+
+    if (defaultAgent) {
+      const detail = await getAgentDetail(defaultAgent.agent_id)
+      return !detail.model
+    }
+
+    return false // 没有默认项目 → 无需配置
+  } catch (e) {
+    console.warn('⚠️ 检查默认项目模型配置失败:', e)
+    return false // 检查失败 → 不阻塞用户
+  }
+}
 
 /** 创建中状态 */
 const isCreating = ref(false)
@@ -1033,9 +1060,17 @@ async function handleCreate() {
     // Start tracking creation progress (global notification + WS)
     agentCreationStore.startCreation(agent_id, name)
 
-    // 引导：创建成功后推进到编辑项目阶段（Step 10）
+    // 引导：创建成功后检查默认项目 xiaodazi 是否需要配置模型
     if (guideStore.isActive) {
-      guideStore.nextStep() // → step 10
+      const needsModel = await checkXiaodaziNeedsModel()
+      if (needsModel) {
+        // xiaodazi 没有 AI 模型 → 强制进入编辑引导，不可跳过
+        guideStore.canSkip = false
+        guideStore.goToStep(11)
+      } else {
+        // xiaodazi 已有模型（或不存在）→ 引导完成
+        guideStore.completeGuide()
+      }
     }
 
     // 立即返回首页，通知卡片会在右上角显示创建进度
@@ -1068,8 +1103,8 @@ async function handleSave() {
     // Start tracking reload progress (global notification + WS)
     agentCreationStore.startUpdate(agent_id, name)
 
-    // 引导 Step 13：保存成功后完成引导
-    if (guideStore.isActive && guideStore.currentStep === 13) {
+    // 引导 Step 14：保存成功后完成引导
+    if (guideStore.isActive && guideStore.currentStep === 14) {
       guideStore.completeGuide()
     }
 
@@ -1135,8 +1170,8 @@ onMounted(() => {
     }]
     loadAgentData()
 
-    // 引导 Step 11：进入编辑页后，高亮左侧面板
-    if (guideStore.isActive && guideStore.currentStep === 11) {
+    // 引导 Step 12：进入编辑页后，高亮左侧面板
+    if (guideStore.isActive && guideStore.currentStep === 12) {
       nextTick(() => {
         if (leftPanelRef.value) {
           guideStore.setTarget(leftPanelRef.value)
@@ -1150,7 +1185,7 @@ onMounted(() => {
       content: '嗨！我会帮你创建一个新项目。你可以说，例如："创建一个帮助生成新产品视觉效果的AI"或是"创建一个帮助格式化代码的助手。"\n\n你想要做什么？'
     }]
 
-    if (guideStore.isActive && guideStore.currentStep === 6) {
+    if (guideStore.isActive && guideStore.currentStep === 7) {
       // 引导模式：延迟启动打字机效果
       setTimeout(() => startTypewriter('创建一个会议纪要项目'), 600)
     } else {
@@ -1177,8 +1212,8 @@ onUnmounted(() => {
 // 引导步骤切换时设置高亮目标
 watch(() => guideStore.currentStep, (step) => {
   if (!guideStore.isActive) return
-  if (step === 8) {
-    // Step 8：高亮配置区域
+  if (step === 9) {
+    // Step 9：高亮配置区域
     nextTick(() => {
       if (configAreaRef.value) {
         guideStore.setTarget(configAreaRef.value)
@@ -1191,12 +1226,12 @@ watch(() => guideStore.currentStep, (step) => {
       }
       return true
     })
-  } else if (step === 9) {
-    // Step 9：高亮"创建"按钮
-    // 校验不通过时回退到 Step 8（配置区域）
+  } else if (step === 10) {
+    // Step 10：高亮"创建"按钮
+    // 校验不通过时回退到 Step 9（配置区域）
     if (!canCreate.value) {
       nextTick(() => {
-        guideStore.goToStep(8, '请先完善配置：选择 AI 模型后再继续')
+        guideStore.goToStep(9, '请先完善配置：选择 AI 模型后再继续')
       })
       return
     }
@@ -1205,15 +1240,15 @@ watch(() => guideStore.currentStep, (step) => {
         guideStore.setTarget(createBtnRef.value)
       }
     })
-  } else if (step === 11) {
-    // Step 11：高亮左侧面板（自然语言修改）
+  } else if (step === 12) {
+    // Step 12：高亮左侧面板（自然语言修改）
     nextTick(() => {
       if (leftPanelRef.value) {
         guideStore.setTarget(leftPanelRef.value)
       }
     })
-  } else if (step === 12) {
-    // Step 12：高亮右侧面板（表单修改 + 选择模型）
+  } else if (step === 13) {
+    // Step 13：高亮右侧面板（表单修改 + 选择模型）
     // 确保切到配置标签
     activeTab.value = 'config'
     nextTick(() => {
@@ -1228,12 +1263,12 @@ watch(() => guideStore.currentStep, (step) => {
       }
       return true
     })
-  } else if (step === 13) {
-    // Step 13：高亮"保存"按钮
-    // 校验不通过时回退到 Step 12（右侧面板）
+  } else if (step === 14) {
+    // Step 14：高亮"保存"按钮
+    // 校验不通过时回退到 Step 13（右侧面板）
     if (!canCreate.value) {
       nextTick(() => {
-        guideStore.goToStep(12, '请先完善配置：选择 AI 模型后再继续')
+        guideStore.goToStep(13, '请先完善配置：选择 AI 模型后再继续')
       })
       return
     }

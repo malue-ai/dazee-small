@@ -214,7 +214,7 @@
         </div>
 
         <!-- ==================== 语义搜索 ==================== -->
-        <div>
+        <div ref="semanticSearchRef">
           <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
             语义搜索
           </h2>
@@ -672,6 +672,7 @@ function isMaskedKey(key: string): boolean {
 const saveBtnRef = ref<HTMLElement | null>(null)
 const backToChatRef = ref<HTMLElement | null>(null)
 const providerSectionRef = ref<HTMLElement | null>(null)
+const semanticSearchRef = ref<HTMLElement | null>(null)
 const providerCardRefs = reactive<Record<string, HTMLElement | null>>({})
 
 function setProviderCardRef(name: string, el: any) {
@@ -880,10 +881,10 @@ async function saveSettings() {
       guideStore.canSkip = true
     }
     if (guideStore.isActive && guideStore.currentStep === 3) {
-      guideStore.nextStep() // → step 4
+      guideStore.nextStep() // → step 4（语义搜索）
       nextTick(() => {
-        if (backToChatRef.value) {
-          guideStore.setTarget(backToChatRef.value)
+        if (semanticSearchRef.value) {
+          guideStore.setTarget(semanticSearchRef.value)
         }
       })
     }
@@ -899,8 +900,8 @@ async function saveSettings() {
 
 /** 返回聊天 */
 function handleBackToChat() {
-  if (guideStore.isActive && guideStore.currentStep === 4) {
-    guideStore.nextStep() // → step 5
+  if (guideStore.isActive && guideStore.currentStep === 5) {
+    guideStore.nextStep() // → step 6
   }
   router.push('/')
 }
@@ -939,6 +940,9 @@ function applyGuideTarget(step: number) {
       if (saveBtnRef.value) guideStore.setTarget(saveBtnRef.value)
       break
     case 4:
+      if (semanticSearchRef.value) guideStore.setTarget(semanticSearchRef.value)
+      break
+    case 5:
       if (backToChatRef.value) guideStore.setTarget(backToChatRef.value)
       break
   }

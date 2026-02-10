@@ -89,18 +89,6 @@
             <Plus class="w-4 h-4" />
           </button>
 
-          <!-- 本地工作区切换按钮 -->
-          <button 
-            @click="showLocalWorkspace = !showLocalWorkspace"
-            class="flex-shrink-0 p-1.5 rounded-md transition-colors"
-            :class="showLocalWorkspace 
-              ? 'bg-primary/10 text-primary' 
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
-            title="工作区文件夹"
-          >
-            <FolderOpen class="w-4 h-4" />
-          </button>
-
           <!-- 历史记录按钮 -->
           <div ref="historyDropdownRef" class="relative flex-shrink-0">
             <button 
@@ -144,17 +132,29 @@
                     </div>
                     <!-- 删除按钮（hover 时显示，真正删除对话记录） -->
                     <button
-                      class="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-all flex-shrink-0"
+                      class="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-all flex-shrink-0"
                       title="删除对话"
                       @click.stop="handleDeleteFromHistory(convId)"
                     >
-                      <Trash2 class="w-3.5 h-3.5" />
+                      <Trash2 class="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               </div>
             </Transition>
           </div>
+
+          <!-- 本地工作区切换按钮 -->
+          <button 
+            @click="showLocalWorkspace = !showLocalWorkspace"
+            class="flex-shrink-0 p-1.5 rounded-md transition-colors"
+            :class="showLocalWorkspace 
+              ? 'bg-primary/10 text-primary' 
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+            title="工作区文件夹"
+          >
+            <FolderOpen class="w-4 h-4" />
+          </button>
         </div>
 
         <!-- 顶部导航栏 (已移除) -->
@@ -378,7 +378,7 @@
       :type="simpleModal.type"
       :confirm-text="simpleModal.confirmText"
       :show-cancel="simpleModal.showCancel"
-      @confirm="simpleModal.onConfirm"
+      @confirm="handleSimpleModalConfirm"
       @cancel="handleSimpleModalCancel"
     />
   </div>
@@ -461,8 +461,10 @@ const simpleModal = ref({
   type: 'confirm' as 'confirm' | 'warning' | 'info' | 'error',
   confirmText: '确定',
   showCancel: true,
-  onConfirm: () => {},
 })
+
+/** 独立存储 resolve 回调，避免挂在 reactive proxy 上丢失 */
+let _modalResolve: ((value: boolean) => void) | null = null
 
 function showConfirm(options: {
   title?: string
@@ -471,7 +473,13 @@ function showConfirm(options: {
   confirmText?: string
   showCancel?: boolean
 }): Promise<boolean> {
+  // 如果上一个弹窗还悬挂，先 resolve(false) 防止 Promise 泄漏
+  if (_modalResolve) {
+    _modalResolve(false)
+    _modalResolve = null
+  }
   return new Promise((resolve) => {
+    _modalResolve = resolve
     simpleModal.value = {
       show: true,
       title: options.title || '确认操作',
@@ -479,30 +487,18 @@ function showConfirm(options: {
       type: options.type || 'confirm',
       confirmText: options.confirmText || '确定',
       showCancel: options.showCancel !== false,
-      onConfirm: () => {
-        simpleModal.value.show = false
-        resolve(true)
-      },
     }
-    // cancel 回调在模板里直接处理
-    const origOnConfirm = simpleModal.value.onConfirm
-    simpleModal.value.onConfirm = () => {
-      origOnConfirm()
-    }
-    // 监听 cancel（通过 watch show 变化实现）
-    const cancelHandler = () => {
-      simpleModal.value.show = false
-      resolve(false)
-    }
-    // 存到一个临时变量供模板使用
-    ;(simpleModal.value as any)._cancelHandler = cancelHandler
   })
 }
 
+function handleSimpleModalConfirm() {
+  simpleModal.value.show = false
+  if (_modalResolve) { _modalResolve(true); _modalResolve = null }
+}
+
 function handleSimpleModalCancel() {
-  const handler = (simpleModal.value as any)._cancelHandler
-  if (handler) handler()
-  else simpleModal.value.show = false
+  simpleModal.value.show = false
+  if (_modalResolve) { _modalResolve(false); _modalResolve = null }
 }
 
 // Refs
@@ -651,17 +647,15 @@ onMounted(async () => {
     guideStore.startGuide()
   }
 
-  // 从设置页返回时，Step 已在 SettingsView 推进到 5，确保侧边栏展开
-  if (guideStore.isActive && guideStore.currentStep === 5) {
+  // 从设置页返回时，Step 已在 SettingsView 推进到 6，确保侧边栏展开
+  if (guideStore.isActive && guideStore.currentStep === 6) {
     sidebarCollapsed.value = false
   }
 
-  // 从创建项目页返回时 或 跳过引导检测到无模型时，Step 10：确保侧边栏展开
-  if (guideStore.isActive && guideStore.currentStep === 10) {
+  // 默认项目缺少模型时进入 Step 11：确保侧边栏展开
+  // canSkip 已在触发处（handleCreate / GuideOverlay.handleSkip）设为 false，此处不修改
+  if (guideStore.isActive && guideStore.currentStep === 11) {
     sidebarCollapsed.value = false
-    // 注意：canSkip 不在此处修改
-    // - 正常流程（1→9→10）：canSkip 在 SettingsView 中已设为 true
-    // - 强制编辑（跳过引导→检测无模型→10）：canSkip 由 GuideOverlay.handleSkip 设为 false
   }
 
   // 恢复上次保存的工作区文件夹
@@ -985,8 +979,8 @@ function handleNavigate(path: string): void {
     if (guideStore.currentStep === 1 && path === '/settings') {
       guideStore.nextStep()
     }
-    // Step 5 → 6：点击"新建项目"，进入创建页
-    if (guideStore.currentStep === 5 && path === '/create-project') {
+    // Step 6 → 7：点击"新建项目"，进入创建页
+    if (guideStore.currentStep === 6 && path === '/create-project') {
       guideStore.nextStep()
     }
   }

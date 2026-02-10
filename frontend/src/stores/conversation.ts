@@ -240,8 +240,9 @@ export const useConversationStore = defineStore('conversation', () => {
   /**
    * 删除会话
    * @param conversationId - 会话 ID
+   * @returns true 表示后端删除成功，false 表示后端失败（本地已清理）
    */
-  async function remove(conversationId: string): Promise<void> {
+  async function remove(conversationId: string): Promise<boolean> {
     // 先执行本地 UI 清理，确保界面立即刷新（不依赖后端响应）
     if (currentId.value === conversationId) {
       currentId.value = null
@@ -250,12 +251,14 @@ export const useConversationStore = defineStore('conversation', () => {
     const { [conversationId]: _, ...rest } = messagesMap.value
     messagesMap.value = rest
 
-    // 再调后端接口（失败仅打日志，不影响前端状态）
+    // 再调后端接口
     try {
       await chatApi.deleteConversation(conversationId)
       console.log('✅ 会话已删除')
+      return true
     } catch (error) {
       console.warn('⚠️ 后端删除会话失败（本地已清理）:', error)
+      return false
     }
   }
 

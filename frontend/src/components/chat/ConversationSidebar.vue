@@ -249,7 +249,7 @@ const guideStore = useGuideStore()
 const createProjectBtnRef = ref<HTMLElement | null>(null)
 const settingsBtnRef = ref<HTMLElement | null>(null)
 
-/** Agent 编辑按钮 ref 映射（用于引导 Step 10 高亮） */
+/** Agent 编辑按钮 ref 映射（用于引导 Step 11 高亮） */
 const editBtnRefs = new Map<string, HTMLElement>()
 
 function setEditBtnRef(agentId: string, el: Element | ComponentPublicInstance | null) {
@@ -267,16 +267,16 @@ function findDefaultAgent(): typeof props.agents[number] | undefined {
   ) || props.agents[0]
 }
 
-/** 判断某个 Agent 是否为引导步骤 10 的目标（用于保持编辑按钮可见） */
+/** 判断某个 Agent 是否为引导步骤 11 的目标（用于保持编辑按钮可见） */
 function isGuideEditTarget(agent: typeof props.agents[number]): boolean {
-  if (!guideStore.isActive || guideStore.currentStep !== 10) return false
+  if (!guideStore.isActive || guideStore.currentStep !== 11) return false
   const target = findDefaultAgent()
   return !!target && target.agent_id === agent.agent_id
 }
 
-/** 设置步骤 10 的高亮目标 */
-function setupGuideStep10() {
-  if (!guideStore.isActive || guideStore.currentStep !== 10) return
+/** 设置步骤 11 的高亮目标 */
+function setupGuideStep11() {
+  if (!guideStore.isActive || guideStore.currentStep !== 11) return
   const target = findDefaultAgent()
   if (!target) return
   nextTick(() => {
@@ -287,23 +287,23 @@ function setupGuideStep10() {
   })
 }
 
-/** 编辑按钮点击处理（引导步骤 10 推进） */
+/** 编辑按钮点击处理（引导步骤 11 推进） */
 function handleEditClick(agentId: string) {
-  if (guideStore.isActive && guideStore.currentStep === 10) {
-    guideStore.nextStep() // → step 11
+  if (guideStore.isActive && guideStore.currentStep === 11) {
+    guideStore.nextStep() // → step 12
   }
   emit('edit-agent', agentId)
 }
 
-// 引导 Step 1：高亮设置按钮 | Step 5：高亮"新建项目"按钮 | Step 10：高亮编辑按钮
+// 引导 Step 1：高亮设置按钮 | Step 6：高亮"新建项目"按钮 | Step 11：高亮编辑按钮
 onMounted(() => {
   if (guideStore.isActive) {
     if (guideStore.currentStep === 1 && settingsBtnRef.value) {
       guideStore.setTarget(settingsBtnRef.value)
-    } else if (guideStore.currentStep === 5 && createProjectBtnRef.value) {
+    } else if (guideStore.currentStep === 6 && createProjectBtnRef.value) {
       guideStore.setTarget(createProjectBtnRef.value)
-    } else if (guideStore.currentStep === 10) {
-      setupGuideStep10()
+    } else if (guideStore.currentStep === 11) {
+      setupGuideStep11()
     }
   }
 })
@@ -311,21 +311,21 @@ onMounted(() => {
 watch(() => guideStore.currentStep, (step) => {
   if (step === 1 && settingsBtnRef.value) {
     guideStore.setTarget(settingsBtnRef.value)
-  } else if (step === 5 && createProjectBtnRef.value) {
+  } else if (step === 6 && createProjectBtnRef.value) {
     guideStore.setTarget(createProjectBtnRef.value)
-  } else if (step === 10) {
-    setupGuideStep10()
+  } else if (step === 11) {
+    setupGuideStep11()
   }
 })
 
-// 监听 agents 列表变化：步骤 10 时 Agent 列表可能异步加载完成，
+// 监听 agents 列表变化：步骤 11 时 Agent 列表可能异步加载完成，
 // 需要在 v-for 重新渲染注册 ref 后再设置高亮目标
 watch(() => props.agents.length, () => {
-  if (guideStore.isActive && guideStore.currentStep === 10) {
+  if (guideStore.isActive && guideStore.currentStep === 11) {
     // agents 变化后 DOM 需要下一帧更新，ref 回调才会执行
     nextTick(() => {
       nextTick(() => {
-        setupGuideStep10()
+        setupGuideStep11()
       })
     })
   }
