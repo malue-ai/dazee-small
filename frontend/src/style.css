@@ -616,6 +616,16 @@ code.code-snippet {
   border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
+/* 不定进度条动画（语义搜索模型下载等） */
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); width: 40%; }
+  50% { width: 60%; }
+  100% { transform: translateX(250%); width: 40%; }
+}
+.animate-indeterminate {
+  animation: indeterminate 1.8s ease-in-out infinite;
+}
+
 /* 工作区拖拽时：强制全局 grabbing 光标 + 禁止文字选择 */
 body.workspace-dragging,
 body.workspace-dragging * {

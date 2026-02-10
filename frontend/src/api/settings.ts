@@ -45,10 +45,14 @@ export interface EmbeddingStatus {
   current_provider: string | null
   provider_setting: string
   local_available: boolean
+  local_backend: string
+  model_downloaded: boolean
   openai_available: boolean
   local_install_hint: string
   local_model_name: string
+  local_model_size: string
   local_model_description: string
+  models_dir: string
   recommendation: string
 }
 
@@ -105,18 +109,47 @@ export interface SemanticSearchSetupResult {
   success: boolean
   mode: string
   needs_download: boolean
+  downloading: boolean
   download_result?: EmbeddingDownloadResult | null
   error?: string | null
 }
 
+export interface SemanticDownloadStatus {
+  status: 'idle' | 'downloading' | 'done' | 'error'
+  mode: string | null
+  error: string | null
+  source: string | null
+  elapsed_seconds: number | null
+}
+
 /**
- * 一键配置语义搜索（本地模型模式）
+ * 一键配置语义搜索
  *
- * 自动下载 GGUF 模型 + 启用语义搜索，无需手动 pip install
+ * 选择 local 模式时，后端会启动后台下载任务并立即返回，
+ * 前端通过 getSemanticDownloadStatus() 轮询下载进度。
  */
 export async function setupSemanticSearch(mode: 'disabled' | 'local' | 'cloud'): Promise<SemanticSearchSetupResult> {
   const { data } = await api.post('/v1/settings/semantic-search/setup', { mode })
   return data.data
+}
+
+/**
+ * 查询后台模型下载状态
+ *
+ * 前端轮询此接口跟踪下载进度，即使离开设置页再回来也能恢复状态。
+ */
+export async function getSemanticDownloadStatus(): Promise<SemanticDownloadStatus> {
+  const { data } = await api.get('/v1/settings/semantic-search/download-status')
+  return data.data
+}
+
+/**
+ * 重置下载状态为 idle
+ *
+ * 前端确认完成/失败后调用，清理状态以便下次操作。
+ */
+export async function resetSemanticDownloadStatus(): Promise<void> {
+  await api.post('/v1/settings/semantic-search/download-status/reset')
 }
 
 /**
@@ -125,6 +158,8 @@ export async function setupSemanticSearch(mode: 'disabled' | 'local' | 'cloud'):
  * 适用于：之前选了 disabled，现在想补装本地模型
  */
 export async function downloadEmbeddingModel(): Promise<EmbeddingDownloadResult> {
-  const { data } = await api.post('/v1/settings/embedding-model/download')
+  const { data } = await api.post('/v1/settings/embedding-model/download', null, {
+    timeout: 600_000, // 模型下载可能需要几分钟
+  })
   return data.data
 }

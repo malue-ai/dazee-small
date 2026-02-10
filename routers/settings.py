@@ -18,9 +18,11 @@ from logger import get_logger
 from services.settings_service import (
     download_embedding_model,
     get_embedding_status,
+    get_semantic_download_status,
     get_settings,
     get_settings_schema,
     get_settings_status,
+    reset_download_state,
     setup_semantic_search,
     update_settings,
 )
@@ -172,13 +174,58 @@ async def setup_semantic_search_mode(body: SemanticSearchSetupRequest) -> Dict[s
     }
 
 
+@router.get("/semantic-search/download-status")
+async def read_semantic_download_status() -> Dict[str, Any]:
+    """
+    查询后台模型下载任务状态
+
+    前端轮询此接口以跟踪下载进度，即使离开设置页再回来也能恢复状态。
+
+    返回:
+    - status: "idle" | "downloading" | "done" | "error"
+    - mode: 触发下载时的模式
+    - error: 错误信息（仅 status=error 时有值）
+    - source: 下载源（"mirror" | "official"，仅 status=done 时有值）
+    - elapsed_seconds: 已耗时（秒）
+    """
+    return {
+        "success": True,
+        "data": get_semantic_download_status(),
+    }
+
+
+@router.post("/semantic-search/download-status/reset")
+async def reset_semantic_download_status() -> Dict[str, Any]:
+    """
+    重置下载状态为 idle
+
+    前端确认完成/失败后调用，清理状态以便下次操作。
+    """
+    reset_download_state()
+    return {"success": True}
+
+
 @router.post("/embedding-model/download")
 async def trigger_embedding_model_download() -> Dict[str, Any]:
     """
     单独触发模型下载（补充端点）
 
     适用于：之前选了 disabled，现在想补装本地模型。
+    如果后台已有下载任务正在进行，直接返回当前状态。
     """
+    bg_status = get_semantic_download_status()
+    if bg_status["status"] == "downloading":
+        return {
+            "success": True,
+            "data": {
+                "success": True,
+                "model_path": None,
+                "source": None,
+                "error": None,
+                "message": "后台下载已在进行中",
+            },
+        }
+
     result = await download_embedding_model()
     return {
         "success": result["success"],

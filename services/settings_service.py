@@ -10,7 +10,9 @@
 - API Key 原文返回（桌面端本地运行，无需脱敏）
 """
 
+import asyncio
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -21,6 +23,18 @@ from logger import get_logger
 from utils.app_paths import get_bundle_dir, get_user_config_path
 
 logger = get_logger("settings_service")
+
+# ==================== 后台下载任务状态 ====================
+
+_download_state: Dict[str, Any] = {
+    "status": "idle",       # idle | downloading | done | error
+    "mode": None,           # 触发下载时的模式
+    "error": None,          # 错误信息
+    "result": None,         # 下载结果 (download_result dict)
+    "started_at": None,     # 开始时间戳
+    "finished_at": None,    # 完成时间戳
+}
+_download_task: Optional[asyncio.Task] = None
 
 
 def _load_dotenv_fallback() -> None:
@@ -346,13 +360,11 @@ async def get_embedding_status() -> Dict[str, Any]:
             "recommendation": str,
         }
     """
-    settings = _load_settings()
-    knowledge_settings = settings.get("knowledge", {})
-
-    semantic_enabled = str(
-        knowledge_settings.get("SEMANTIC_SEARCH_ENABLED", "false")
-    ).lower() in ("true", "1", "yes")
-    provider_setting = knowledge_settings.get("EMBEDDING_PROVIDER", "auto")
+    # 从实例 memory.yaml 读取语义搜索配置（与 knowledge_service 同源）
+    from services.knowledge_service import _load_knowledge_config
+    knowledge_config = _load_knowledge_config()
+    semantic_enabled = knowledge_config.get("semantic_enabled", False)
+    provider_setting = knowledge_config.get("embedding_provider", "auto")
 
     # Check local availability (GGUF preferred, sentence-transformers fallback)
     local_available = False
@@ -375,31 +387,39 @@ async def get_embedding_status() -> Dict[str, Any]:
     # Check OpenAI availability
     openai_available = bool(os.getenv("OPENAI_API_KEY"))
 
-    # Determine current effective provider
-    current_provider = None
-    if semantic_enabled:
-        if provider_setting == "auto":
-            if local_available:
-                current_provider = "local"
-            elif openai_available:
-                current_provider = "openai"
-        elif provider_setting == "local" and local_available:
-            current_provider = "local"
-        elif provider_setting == "openai" and openai_available:
-            current_provider = "openai"
-
-    # Model download status
+    # Model download status (checked early — needed for provider resolution)
     from core.knowledge.embeddings import is_gguf_model_downloaded
     from utils.app_paths import get_shared_models_dir
 
     model_downloaded = is_gguf_model_downloaded()
     models_dir = str(get_shared_models_dir())
 
+    # Local model is truly ready only when both dependency AND model file exist
+    local_ready = local_available and model_downloaded
+
+    # Determine current effective provider
+    # Cross-check: config says "local" but model file deleted → not actually working
+    current_provider = None
+    if semantic_enabled:
+        if provider_setting == "auto":
+            if local_ready:
+                current_provider = "local"
+            elif openai_available:
+                current_provider = "openai"
+        elif provider_setting == "local" and local_ready:
+            current_provider = "local"
+        elif provider_setting == "openai" and openai_available:
+            current_provider = "openai"
+
+    # If config says enabled but no provider is actually working, report as disabled
+    if semantic_enabled and current_provider is None:
+        semantic_enabled = False
+
     # Recommendation for user
     if model_downloaded:
         recommendation = "本地模型已就绪，可开启语义搜索"
-    elif local_available:
-        recommendation = "依赖已安装，开启语义搜索后会下载模型（438MB）"
+    elif local_available and not model_downloaded:
+        recommendation = "依赖已安装，需要下载模型（438MB）才能使用本地语义搜索"
     elif openai_available:
         recommendation = "可使用 OpenAI 云端语义搜索，或安装本地模型离线使用"
     else:
@@ -479,9 +499,11 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
     - "local":    download 438MB GGUF model, offline, recommended
     - "cloud":    use OpenAI embedding API, needs API key
 
-    Write path: instances/{AGENT_INSTANCE}/config.yaml → knowledge section.
-    After config + download, reloads runtime singletons so changes take effect
-    WITHOUT restart.
+    When local mode needs model download, the download runs as a background
+    asyncio task. The API returns immediately with ``"downloading": True``,
+    and the frontend polls ``get_semantic_download_status()`` for progress.
+    Once download finishes, the backend auto-applies the config (reloads
+    runtime singletons) without requiring the user to stay on the page.
 
     Args:
         mode: "disabled" | "local" | "cloud"
@@ -491,6 +513,7 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
             "success": bool,
             "mode": str,
             "needs_download": bool,
+            "downloading": bool,
             "download_result": {...} | None,
             "error": str | None,
         }
@@ -500,6 +523,7 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
             "success": False,
             "mode": mode,
             "needs_download": False,
+            "downloading": False,
             "download_result": None,
             "error": f"Invalid mode: {mode}. Must be 'disabled', 'local', or 'cloud'.",
         }
@@ -513,26 +537,26 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
         from core.knowledge.embeddings import is_gguf_model_downloaded
 
         if not is_gguf_model_downloaded():
-            download_result = await download_embedding_model()
-            if not download_result["success"]:
-                return {
-                    "success": False,
-                    "mode": mode,
-                    "needs_download": True,
-                    "download_result": download_result,
-                    "error": download_result.get("error"),
-                }
-        else:
-            download_result = None
+            # Launch background download task and return immediately
+            _start_background_download(mode)
+            return {
+                "success": True,
+                "mode": mode,
+                "needs_download": True,
+                "downloading": True,
+                "download_result": None,
+                "error": None,
+            }
 
-        # Model ready → reload runtime singletons
+        # Model already exists → reload runtime singletons directly
         await _reload_semantic_components()
 
         return {
             "success": True,
             "mode": mode,
-            "needs_download": download_result is not None,
-            "download_result": download_result,
+            "needs_download": False,
+            "downloading": False,
+            "download_result": None,
             "error": None,
         }
 
@@ -545,6 +569,7 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
             "success": has_key,
             "mode": mode,
             "needs_download": False,
+            "downloading": False,
             "download_result": None,
             "error": None if has_key else "需要先配置 OpenAI API Key",
         }
@@ -555,9 +580,135 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
         "success": True,
         "mode": mode,
         "needs_download": False,
+        "downloading": False,
         "download_result": None,
         "error": None,
     }
+
+
+# ==================== 后台下载任务管理 ====================
+
+
+def _start_background_download(mode: str) -> None:
+    """
+    Launch an asyncio background task that downloads the embedding model
+    and auto-applies the semantic search config when done.
+
+    Safe to call multiple times — if a download is already in progress,
+    the call is a no-op.
+    """
+    global _download_task, _download_state
+
+    # Already downloading → no-op
+    if _download_state["status"] == "downloading" and _download_task and not _download_task.done():
+        logger.info("Background download already in progress, skipping duplicate launch")
+        return
+
+    _download_state.update({
+        "status": "downloading",
+        "mode": mode,
+        "error": None,
+        "result": None,
+        "started_at": time.time(),
+        "finished_at": None,
+    })
+
+    _download_task = asyncio.create_task(
+        _background_download_and_apply(mode),
+        name="embedding_model_download",
+    )
+    logger.info("Background embedding model download task started")
+
+
+async def _background_download_and_apply(mode: str) -> None:
+    """
+    Background coroutine: download model → reload semantic components.
+
+    Updates ``_download_state`` throughout so the frontend can poll status.
+    """
+    global _download_state
+    try:
+        result = await download_embedding_model()
+        if result["success"]:
+            # Auto-apply: reload runtime singletons
+            await _reload_semantic_components()
+            _download_state.update({
+                "status": "done",
+                "result": result,
+                "error": None,
+                "finished_at": time.time(),
+            })
+            logger.info("Background download completed and semantic search applied")
+        else:
+            _download_state.update({
+                "status": "error",
+                "result": result,
+                "error": result.get("error", "下载失败"),
+                "finished_at": time.time(),
+            })
+            logger.error(f"Background download failed: {result.get('error')}")
+    except Exception as e:
+        _download_state.update({
+            "status": "error",
+            "result": None,
+            "error": str(e),
+            "finished_at": time.time(),
+        })
+        logger.error(f"Background download exception: {e}", exc_info=True)
+
+
+def get_semantic_download_status() -> Dict[str, Any]:
+    """
+    Return current background download task status.
+
+    Called by the frontend poll endpoint.
+
+    Returns:
+        {
+            "status": "idle" | "downloading" | "done" | "error",
+            "mode": str | None,
+            "error": str | None,
+            "source": str | None,
+            "elapsed_seconds": float | None,
+        }
+    """
+    elapsed = None
+    if _download_state["started_at"]:
+        end = _download_state["finished_at"] or time.time()
+        elapsed = round(end - _download_state["started_at"], 1)
+
+    source = None
+    if _download_state["result"] and isinstance(_download_state["result"], dict):
+        source = _download_state["result"].get("source")
+
+    return {
+        "status": _download_state["status"],
+        "mode": _download_state["mode"],
+        "error": _download_state["error"],
+        "source": source,
+        "elapsed_seconds": elapsed,
+    }
+
+
+def reset_download_state() -> None:
+    """Reset download state to idle (called after frontend acknowledges completion).
+
+    No-op if a download is currently in progress — prevents accidental state loss.
+    """
+    global _download_state, _download_task
+    if _download_state["status"] == "downloading":
+        logger.warning("Attempted to reset download state while downloading, ignored")
+        return
+
+    _download_state.update({
+        "status": "idle",
+        "mode": None,
+        "error": None,
+        "result": None,
+        "started_at": None,
+        "finished_at": None,
+    })
+    _download_task = None
 
 
 async def _write_instance_memory_config(mode: str) -> None:
@@ -607,15 +758,15 @@ async def _reload_semantic_components() -> None:
     Reload all runtime singletons that depend on semantic search config.
 
     Called after setup_semantic_search() so changes take effect without restart.
+    Destroys existing singletons; they'll be re-created with new config on next use.
     """
     # 1. Reset KnowledgeManager singleton → re-reads instance config on next use
     from services.knowledge_service import reload_knowledge_manager
     await reload_knowledge_manager()
 
-    # 2. Reset IntentCache EmbeddingService → re-probes model availability
-    from core.routing.intent_cache import get_intent_cache
-    cache = get_intent_cache()
-    cache._embedding_service._unavailable = False
-    cache._embedding_service._provider = None
+    # 2. Reset IntentCache singleton → re-creates with new config (including EmbeddingService)
+    #    不直接操作内部私有属性，避免 _embedding_service 为 None 时崩溃
+    from core.routing.intent_cache import IntentSemanticCache
+    IntentSemanticCache.reset_instance()
 
     logger.info("Semantic components reloaded")

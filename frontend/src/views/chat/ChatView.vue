@@ -678,11 +678,34 @@ onUnmounted(() => {
 
 let unlistenTauriDragDrop: (() => void) | null = null
 
+/** macOS 平台检测（缓存结果，避免每次拖拽事件都检测） */
+const _isMacOS = /Macintosh|Mac OS/i.test(navigator.userAgent)
+
 /** 检查逻辑坐标是否在某个元素内 */
 function isInsideElement(el: HTMLElement | null, logicalX: number, logicalY: number): boolean {
   if (!el) return false
   const rect = el.getBoundingClientRect()
   return logicalX >= rect.left && logicalX <= rect.right && logicalY >= rect.top && logicalY <= rect.bottom
+}
+
+/**
+ * 将 Tauri DragDropEvent 的原始坐标转换为 CSS 逻辑像素
+ *
+ * 平台差异（Tauri 已知 bug #10744）：
+ * - Windows WebView2：返回物理像素，需要除以 devicePixelRatio
+ * - macOS WKWebView：返回逻辑像素，无需缩放；但 Y 偏小约一个 titlebar 高度（~28px）
+ */
+function tauriPosToCss(rawX: number, rawY: number): { x: number; y: number } {
+  if (_isMacOS) {
+    // macOS: 坐标已是逻辑像素，补偿 titlebar 偏移
+    const rawH = window.outerHeight - window.innerHeight
+    // clamp: macOS 标准 titlebar ~28px，含 toolbar 最大约 80px
+    const titlebarH = (rawH > 0 && rawH < 80) ? rawH : 28
+    return { x: rawX, y: rawY + titlebarH }
+  }
+  // Windows / Linux: 物理像素 → 逻辑像素
+  const dpr = window.devicePixelRatio || 1
+  return { x: rawX / dpr, y: rawY / dpr }
 }
 
 async function initTauriDragDrop() {
@@ -691,10 +714,7 @@ async function initTauriDragDrop() {
     const { getCurrentWebview } = await import('@tauri-apps/api/webview')
     unlistenTauriDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
       const pos = (event.payload as any).position
-      // Tauri 返回的是 PhysicalPosition（物理像素），需要转换为逻辑像素（CSS 像素）
-      const dpr = window.devicePixelRatio || 1
-      const x = (pos?.x ?? 0) / dpr
-      const y = (pos?.y ?? 0) / dpr
+      const { x, y } = tauriPosToCss(pos?.x ?? 0, pos?.y ?? 0)
 
       if (event.payload.type === 'over') {
         // 根据坐标判断悬停在哪个区域

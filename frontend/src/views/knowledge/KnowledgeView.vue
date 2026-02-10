@@ -133,9 +133,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { BookOpen, Check, Search, Sparkles, FolderOpen, Download } from 'lucide-vue-next'
-import { getEmbeddingStatus, setupSemanticSearch, type EmbeddingStatus } from '@/api/settings'
+import {
+  getEmbeddingStatus,
+  setupSemanticSearch,
+  getSemanticDownloadStatus,
+  resetSemanticDownloadStatus,
+  type EmbeddingStatus,
+} from '@/api/settings'
 import { useNotificationStore } from '@/stores/notification'
 
 const notify = useNotificationStore()
@@ -147,6 +153,53 @@ type DownloadState = 'idle' | 'downloading' | 'done' | 'error'
 const downloadState = ref<DownloadState>('idle')
 const downloadError = ref('')
 
+/** 轮询定时器 */
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let isPolling = false
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+/** 开始轮询后台下载状态 */
+function startPolling(notifId: string) {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    if (isPolling) return
+    isPolling = true
+    try {
+      const status = await getSemanticDownloadStatus()
+      if (status.status === 'done') {
+        stopPolling()
+        downloadState.value = 'done'
+        notify.update(notifId, {
+          type: 'success',
+          title: '语义搜索已启用',
+          message: `本地模型下载完成并自动生效${status.source === 'mirror' ? '（国内镜像）' : ''}`,
+        })
+        embeddingStatus.value = await getEmbeddingStatus()
+        try { await resetSemanticDownloadStatus() } catch { /* ignore */ }
+      } else if (status.status === 'error') {
+        stopPolling()
+        downloadState.value = 'error'
+        downloadError.value = status.error || '下载失败，请检查网络后重试'
+        notify.update(notifId, {
+          type: 'error',
+          title: '模型下载失败',
+          message: status.error || '请检查网络连接',
+        })
+      }
+    } catch {
+      // polling failure, keep trying
+    } finally {
+      isPolling = false
+    }
+  }, 2000)
+}
+
 async function handleDownload() {
   downloadState.value = 'downloading'
   downloadError.value = ''
@@ -154,21 +207,26 @@ async function handleDownload() {
   const notifId = notify.push({
     type: 'progress',
     title: '正在下载语义模型',
-    message: 'BGE-M3 Q4（438MB），请稍候…',
+    message: 'BGE-M3 Q4（438MB），后台下载中，可离开此页面…',
     progress: { step: 0, total: 1 },
   })
 
   try {
     const result = await setupSemanticSearch('local')
 
+    if (result.downloading) {
+      // 后端已启动后台下载，开始轮询
+      startPolling(notifId)
+      return
+    }
+
     if (result.success) {
       downloadState.value = 'done'
       notify.update(notifId, {
         type: 'success',
         title: '语义搜索已启用',
-        message: '本地模型下载完成，重启后生效',
+        message: '本地模型已就绪并自动生效',
       })
-      // Refresh status
       embeddingStatus.value = await getEmbeddingStatus()
     } else {
       downloadState.value = 'error'
@@ -196,5 +254,30 @@ onMounted(async () => {
   } catch {
     // API not available, keep null
   }
+
+  // 检查是否有后台下载正在进行（从其他页面发起的）
+  try {
+    const status = await getSemanticDownloadStatus()
+    if (status.status === 'downloading') {
+      downloadState.value = 'downloading'
+      const notifId = notify.push({
+        type: 'progress',
+        title: '正在下载语义模型',
+        message: 'BGE-M3 Q4（438MB），后台下载中…',
+        progress: { step: 0, total: 1 },
+      })
+      startPolling(notifId)
+    } else if (status.status === 'done') {
+      // 下载已完成但前端未确认
+      embeddingStatus.value = await getEmbeddingStatus()
+      try { await resetSemanticDownloadStatus() } catch { /* ignore */ }
+    }
+  } catch {
+    // ignore
+  }
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>

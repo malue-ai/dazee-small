@@ -874,8 +874,8 @@ function handleStreamEvent(event: { type: string; data: any }): void {
 function parseAndFillForm(text: string): void {
   if (!text) return
 
-  // 匹配 ```json ... ``` 代码块
-  const jsonBlockRegex = /```json\s*\n?([\s\S]*?)```/g
+  // 匹配 ```json ... ``` 代码块（(?!\w) 防止匹配到内容中的 ```python 等语言标记）
+  const jsonBlockRegex = /```json\s*\n?([\s\S]*?)```(?!\w)/g
   let match: RegExpExecArray | null = null
   let lastJson: Record<string, string> | null = null
 

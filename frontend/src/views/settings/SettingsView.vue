@@ -213,6 +213,190 @@
           </div>
         </div>
 
+        <!-- ==================== 语义搜索 ==================== -->
+        <div>
+          <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
+            语义搜索
+          </h2>
+
+          <div class="bg-card rounded-lg border border-border p-4 space-y-4">
+            <!-- 加载中 -->
+            <div v-if="embeddingLoading" class="flex items-center gap-2 py-4 justify-center text-muted-foreground">
+              <Loader2 class="w-4 h-4 animate-spin" />
+              <span class="text-xs">检测模型状态...</span>
+            </div>
+
+            <template v-else>
+              <!-- 三选项卡片 -->
+              <div class="grid grid-cols-3 gap-3">
+                <!-- 选项1: 不需要 -->
+                <button
+                  @click="selectedSemanticMode = 'disabled'"
+                  :disabled="semanticOperating"
+                  class="relative flex flex-col items-start gap-2 p-3.5 rounded-lg border-2 text-left transition-all"
+                  :class="selectedSemanticMode === 'disabled'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'"
+                >
+                  <div class="flex items-center gap-2">
+                    <Search class="w-4 h-4 text-muted-foreground" />
+                    <span class="text-xs font-semibold text-foreground">不需要</span>
+                  </div>
+                  <p class="text-[11px] text-muted-foreground leading-relaxed">关键词搜索即可</p>
+                  <!-- 选中指示器 -->
+                  <div
+                    v-if="selectedSemanticMode === 'disabled'"
+                    class="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center"
+                  >
+                    <Check class="w-2.5 h-2.5 text-white" />
+                  </div>
+                </button>
+
+                <!-- 选项2: 本地模型（推荐） -->
+                <button
+                  @click="selectedSemanticMode = 'local'"
+                  :disabled="semanticOperating"
+                  class="relative flex flex-col items-start gap-2 p-3.5 rounded-lg border-2 text-left transition-all"
+                  :class="selectedSemanticMode === 'local'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'"
+                >
+                  <div class="flex items-center gap-2">
+                    <HardDrive class="w-4 h-4 text-primary" />
+                    <span class="text-xs font-semibold text-foreground">本地模型</span>
+                    <span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">推荐</span>
+                  </div>
+                  <p class="text-[11px] text-muted-foreground leading-relaxed">
+                    {{ embeddingStatus?.local_model_size || '438MB' }} 离线<br>中英文双语
+                  </p>
+                  <div
+                    v-if="selectedSemanticMode === 'local'"
+                    class="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center"
+                  >
+                    <Check class="w-2.5 h-2.5 text-white" />
+                  </div>
+                </button>
+
+                <!-- 选项3: OpenAI 云端 -->
+                <button
+                  @click="selectedSemanticMode = 'cloud'"
+                  :disabled="semanticOperating"
+                  class="relative flex flex-col items-start gap-2 p-3.5 rounded-lg border-2 text-left transition-all"
+                  :class="selectedSemanticMode === 'cloud'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'"
+                >
+                  <div class="flex items-center gap-2">
+                    <Cloud class="w-4 h-4 text-blue-500" />
+                    <span class="text-xs font-semibold text-foreground">OpenAI 云端</span>
+                  </div>
+                  <p class="text-[11px] text-muted-foreground leading-relaxed">
+                    需要 API Key<br>按量计费
+                  </p>
+                  <div
+                    v-if="selectedSemanticMode === 'cloud'"
+                    class="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center"
+                  >
+                    <Check class="w-2.5 h-2.5 text-white" />
+                  </div>
+                </button>
+              </div>
+
+              <!-- 当前模式与选择模式不同时显示"应用"按钮 -->
+              <template v-if="downloadState === 'idle' && semanticModeChanged">
+                <!-- local 模式且模型未下载 → 下载提示 -->
+                <div
+                  v-if="selectedSemanticMode === 'local' && embeddingStatus && !embeddingStatus.model_downloaded"
+                  class="bg-amber-50 border border-amber-200 rounded-lg p-3"
+                >
+                  <div class="flex items-center gap-2 mb-1">
+                    <Download class="w-3.5 h-3.5 text-amber-600" />
+                    <p class="text-xs text-amber-800 font-medium">需要下载本地模型</p>
+                  </div>
+                  <p class="text-[11px] text-amber-700 leading-relaxed">
+                    {{ embeddingStatus.local_model_name || 'BGE-M3 Q4 (GGUF)' }}，{{ embeddingStatus.local_model_size || '438MB' }}，下载后完全离线可用，不产生费用。
+                  </p>
+                </div>
+
+                <!-- cloud 模式 → 提示需要 API Key -->
+                <div
+                  v-if="selectedSemanticMode === 'cloud' && !embeddingStatus?.openai_available"
+                  class="bg-blue-50 border border-blue-200 rounded-lg p-3"
+                >
+                  <p class="text-[11px] text-blue-700 leading-relaxed">
+                    请先在上方 API Providers 中配置 OpenAI 的 API Key，才能使用云端语义搜索。
+                  </p>
+                </div>
+
+                <button
+                  @click="applySemanticMode"
+                  :disabled="semanticOperating || (selectedSemanticMode === 'cloud' && !embeddingStatus?.openai_available)"
+                  class="px-4 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 w-fit"
+                >
+                  <span v-if="semanticOperating" class="flex items-center gap-1.5">
+                    <Loader2 class="w-3 h-3 animate-spin" />
+                    应用中...
+                  </span>
+                  <span v-else>
+                    {{ selectedSemanticMode === 'local' && embeddingStatus && !embeddingStatus.model_downloaded ? '下载并启用' : '应用' }}
+                  </span>
+                </button>
+              </template>
+
+              <!-- 下载中 -->
+              <template v-if="downloadState === 'downloading'">
+                <div class="flex items-center gap-3">
+                  <Loader2 class="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-medium text-foreground">后台下载模型中...</p>
+                    <p class="text-[11px] text-muted-foreground mt-0.5">
+                      {{ embeddingStatus?.local_model_name || 'BGE-M3 Q4' }}
+                      ({{ embeddingStatus?.local_model_size || '438MB' }})，自动选择最快下载源
+                      <span v-if="downloadElapsed != null && downloadElapsed > 0">
+                        · 已耗时 {{ Math.round(downloadElapsed) }}s
+                      </span>
+                    </p>
+                    <p class="text-[11px] text-primary/70 mt-1">
+                      离开此页面不影响下载，完成后自动生效
+                    </p>
+                  </div>
+                </div>
+                <div class="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div class="h-full bg-primary/80 rounded-full animate-indeterminate"></div>
+                </div>
+              </template>
+
+              <!-- 操作成功 -->
+              <div v-if="downloadState === 'done'" class="bg-success/10 border border-success/20 rounded-lg p-3">
+                <div class="flex items-center gap-2">
+                  <CircleCheck class="w-4 h-4 text-success flex-shrink-0" />
+                  <p class="text-xs text-success font-medium">配置已生效</p>
+                </div>
+                <p class="text-[11px] text-success/70 mt-1">
+                  {{ semanticDoneMessage }}
+                </p>
+              </div>
+
+              <!-- 操作失败 -->
+              <template v-if="downloadState === 'error'">
+                <div class="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                  <div class="flex items-center gap-2">
+                    <AlertTriangle class="w-4 h-4 text-destructive flex-shrink-0" />
+                    <p class="text-xs text-destructive font-medium">操作失败</p>
+                  </div>
+                  <p class="text-[11px] text-destructive/70 mt-1">{{ downloadError }}</p>
+                </div>
+                <button
+                  @click="applySemanticMode"
+                  class="px-4 py-2 text-xs font-medium text-foreground border border-border rounded-lg hover:bg-muted transition-colors w-fit"
+                >
+                  重试
+                </button>
+              </template>
+            </template>
+          </div>
+        </div>
+
         <!-- ==================== 操作按钮 ==================== -->
         <div class="flex items-center justify-between pt-2">
           <a
@@ -246,13 +430,19 @@ import { useRouter } from 'vue-router'
 import {
   Check, Lock, Eye, EyeOff, Loader2,
   CircleCheck, AlertTriangle, ChevronDown, ShieldCheck,
+  HardDrive, Download, Search, Cloud,
 } from 'lucide-vue-next'
 import {
   getSettings,
   getSettingsStatus,
   updateSettings,
+  getEmbeddingStatus,
+  setupSemanticSearch,
+  getSemanticDownloadStatus,
+  resetSemanticDownloadStatus,
   type SettingsData,
   type SettingsStatus,
+  type EmbeddingStatus,
 } from '@/api/settings'
 import { modelApi, type ProviderDetail, type ValidateKeyResult } from '@/api/models'
 import { useGuideStore } from '@/stores/guide'
@@ -287,6 +477,187 @@ const providerKeyState = computed(() => {
   }
   return result
 })
+
+// ==================== 语义搜索状态 ====================
+
+const embeddingStatus = ref<EmbeddingStatus | null>(null)
+const embeddingLoading = ref(false)
+const downloadState = ref<'idle' | 'downloading' | 'done' | 'error'>('idle')
+const downloadError = ref('')
+const semanticDoneMessage = ref('')
+const semanticOperating = ref(false)
+const downloadElapsed = ref<number | null>(null)
+
+/** 轮询定时器 */
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let isPolling = false
+
+/** 当前选中的模式（UI 状态） */
+const selectedSemanticMode = ref<'disabled' | 'local' | 'cloud'>('disabled')
+
+/** 后端实际生效的模式（用于判断是否有变更） */
+const appliedSemanticMode = ref<'disabled' | 'local' | 'cloud'>('disabled')
+
+/** 用户是否更改了模式 */
+const semanticModeChanged = computed(() => selectedSemanticMode.value !== appliedSemanticMode.value)
+
+/** 从后端状态推断当前模式 */
+function inferSemanticMode(status: EmbeddingStatus): 'disabled' | 'local' | 'cloud' {
+  if (!status.semantic_enabled) return 'disabled'
+  if (status.current_provider === 'openai') return 'cloud'
+  return 'local'
+}
+
+/** 加载 Embedding 模型状态 */
+async function loadEmbeddingStatus() {
+  embeddingLoading.value = true
+  try {
+    embeddingStatus.value = await getEmbeddingStatus()
+    const mode = inferSemanticMode(embeddingStatus.value)
+    selectedSemanticMode.value = mode
+    appliedSemanticMode.value = mode
+  } catch (e) {
+    console.error('Failed to load embedding status:', e)
+  } finally {
+    embeddingLoading.value = false
+  }
+}
+
+/** 检查后台下载状态，如果正在下载则自动开始轮询 */
+async function checkAndResumeDownload() {
+  try {
+    const status = await getSemanticDownloadStatus()
+    if (status.status === 'downloading') {
+      // 恢复下载中状态
+      downloadState.value = 'downloading'
+      downloadElapsed.value = status.elapsed_seconds
+      startPolling()
+    } else if (status.status === 'done') {
+      // 上次下载已完成但前端未确认
+      await handleDownloadComplete(status.source)
+    } else if (status.status === 'error') {
+      // 上次下载失败但前端未确认
+      downloadError.value = status.error || '下载失败'
+      downloadState.value = 'error'
+    }
+  } catch (e) {
+    console.error('Failed to check download status:', e)
+  }
+}
+
+/** 开始轮询下载状态 */
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    if (isPolling) return
+    isPolling = true
+    try {
+      const status = await getSemanticDownloadStatus()
+      downloadElapsed.value = status.elapsed_seconds
+
+      if (status.status === 'done') {
+        stopPolling()
+        await handleDownloadComplete(status.source)
+      } else if (status.status === 'error') {
+        stopPolling()
+        downloadError.value = status.error || '下载失败，请重试'
+        downloadState.value = 'error'
+        semanticOperating.value = false
+      } else if (status.status === 'idle') {
+        // 异常情况：任务消失了
+        stopPolling()
+        downloadState.value = 'idle'
+        semanticOperating.value = false
+      }
+    } catch (e) {
+      console.error('Polling download status failed:', e)
+    } finally {
+      isPolling = false
+    }
+  }, 2000)
+}
+
+/** 停止轮询 */
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+/** 下载完成后的处理 */
+async function handleDownloadComplete(source: string | null) {
+  const sourceLabel = source === 'mirror' ? '国内镜像' : source === 'official' ? '官方源' : ''
+  semanticDoneMessage.value = `本地模型已就绪并自动启用${sourceLabel ? `（来源：${sourceLabel}）` : ''}`
+  downloadState.value = 'done'
+  semanticOperating.value = false
+
+  // 刷新 Embedding 状态
+  await loadEmbeddingStatus()
+
+  // 重置后端下载状态
+  try { await resetSemanticDownloadStatus() } catch (_) { /* ignore */ }
+
+  // 3 秒后自动清除成功提示
+  setTimeout(() => {
+    if (downloadState.value === 'done') downloadState.value = 'idle'
+  }, 3000)
+}
+
+/**
+ * 应用选中的语义搜索模式
+ *
+ * - disabled → 关闭语义搜索
+ * - local    → 如果模型未下载，后台下载并自动启用；否则直接启用
+ * - cloud    → 使用 OpenAI 云端（需已配置 API Key）
+ */
+async function applySemanticMode() {
+  const mode = selectedSemanticMode.value
+  downloadError.value = ''
+  semanticOperating.value = true
+
+  try {
+    const result = await setupSemanticSearch(mode)
+
+    if (result.downloading) {
+      // 后端已启动后台下载，进入轮询
+      downloadState.value = 'downloading'
+      downloadElapsed.value = 0
+      startPolling()
+      // 注意：不设置 semanticOperating = false，轮询到完成时再清除
+      return
+    }
+
+    if (result.success) {
+      // 非下载场景（disabled / cloud / local 模型已存在）
+      if (mode === 'disabled') {
+        semanticDoneMessage.value = '语义搜索已关闭，将使用关键词搜索'
+      } else if (mode === 'local') {
+        semanticDoneMessage.value = '本地模型已启用'
+      } else {
+        semanticDoneMessage.value = 'OpenAI 云端语义搜索已启用'
+      }
+      downloadState.value = 'done'
+      await loadEmbeddingStatus()
+      setTimeout(() => {
+        if (downloadState.value === 'done') downloadState.value = 'idle'
+      }, 3000)
+    } else {
+      downloadError.value = result.error || '操作失败，请重试'
+      downloadState.value = 'error'
+    }
+  } catch (e: any) {
+    downloadError.value = e?.response?.data?.detail?.message || e?.message || '操作失败，请检查网络连接后重试'
+    downloadState.value = 'error'
+  } finally {
+    // 仅非下载场景清除 operating 标记（下载场景由轮询负责）
+    if (downloadState.value !== 'downloading') {
+      semanticOperating.value = false
+    }
+  }
+}
+
+// ==================== Provider 工具函数 ====================
 
 /** 判断是否为后端返回的脱敏 Key（如 "sk-xxxx...yyyy" 或 "***"） */
 function isMaskedKey(key: string): boolean {
@@ -576,7 +947,10 @@ function applyGuideTarget(step: number) {
 // ==================== 生命周期 ====================
 
 onMounted(async () => {
-  await loadAll()
+  await Promise.all([loadAll(), loadEmbeddingStatus()])
+
+  // 检查是否有后台下载正在进行（用户离开设置页后再回来的场景）
+  await checkAndResumeDownload()
 
   if (guideStore.isActive) {
     nextTick(() => {
@@ -591,6 +965,9 @@ watch(() => guideStore.currentStep, (step) => {
 })
 
 onUnmounted(() => {
+  // 清理轮询定时器（后台下载不受影响，下次进入页面会自动恢复）
+  stopPolling()
+
   if (guideStore.isActive) {
     guideStore.setBeforeNextStep(null)
   }
