@@ -72,11 +72,13 @@ async def _load_full_conversation(conversation_id: str) -> List[Dict]:
         raw_msgs = result.get("messages", [])
         messages = []
         for m in raw_msgs:
-            role = m.get("role", "")
+            # raw_msgs may be Message (Pydantic) objects or dicts;
+            # use getattr() for attribute access with dict fallback.
+            role = m.role if hasattr(m, "role") else m.get("role", "")
             if role not in ("user", "assistant"):
                 continue
             # content is stored as JSON array of blocks; extract text parts
-            content_raw = m.get("content", "")
+            content_raw = m.content if hasattr(m, "content") else m.get("content", "")
             if isinstance(content_raw, str):
                 try:
                     blocks = json.loads(content_raw)

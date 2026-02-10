@@ -378,6 +378,51 @@ def _compress_tool_result_content(content: Any) -> Any:
     return content
 
 
+def _try_fold_plan_tool_result(content: Any) -> Optional[str]:
+    """Fold old plan tool_result into a one-line summary (zero LLM, <0.1ms).
+
+    Detects plan tool results by checking for "success" + "plan" keys in JSON,
+    then extracts plan name + todo statuses into a compact string.
+
+    Returns:
+        Folded string if content is a plan result, None otherwise.
+    """
+    import json as _json
+
+    text = content if isinstance(content, str) else str(content) if content else ""
+    if len(text) < 10 or '"plan"' not in text:
+        return None
+
+    try:
+        data = _json.loads(text) if isinstance(text, str) else None
+        if not isinstance(data, dict):
+            return None
+        if "success" not in data or "plan" not in data:
+            return None
+        plan = data["plan"]
+        if not isinstance(plan, dict):
+            return None
+
+        name = plan.get("name", "")
+        todos = plan.get("todos", [])
+        if not todos:
+            return f"[plan] {name} (无步骤)"
+
+        status_icons = {"completed": "✓", "in_progress": "→", "failed": "✗"}
+        total = len(todos)
+        completed = sum(1 for t in todos if t.get("status") == "completed")
+        parts = []
+        for t in todos:
+            icon = status_icons.get(t.get("status", "pending"), "○")
+            title = (t.get("title") or t.get("content", ""))[:15]
+            parts.append(f"{icon}{title}")
+
+        return f"[plan] {name}（{completed}/{total}）: {', '.join(parts)}"
+
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
 def compress_fresh_tool_result(content: str) -> str:
     """Compress a fresh tool result BEFORE appending to messages.
 
@@ -459,6 +504,12 @@ def _compress_old_tool_results(
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_result":
                 original = block.get("content", "")
+                # P1: Plan update 特殊折叠 — 旧 plan tool_result 折叠为一行摘要
+                folded = _try_fold_plan_tool_result(original)
+                if folded is not None:
+                    new_content.append({**block, "content": folded})
+                    changed = True
+                    continue
                 compressed = _compress_tool_result_content(original)
                 if compressed is not original:
                     new_content.append({**block, "content": compressed})

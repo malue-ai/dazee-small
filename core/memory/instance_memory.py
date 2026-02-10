@@ -329,9 +329,9 @@ class InstanceMemoryManager:
 
         # Layer 1: 写入每日日志
         user_msgs = [
-            m.get("content", "")
+            (m.get("content", "") if isinstance(m, dict) else getattr(m, "content", ""))
             for m in messages
-            if m.get("role") == "user"
+            if (m.get("role") if isinstance(m, dict) else getattr(m, "role", "")) == "user"
         ]
         if user_msgs:
             summary = f"对话 {session_id[:8]}... — 用户主题: {user_msgs[0][:100]}"

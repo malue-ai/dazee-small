@@ -81,6 +81,7 @@ class SqliteVecVectorStore(VectorStoreBase):
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
 
         # 加载 sqlite-vec 扩展
         try:

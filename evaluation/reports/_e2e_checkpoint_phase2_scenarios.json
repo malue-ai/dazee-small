@@ -1,6 +1,13 @@
 {
   "completed_cases": [
-    "G2"
+    "G2",
+    "G4",
+    "G3",
+    "G1",
+    "F4",
+    "H1",
+    "I1",
+    "I2"
   ],
   "results": {
     "G2": {
@@ -121,7 +128,489 @@
           "needs_human_review": true
         }
       ]
+    },
+    "G4": {
+      "task_id": "G4",
+      "passed": true,
+      "grade_results": [
+        {
+          "grader_type": "model",
+          "grader_name": "grade_action_item_extraction",
+          "passed": true,
+          "score": 0.6,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {
+              "completeness": {
+                "score": "3",
+                "items_extracted": "4",
+                "items_missed": [
+                  "小陈：首页改版设计稿评审（下周）"
+                ],
+                "analysis": "Agent 提取了 6 个行动项，其中可与预期行动项明确对应的有 3-4 个：（1）小王缓存方案文档 ✅；（2）小陈搜索结果页面设计稿初版 ✅；（3）小赵完整测试方案 ✅；（4）技术方案评审会勉强可对应但责任人和日期均有偏差。小陈的首页改版设计稿评审完全遗漏。另外，Agent 额外提取了 'Mock API' 和 '容量评估' 两个条目，这些可能是会议讨论内容但并非明确的行动项，属于过度提取。遗漏 1 个核心行动项，跨过了 4 个的最低线但有质量问题。"
+              },
+              "deadline_accuracy": {
+                "score": "3",
+                "deadline_checks": [
+                  {
+                    "owner": "小王",
+                    "task": "缓存方案文档",
+                    "expected": "2026-02-17",
+                    "agent_output": "2026-02-17",
+                    "correct": "true"
+                  },
+                  {
+                    "owner": "小陈",
+                    "task": "搜索结果页面设计稿初版",
+                    "expected": "下周（约2026-02-16~20）",
+                    "agent_output": "2026-02-20",
+                    "correct": "true"
+                  },
+                  {
+                    "owner": "小赵",
+                    "task": "完整测试方案",
+                    "expected": "≈2026-03-06（技术方案2/28确定后一周）",
+                    "agent_output": "2026-02-27",
+                    "correct": "false"
+                  },
+                  {
+                    "owner": "全体",
+                    "task": "技术方案评审会",
+                    "expected": "2026-02-20",
+                    "agent_output": "2026-02-28前（备注中写了2/20）",
+                    "correct": "false"
+                  }
+                ],
+                "analysis": "关键日期推算情况：（1）'下周三'→ 2/17 ✅ 正确；（2）'下周'→ 2/20 合理推断 ✅；（3）小赵测试方案日期严重偏差 ❌——Agent 假设技术方案在评审会当日（2/20）即确定，推出 2/27，但评审标准明确技术方案确定日期为 2/28，正确答案应为 ≈3/6，差距达 7 天；（4）技术方案评审会被标为 '2026-02-28前' 而非明确的 2/20，表述混乱（虽然备注中提到了 2/20）。2 个日期正确，2 个有明显问题。"
+              },
+              "owner_accuracy": {
+                "score": "3",
+                "analysis": "核心三人（小王、小陈、小赵）的责任归属基本正确。但存在两个严重问题：（1）技术方案评审的责任人被写为 '老李、小张、小王'，其中 '老李' 和 '小张' 在预期参会人员名单（小王/小陈/小赵）中完全不存在，属于凭空出现的人名，应为 '全体'；（2）遗漏的首页改版设计稿评审的责任人小陈自然也未能体现。编造不存在的责任人是比较严重的问题。"
+              },
+              "no_fabrication": {
+                "score": "2",
+                "fabricated_items": [
+                  "老李、小张——会议预期人员中不存在这两个人名",
+                  "小王：出一版 Mock API——可能是讨论内容但非明确行动项",
+                  "小王：完成容量评估——可能是讨论内容但非明确行动项"
+                ],
+                "analysis": "存在较明显的编造问题：（1）'老李' 和 '小张' 这两个人名在会议预期参会人员中完全不存在，属于无中生有，这是最严重的编造行为；（2）'Mock API' 和 '容量评估' 两个行动项在预期的 5 个行动项中均未列出，可能是从会议讨论中过度提取为行动项，属于边界情况但倾向于过度推断。整体来看，编造人名的行为严重违反了 '不编造原则'。"
+              },
+              "format_quality": {
+                "score": "4",
+                "analysis": "格式整体较好：（1）使用了清晰的表格格式，包含责任人、具体任务、截止日期、备注四列 ✅；（2）在表格下方提供了日期推算说明，增强了可追溯性 ✅；（3）提到了会议日期 2026-02-10 ✅。不足之处：（1）缺少完整的会议元信息头部（参会人、会议主题等）；（2）未将 '讨论要点' 与 '行动项' 做显式区分，导致讨论内容被混入行动项表格。"
+              }
+            },
+            "overall_score": 3.0,
+            "task_completed": "false",
+            "strengths": [
+              "'下周三' → 2026-02-17 的日期推算完全正确",
+              "表格格式清晰，包含备注列和日期推算说明，实用性强",
+              "核心行动项（缓存方案、设计稿、测试方案）的责任人归属准确",
+              "主动标注了不确定日期的推算假设，便于用户校验"
+            ],
+            "optimization_suggestions": [
+              "严格区分会议中的 '讨论提及' 与 '明确分配的行动项'，避免过度提取",
+              "对于日期推算，应更仔细地追踪依赖链：评审会(2/20) ≠ 方案确定(2/28)，需要区分评审日和最终确定日",
+              "增加对原文行动项的逐条扫描机制，确保不遗漏——可在最后做一次 '回查' 步骤",
+              "不确定的人名宁可标注 '待确认' 也不应编造，责任人必须在会议纪要中有明确出处",
+              "补充完整的会议元信息头部（会议主题、参会人员、主持人等），提升文档规范性"
+            ],
+            "scores": {},
+            "weighted_score": 3.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:16:52.470606",
+          "confidence": 0.72,
+          "needs_human_review": true
+        }
+      ]
+    },
+    "G3": {
+      "task_id": "G3",
+      "passed": true,
+      "grade_results": [
+        {
+          "grader_type": "model",
+          "grader_name": "grade_research_quality",
+          "passed": true,
+          "score": 0.6,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {
+              "polish_quality": {
+                "score": "2",
+                "meaning_preserved": "false",
+                "terminology_consistent": "false",
+                "analysis": "在提供的智能体回复中，完全没有呈现润色后的摘要文本。用户第一轮明确要求'润色这篇论文的摘要部分，保持学术风格，注意术语一致性'，但最终输出仅包含引用遗漏检查报告，润色结果缺失。无法评估原意保持、术语一致性（Agent/智能体）和学术语气等关键指标。meaning_preserved 和 terminology_consistent 标记为 false，因为无法确认这些工作被执行。此外，回复中泄露了内部思考标记（<｜end▁of▁thinking｜>），进一步降低了输出的专业性。33 次工具调用链与仅 175 个输出 token 之间的巨大反差也暗示润色任务可能未被有效完成。"
+              },
+              "citation_check": {
+                "score": "4",
+                "gaps_found": [
+                  "第 3 节「记忆衰减机制」——在补充说明 #2 中识别出该章节需要系统引用相关文献（如时间/频率衰减策略），但将其描述为'占位符'而非直接标注为引用遗漏，定位略有偏移",
+                  "第 4 节「实验分析」——在补充说明 #3 中正确识别出'三个基准数据集'和'五种记忆方案'需要引用来源",
+                  "引言中 15-30% 提升数据缺乏引用支撑",
+                  "2.1 节 RAG 框架描述未引用原始论文",
+                  "2.2 节 Chroma/FAISS 技术工具未引用",
+                  "2.3 节混合检索方案未引用具体研究"
+                ],
+                "false_positives": [],
+                "analysis": "两个核心预期遗漏点（第 3 节记忆衰减机制和第 4 节实验分析）均被识别到，这是关键的正确判断。但存在两个不足：(1) 这两个最重要的发现被放在了'补充说明'中而非主表，与引言/相关工作中的 6 个发现相比显得优先级偏低，组织结构上未突出关键问题；(2) 第 3 节的问题被描述为'待内容补充后需系统引用'，而非直接指出已有内容存在引用缺失。额外发现的 6 处遗漏（引言数据声称、RAG 原始论文、FAISS 等）均属合理且基于学术写作规范，未发现明显误报或编造问题。整体引用检查覆盖面较广，基于文本事实判断，质量良好。"
+              },
+              "professionalism": {
+                "score": "4",
+                "analysis": "建议具有较强的可操作性：使用结构化表格分类展示（位置/原文/问题类型/建议），并给出了具体的文献推荐（如 Lewis et al. 2020 用于 RAG），还提供了优先级排序（'优先补充' → '其次补充'）和参考文献数量建议（10-15 篇）。对学术论文结构有清晰理解，按章节逐一检查。提供了后续行动选项（搜索文献、保存清单、格式化引用），体现了服务意识。扣分点：(1) 回复中泄露了内部思考标记 `<｜end▁of▁thinking｜>`，不专业；(2) 33 次工具调用显示流程效率低下，对于一篇论文草稿的引用检查来说过于冗余；(3) 自评分数（90/100）与实际交付质量不完全匹配（润色任务缺失）。"
+              }
+            },
+            "overall_score": 3.0,
+            "task_completed": "false",
+            "strengths": [
+              "引用遗漏检查覆盖全面，两个核心预期问题（第 3 节记忆衰减机制、第 4 节实验分析）均被正确识别",
+              "未发现误报或编造不存在的引用问题，检查基于文本事实",
+              "结构化输出清晰：表格分类 + 补充说明 + 优先级建议 + 后续行动选项",
+              "建议高度可操作，提供了具体的文献推荐方向（如 Lewis et al. 2020）和参考文献数量目标",
+              "对额外引用遗漏的识别（引言数据声称、RAG/FAISS 工具引用等）合理且有价值"
+            ],
+            "optimization_suggestions": [
+              "【关键】必须在回复中包含润色后的摘要文本——这是用户第一轮的核心请求，完全缺失导致 40% 权重的任务未完成",
+              "将第 3 节和第 4 节的引用遗漏从'补充说明'提升到主检查表中，并标注为高优先级，因为这些是正文核心章节的关键缺陷",
+              "清理内部标记（如 `<｜end▁of▁thinking｜>`），确保最终输出的专业性",
+              "优化工具调用链——33 次调用对于摘要润色+引用检查任务明显过多，建议精简至 10 次以内以提高效率",
+              "第 3 节的描述应从'待内容补充后需引用'改为'当前已出现的概念/术语缺乏引用支撑'，更精确地匹配实际问题"
+            ],
+            "scores": {},
+            "weighted_score": 3.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:23:32.654628",
+          "confidence": 0.62,
+          "needs_human_review": true
+        }
+      ]
+    },
+    "G1": {
+      "task_id": "G1",
+      "passed": true,
+      "grade_results": [
+        {
+          "grader_type": "model",
+          "grader_name": "grade_style_memory",
+          "passed": true,
+          "score": 0.2,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {
+              "style_analysis": {
+                "score": "1",
+                "features_identified": [
+                  "专业",
+                  "结构清晰",
+                  "简洁"
+                ],
+                "analysis": "从轮次3的输出元数据可以明确看到，agent将用户风格记忆为'专业、结构清晰、简洁'——这与原文的毒舌、犀利、反转幽默、数据吐槽风格完全相反。风格分析严重错误，把一个满嘴'那玩意儿''别装''别骗自己'的毒舌博主识别成了学术写作者。"
+              },
+              "immediate_application": {
+                "score": "2",
+                "has_toxic_wit": "false",
+                "has_data_support": "false",
+                "analysis": "轮次2的奶茶文章未在回复中直接展示，但从最终记忆的风格标签（'专业、结构清晰、简洁'）和轮次3的输出风格推断，奶茶文章大概率也未体现毒舌风格。给予不确定的低分。"
+              },
+              "cross_session_memory": {
+                "score": "1",
+                "style_preserved": "false",
+                "reverted_to_generic": "true",
+                "analysis": "这是一次彻底的记忆失败。轮次3的健身房文章是典型的模板化正能量文案：'身心庇护所''精神驿站''都市生活中的绿洲'——全是鸡汤用语。与原文风格形成对照：原文会写'你以为他们在喝咖啡？不，他们在买独处的合理性'，而轮次3写的是'运动分泌的内啡肽缓解焦虑、对抗抑郁'。零毒舌、零吐槽、零反转、零硬核数据、零口语化第二人称。agent甚至在元数据中明确承认风格为'专业、结构清晰、简洁（根据您的记忆偏好）'——说明记忆系统存储了错误的风格画像。"
+              },
+              "writing_quality": {
+                "score": "2",
+                "analysis": "文章可读，字数达标（321字），结构清晰。但作为公众号文章极其无聊，毫无个人辨识度，读起来像健身房招商PPT。用'内啡肽''心流体验'等术语堆砌，完全不符合公众号爆文的可读性要求。"
+              }
+            },
+            "overall_score": 1.0,
+            "task_completed": "false",
+            "strengths": [
+              "字数控制基本达标（321字）",
+              "文章结构完整，有标题和段落划分"
+            ],
+            "optimization_suggestions": [
+              "风格分析模块需要彻底重做：应识别出'毒舌/犀利/反转幽默/口语化第二人称直击/数据支撑吐槽'等核心特征，而非泛化为'专业简洁'",
+              "记忆存储格式需要包含具体风格标签和范例片段，如保存'类比吐槽：用微波炉热牛排''直接怼读者：别装''数据+毒舌公式'等可操作特征",
+              "跨会话写作前应自动检索风格记忆并在prompt中注入风格约束，确保输出与记忆一致",
+              "当前系统可能将'分析'和'应用'脱节——分析了但没有将分析结果转化为生成约束"
+            ],
+            "scores": {},
+            "weighted_score": 1.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:28:30.975174",
+          "confidence": 0.92,
+          "needs_human_review": true
+        }
+      ]
+    },
+    "F4": {
+      "task_id": "F4",
+      "passed": true,
+      "grade_results": [
+        {
+          "grader_type": "code",
+          "grader_name": "check_no_tool_errors",
+          "passed": true,
+          "score": 1.0,
+          "explanation": null,
+          "details": {
+            "total_calls": 106,
+            "error_count": 0,
+            "errors": []
+          },
+          "timestamp": "2026-02-10 19:38:55.106515",
+          "confidence": null,
+          "needs_human_review": false
+        },
+        {
+          "grader_type": "model",
+          "grader_name": "grade_context_engineering",
+          "passed": true,
+          "score": 0.6,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {
+              "data_accuracy": {
+                "score": "5",
+                "q1_revenue_correct": "true",
+                "q2_revenue_correct": "true",
+                "hallucinated_data": [],
+                "analysis": "所有关键财务数据引用精确无误：Q1 ¥120万（环比15%、同比22%）、Q2 ¥138万（环比15%、同比28%）、客户数85→112、Q2新增3家大客户（单笔>¥10万）等均与原始报告完全一致。竞品数据（BetaAI 18%、Alpha智能 13%等）内部逻辑自洽，无幻觉数字。"
+              },
+              "synthesis_quality": {
+                "score": "5",
+                "files_integrated": "3份文件全部有效整合：Q1报告、Q2报告、竞品分析",
+                "analysis": "综合质量出色。回复不仅准确引用三份文件数据，还做了多层次分析：①Q1与Q2的纵向对比（从数量扩张到价值提升的转型洞察）；②竞品横向对比定位（51%头部份额 vs 49%剩余空间的机会分析）；③给出4条结构化战略建议（垂直行业渗透、产品力、融资、客户留存），具有可操作性。约500字，符合要求。"
+              },
+              "context_efficiency": {
+                "score": "1",
+                "scratchpad_used": "false",
+                "token_stable": "false",
+                "analysis": "上下文管理严重失控。①input tokens=30,974，是预期上限10K的3倍，说明大文件未走scratchpad卸载，全文被保留在上下文中；②从对话结构可见，3份附件在4轮对话中被完整重复注入4次（同一文件出现4遍），历史完全未折叠；③工具调用106次，模式为大量重复的'plan→nodes'循环，暗示没有有效的上下文压缩或缓存机制，Agent在每轮重新解析全部内容；④旧轮次工具结果未被折叠，导致上下文逐轮线性膨胀。这与上下文工程的核心目标（可控、高效）背道而驰。"
+              }
+            },
+            "overall_score": 3.0,
+            "task_completed": "true",
+            "strengths": [
+              "数据引用零错误，Q1/Q2所有关键指标精确匹配原始报告",
+              "三份文件综合分析质量高，不是简单拼接而是有逻辑的战略洞察",
+              "战略建议具体且可操作，展现了真正的分析思维而非复述",
+              "回复结构清晰，按财务→竞争→定位→建议的逻辑递进",
+              "竞品数据与自身数据的交叉分析做得到位（如剩余市场空间机会）"
+            ],
+            "optimization_suggestions": [
+              "【紧急】实现 scratchpad 卸载机制：13.7KB/16.6KB 文件应在首次读取后提取摘要放入上下文，原文存入 scratchpad，后续轮次按需查阅而非全文注入",
+              "【紧急】实现历史折叠：附件在4轮中被完整重复4次，应在后续轮次将已处理的文件内容替换为摘要标记（如 '[Q1报告已分析，摘要：收入¥120万...]'）",
+              "【高优】控制 input token 预算：当前30,974远超10K目标，应设置每轮注入预算上限，超限时触发压缩策略",
+              "【高优】削减工具调用次数：106次调用极度冗余，plan→nodes 循环应有终止条件和缓存，避免重复解析相同内容",
+              "【建议】旧轮次工具结果折叠：第1轮的文件解析结果在第4轮时应被压缩为结论摘要，而非保留完整调用记录"
+            ],
+            "scores": {},
+            "weighted_score": 3.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:39:51.456195",
+          "confidence": 0.88,
+          "needs_human_review": true
+        }
+      ]
+    },
+    "H1": {
+      "task_id": "H1",
+      "passed": true,
+      "grade_results": [
+        {
+          "grader_type": "model",
+          "grader_name": "grade_response_quality",
+          "passed": true,
+          "score": 0.6,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {},
+            "overall_score": 3.0,
+            "task_completed": null,
+            "strengths": [],
+            "optimization_suggestions": [],
+            "scores": {},
+            "weighted_score": 3.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:41:56.694137",
+          "confidence": 0.5,
+          "needs_human_review": true
+        }
+      ]
+    },
+    "I1": {
+      "task_id": "I1",
+      "passed": false,
+      "grade_results": [
+        {
+          "grader_type": "code",
+          "grader_name": "check_backtrack_occurred",
+          "passed": false,
+          "score": 0.0,
+          "explanation": "Backtrack count = 0: Agent completed without backtrack. This test requires at least 1 backtrack(s) to verify error recovery. Either the test data wasn't 'broken enough' or the Agent bypassed the expected failure path.",
+          "details": {
+            "backtrack_count": 0,
+            "min_required": 1,
+            "max_allowed": 5,
+            "exhausted": false,
+            "escalation": null
+          },
+          "timestamp": "2026-02-10 19:45:57.673840",
+          "confidence": null,
+          "needs_human_review": false
+        },
+        {
+          "grader_type": "model",
+          "grader_name": "grade_backtrack_quality",
+          "passed": true,
+          "score": 0.8,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {
+              "error_detection": {
+                "score": "4",
+                "error_type_identified": "PARAMETER_ERROR（推断：ERR#REF! 金额解析失败、N/A 日期解析失败）",
+                "analysis": "最终输出明确识别出两类数据质量问题：(1) ERR#REF! 销售额（键盘产品），已按0处理；(2) N/A 日期（充电宝产品），标记为缺失。工具调用链中出现了 4 次 plan 调用，表明至少发生了 3 次重新规划，这与遇到解析错误后触发重试的模式一致。扣分原因：Agent 的最终回复未显式提及错误检测过程，无法看到 ErrorClassifier 的具体分类标签（PARAMETER_ERROR），只能从工具链模式和输出结果逆向推断。"
+              },
+              "strategy_selection": {
+                "score": "3",
+                "strategy_used": "PARAM_ADJUST（推断）",
+                "strategy_appropriate": "true",
+                "analysis": "预期策略为 PARAM_ADJUST（如 errors='coerce'、dtype 调整或跳过坏行），最终输出中 ERR#REF! 被正确转为 0、N/A 日期被标记为缺失，这些处理结果与 PARAM_ADJUST 策略的预期效果一致。但关键缺陷：(1) 无法从可见信息中确认 BacktrackManager 是否被触发；(2) 工具链中的 4 次 plan 调用模式（plan→nodes×3→plan→nodes×3→plan→nodes×2→plan）也可能对应 PLAN_REPLAN 而非纯粹的 PARAM_ADJUST。策略虽合理但可见证据不足，给3分。"
+              },
+              "recovery_quality": {
+                "score": "5",
+                "result_improved": "true",
+                "task_completed": "true",
+                "analysis": "无论内部回溯机制的透明度如何，最终输出质量极高：(1) 完整的产品销售排名（7个产品），最佳产品智能手表¥70,276明确标注；(2) 时间趋势分析含日均、峰值、谷值；(3) 地区分布表格；(4) 数据质量异常被妥善处理并说明（ERR#REF!→0，N/A→缺失标记）；(5) 附带3条业务建议。从'毒药CSV'的脏数据输入到结构化清洁报告输出，这个转化本身就证明了恢复是有效的。任务100%完成。"
+              },
+              "loop_protection": {
+                "score": "4",
+                "backtrack_count": "3",
+                "repeated_attempts": "false",
+                "analysis": "12次工具调用中有4次plan调用，推断发生了3次回溯/重规划。这个次数在合理范围内（≤3为正常）。从工具链模式看，每次replan后的节点调用数递减（3→3→2），没有出现死循环或重复相同策略的迹象。output=56 tokens 说明工具调用过程高度精简，无冗余处理。扣1分因为无法确认是否维护了 failed_tools 列表。"
+              },
+              "user_transparency": {
+                "score": "2",
+                "informed_user": "false",
+                "analysis": "严重不足。Agent 的最终回复完全没有告知用户曾经遇到过解析错误或需要回溯重试。数据质量说明部分（⚠️ 数据质量说明）只是将异常值作为'发现'呈现给用户，而非说明'我在分析过程中遇到了 ERR#REF! 解析错误，通过调整参数（强制转换）解决了这个问题'。对用户而言，看起来一切都是一帆风顺的，完全隐藏了错误恢复过程。这与 RVR-B 的透明度设计初衷不符。唯一的加分点是确实提到了数据异常的存在和处理方式。"
+              }
+            },
+            "overall_score": 4.0,
+            "task_completed": "true",
+            "strengths": [
+              "最终输出质量极高：结构化表格、趋势洞察、地区分布、业务建议，远超用户'告诉我哪个产品卖得最好'的基本需求",
+              "毒药数据（ERR#REF!、N/A）被正确处理——ERR#REF! 转为 0 且明确说明，N/A 标记为缺失，展现了对脏数据的鲁棒处理能力",
+              "回溯次数合理（推断3次），无死循环迹象，工具调用精简高效（12次调用，56 output tokens）",
+              "数据完整性统计（29/30行，96.7%）体现了对数据质量的严谨态度"
+            ],
+            "optimization_suggestions": [
+              "在最终回复中增加一段简短的'处理过程说明'，如：'在分析过程中，我发现1行数据存在ERR#REF!错误和1行N/A日期，已自动调整解析参数进行修复'",
+              "工具调用日志应输出可追踪的回溯事件（error_type, strategy_selected, retry_result），便于后续评估和调试",
+              "考虑在Agent响应中添加置信度指标：'基于96.7%有效数据的分析结果，置信度：高'",
+              "如果确认是预处理而非回溯处理了脏数据，需要调整Agent的CSV读取策略——首次应使用严格模式以触发RVR-B管道"
+            ],
+            "scores": {},
+            "weighted_score": 4.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:47:24.378165",
+          "confidence": 0.52,
+          "needs_human_review": true
+        }
+      ]
+    },
+    "I2": {
+      "task_id": "I2",
+      "passed": false,
+      "grade_results": [
+        {
+          "grader_type": "code",
+          "grader_name": "check_backtrack_occurred",
+          "passed": false,
+          "score": 0.0,
+          "explanation": "Backtrack count = 0: Agent completed without backtrack. This test requires at least 1 backtrack(s) to verify error recovery. Either the test data wasn't 'broken enough' or the Agent bypassed the expected failure path.",
+          "details": {
+            "backtrack_count": 0,
+            "min_required": 1,
+            "max_allowed": 5,
+            "exhausted": false,
+            "escalation": null
+          },
+          "timestamp": "2026-02-10 19:49:01.599042",
+          "confidence": null,
+          "needs_human_review": false
+        },
+        {
+          "grader_type": "model",
+          "grader_name": "grade_backtrack_quality",
+          "passed": true,
+          "score": 0.6,
+          "explanation": "",
+          "details": {
+            "pipeline_diagnosis": {
+              "error_detection": {
+                "score": "3",
+                "error_type_identified": "工具返回空/无效数据（第4页扫描件无法提取文字）",
+                "analysis": "Agent 确实识别出第4页为扫描图像、无法提取文字内容，并在两次输出中都明确标注了这一限制。但从工具调用链（plan→nodes→plan→plan→plan）来看，缺乏显式的错误检测环节——没有看到文档提取工具返回错误后被捕获的明确证据。错误识别更像是从文档元信息中推断得出，而非通过工具调用失败触发的结构化错误检测流程。此外，5次调用中4次为plan类型，仅60个output tokens，说明实际的文档解析工具调用要么未被追踪，要么执行不充分。"
+              },
+              "strategy_selection": {
+                "score": "2",
+                "strategy_used": "unknown",
+                "strategy_appropriate": false,
+                "analysis": "预期策略为 TOOL_REPLACE：当文本提取工具对第4页扫描件失败时，应尝试替代工具（如OCR识别、图像分析工具）来尽可能恢复页面内容。但实际情况是Agent直接放弃了第4页，仅标注'无法提取文字内容'。这是一种优雅降级（graceful degradation），但不是真正的TOOL_REPLACE回溯策略。Agent没有尝试任何替代工具（如OCR、视觉模型等），直接跳过了该页，策略选择与预期的TOOL_REPLACE不匹配。工具调用链中也没有看到任何工具切换的痕迹。"
+              },
+              "recovery_quality": {
+                "score": "3",
+                "result_improved": true,
+                "task_completed": true,
+                "analysis": "从最终产出看，Agent成功提取了第1-3页和第5页的关键数据，生成了结构化摘要（含财务绩效、收入构成、客户渠道、风险因素等），内容质量较高且标注了第4页的限制——基本符合预期行为的输出要求。然而存在两个显著问题：(1) 输出包含两份几乎完全相同的结构化摘要，这是明显的回溯机制缺陷——应该用改善后的结果替代初始结果，而不是两份都输出；(2) 没有尝试恢复第4页内容（可能包含重要图表数据），这意味着数据提取实际上是不完整的。第二份摘要仅比第一份多了净利率的计算(14.1%)和微调的表述，改善幅度极小，大量重复内容反而降低了用户体验。"
+              },
+              "loop_protection": {
+                "score": "3",
+                "backtrack_count": "1-2",
+                "repeated_attempts": "部分——两次输出内容高度相似，说明重试未产生实质性差异",
+                "analysis": "工具调用共5次（plan×4 + nodes×1），回溯次数在合理范围内，未出现明显的死循环。但两份几乎相同的输出暗示回溯后的重试并未采用不同的方法或工具，本质上是用相同策略重复了一遍，这与循环防护的精神相违背。没有证据显示failed_tools被记录或用于避免重复尝试。"
+              },
+              "user_transparency": {
+                "score": "3",
+                "informed_user": true,
+                "analysis": "Agent在两份摘要中都明确告知了第4页的限制（扫描图像，无法提取文字），并标注了数据来源说明（'报告共5页，已提取1-3页及第5页文字内容'），提供了后续分析的建议。但存在不足：(1) 没有明确告知用户'遇到了错误正在尝试修复'——用户看到的是两份重复摘要而非一份经过修复改善的摘要，这造成了困惑；(2) 没有解释为什么输出了两份几乎一样的内容；(3) 对于第4页未恢复的内容，没有建议用户提供更清晰的扫描版本或尝试其他方式。"
+              }
+            },
+            "overall_score": 3.0,
+            "task_completed": true,
+            "strengths": [
+              "成功识别第4页为扫描件并明确标注限制，体现了一定的错误感知能力",
+              "最终提取的结构化摘要内容质量较高，涵盖财务绩效、收入构成、客户渠道、风险因素等多个维度",
+              "数据呈现形式规范（表格+列表），结构清晰，可读性强",
+              "提供了关键洞察和后续分析建议，超出了简单数据提取的范畴"
+            ],
+            "optimization_suggestions": [
+              "对扫描件页面应自动触发TOOL_REPLACE：优先尝试OCR工具 → 图像描述工具 → 标注无法恢复，形成三级降级链路",
+              "回溯后的输出应替换初始输出，而非叠加；需要输出管理机制确保用户只看到最终改善版本",
+              "记录failed_tools列表（如text_extract对page4失败），确保重试时使用不同工具而非重复同一策略",
+              "增加对用户的过程透明度：在第4页处理失败时主动告知'正在尝试OCR识别'或'该页需要您手动确认'",
+              "工具调用链应包含实际的文档解析工具调用，而非仅依赖plan节点，确保流程可追溯"
+            ],
+            "scores": {},
+            "weighted_score": 3.0,
+            "weaknesses": []
+          },
+          "timestamp": "2026-02-10 19:50:13.151878",
+          "confidence": 0.78,
+          "needs_human_review": true
+        }
+      ]
     }
   },
-  "updated_at": "2026-02-10T19:12:46.767734"
+  "updated_at": "2026-02-10T19:50:13.152207"
 }

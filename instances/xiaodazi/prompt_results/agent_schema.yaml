@@ -1,5 +1,5 @@
-name: DesktopBuddy
-description: 一个住在用户电脑里的AI搭子，帮助完成各种桌面任务
+name: XiaoDazi
+description: 住在用户电脑里的 AI 搭子，亲切、靠谱、主动
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -9,15 +9,14 @@ intent_analyzer:
   task_types:
   - file_operation
   - data_analysis
-  - writing
-  - translation
-  - screenshot
-  - ui_automation
-  - search
-  - planning
+  - content_generation
+  - desktop_automation
+  - information_retrieval
+  - system_interaction
   output_formats:
   - text
   - markdown
+  - file
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,14 +24,14 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'complex' || (intent.tools && intent.tools.length
-    > 2)
-  max_steps: 20
+  trigger_condition: complexity == 'complex' or (complexity == 'medium' and step_count
+    > 3)
+  max_steps: 15
   granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 3
+  max_replan_attempts: 2
   replan_strategy: incremental
   failure_threshold: 0.3
 tool_selector:
@@ -42,17 +41,14 @@ tool_selector:
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - hitl
-  - plan-todo
   - nodes
-  - knowledge_search
-  - open_system_preferences
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: user
   episodic_memory: true
-  working_memory_limit: 30
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -63,17 +59,33 @@ output_formatter:
   - markdown
   - json
   - html
-  code_highlighting: true
-  max_output_length: 5000
+  code_highlighting: false
+  max_output_length: 4000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills: []
-tools: []
-model: deepseek-reasoner
+skills:
+- name: excel-generator
+  enabled: true
+  description: ''
+- name: knowledge-search
+  enabled: true
+  description: ''
+- name: desktop-automation
+  enabled: true
+  description: ''
+- name: multi-lang-ocr
+  enabled: true
+  description: ''
+tools:
+- nodes
+- hitl
+- plan-todo
+- open_system_preferences
+model: claude-sonnet-4-5-20250929
 max_turns: null
 execution_strategy: rvr-b
 allow_parallel_tools: false
@@ -87,4 +99,30 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 这是一个复杂的桌面AI助手，需要处理从简单查询到多步骤规划的各种任务。根据Prompt分析：1）需要意图分析判断任务复杂度；2）复杂任务需启用规划管理器，支持动态调整和重规划；3）工具选择基于能力，且需包含HITL、规划、文件操作等基础工具；4）记忆管理器需保留用户偏好和习惯，采用用户级别记忆；5）输出格式化使用Markdown以支持结构化输出和友好展示。Skills和Tools留空，由系统根据实际可用能力动态注入。
+reasoning: '这是一个复杂的桌面 AI 助手场景，具有以下特征：
+
+
+  1. **高复杂度任务**：涉及文件操作、数据分析、桌面自动化、应用界面操作等多种复杂任务，需要启用规划能力。设置 medium 粒度以平衡灵活性和效率。
+
+
+  2. **强记忆需求**：明确要求记住用户偏好、习惯、风格等，需要 user 级别的持久化记忆和情景记忆。工作记忆限制设为 50 以支持复杂对话。
+
+
+  3. **本地优先策略**：强调本地执行，tools 列表包含 nodes（本地命令执行）、hitl（用户确认）、plan-todo（任务规划）等核心工具。不启用并行工具以确保操作安全性。
+
+
+  4. **Skills 按需启用**：根据 Prompt 提到的能力启用 excel-generator（表格分析）、knowledge-search（知识库搜索）、desktop-automation（桌面操作）、multi-lang-ocr（OCR
+  文字提取）。
+
+
+  5. **意图分析必需**：需要区分 simple/medium/complex 任务复杂度，并识别多种任务类型（文件操作、数据分析、内容生成、桌面自动化等），因此启用
+  LLM 驱动的意图分析。
+
+
+  6. **输出格式化**：默认 markdown 格式以支持结构化展示（列表、表格等），不启用代码高亮（因为面向普通用户）。
+
+
+  7. **重规划策略**：允许重规划但采用 incremental 策略（保留已完成步骤），最多重规划 2 次，失败率阈值 0.3，符合「遇到问题自己换方法试」的要求。
+
+
+  8. **安全考虑**：不启用并行工具，确保敏感操作（删除、覆盖等）通过 hitl 逐一确认。'

@@ -178,6 +178,14 @@ class Mem0MemoryPool:
             # 4. 创建 SQLite 历史管理器 — instance-scoped
             db = SQLiteManager(self.config.history_db_name)
 
+            # Enable WAL mode + busy_timeout on Mem0's history DB.
+            # SQLiteManager defaults to DELETE journal mode, which causes
+            # "database is locked" under concurrent writes from Mem0's
+            # internal thread pool during batch memory.add() calls.
+            if db.connection is not None:
+                db.connection.execute("PRAGMA journal_mode=WAL")
+                db.connection.execute("PRAGMA busy_timeout=5000")
+
             # 5. 创建最小配置对象（供 Memory 内部方法访问）
             #
             # 注意：Mem0 的 MemoryConfig 只支持预定义的 provider（如 "qdrant"），

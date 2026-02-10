@@ -40,8 +40,8 @@ skill_groups:
     description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理"
     skills: [excel-analyzer, excel-fixer, invoice-organizer]
   file_operation:
-    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印、批量格式转换（图片/文档）、视频帧提取、桌面智能整理、极速全盘文件搜索"
-    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder, windows-explorer-advanced, everything-search]
+    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印/扫描件 OCR 提取、批量格式转换（图片/文档）、视频帧提取、桌面智能整理、极速全盘文件搜索"
+    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, multi-lang-ocr, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder, windows-explorer-advanced, everything-search]
   translation:
     description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
     skills: [translator, locale-aware-formatter, multi-lang-ocr]
@@ -208,7 +208,7 @@ skills:
       - { name: github,              backend_type: local, skill_source: library, bins: ["gh"], description: "GitHub 仓库与 Issue 管理" }
       - { name: draw-io,              backend_type: local, skill_source: instance, requires_app: "draw.io", description: "生成专业流程图、架构图（draw.io 格式）" }
       - { name: excalidraw,           backend_type: local, skill_source: instance, description: "生成手绘风格图表（Excalidraw 格式）" }
-      - { name: multi-lang-ocr,       backend_type: local, skill_source: instance, bins: ["tesseract"], description: "多语言 OCR 图片文字提取（本地离线）" }
+      # multi-lang-ocr: 按 OS 分区注册（darwin/builtin 零安装，win32+linux/lightweight pip 安装）
       - { name: bird,                 backend_type: local, skill_source: library, bins: ["bird"], description: "X/Twitter CLI：读、搜、发帖与互动" }
       - { name: wacli,                backend_type: local, skill_source: library, bins: ["wacli"], description: "WhatsApp 消息发送与历史同步" }
       - { name: gemini,               backend_type: local, skill_source: library, bins: ["gemini"], description: "Gemini CLI 问答与生成" }
@@ -254,6 +254,7 @@ skills:
       - { name: macos-finder,        backend_type: local, skill_source: instance, system: true, description: "Finder 操作：标签、预览、文件信息" }
       - { name: applescript,         backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
       - { name: app-scanner,         backend_type: local, skill_source: instance, system: true, description: "发现已安装应用" }
+      - { name: multi-lang-ocr,     backend_type: local, skill_source: instance, description: "多语言 OCR 图片文字提取（macOS Vision 内置，中英混排，零安装）" }
 
     lightweight:
       - { name: apple-notes,         backend_type: local, skill_source: library, system_auth: "accessibility", description: "Apple 备忘录" }
@@ -284,6 +285,7 @@ skills:
       - { name: task-scheduler,              backend_type: local, skill_source: instance, description: "Windows 任务计划程序：定时任务自动化" }
 
     lightweight:
+      - { name: multi-lang-ocr,              backend_type: local, skill_source: instance, auto_install: "pip install rapidocr-onnxruntime", description: "多语言 OCR 图片文字提取（中英混排，本地离线）" }
       - { name: outlook-cli,                 backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
       - { name: onenote,                     backend_type: local, skill_source: instance, requires_app: "OneNote", description: "OneNote 笔记" }
       - { name: pywinauto,                   backend_type: local, skill_source: instance, python_packages: ["pywinauto"], description: "Windows UI 自动化：操作任意桌面应用" }
@@ -300,6 +302,7 @@ skills:
       - { name: linux-clipboard,      backend_type: local, skill_source: instance, system: true, description: "Linux 剪贴板" }
 
     lightweight:
+      - { name: multi-lang-ocr,      backend_type: local, skill_source: instance, auto_install: "pip install rapidocr-onnxruntime", description: "多语言 OCR 图片文字提取（中英混排，本地离线）" }
       - { name: linux-notification,   backend_type: local, skill_source: instance, bins: ["notify-send"], description: "Linux 桌面通知" }
 
     external:
