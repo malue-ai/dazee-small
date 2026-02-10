@@ -1261,6 +1261,9 @@ class RVRBExecutor(RVRExecutor):
                 }
             )
 
+            # Record tool call signature for dedup detection
+            ctx.record_tool_call(tool_name, tool_input)
+
         append_assistant_message(llm_messages, response.raw_content)
 
         if tool_results:
@@ -1269,6 +1272,17 @@ class RVRBExecutor(RVRExecutor):
             # 参考 2025 研究：context pollution 是 Agent 回溯后性能下降的主要原因。
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
+
+        # Trajectory dedup: same (tool_name, params) called N+ times in a row
+        # → inject hint for LLM to self-correct (not force stop)
+        # This is deterministic dedup (same input = same output), not semantic judgment.
+        if ctx.detect_repeated_call(threshold=3):
+            _dedup_hint = (
+                "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
+                "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
+            )
+            append_user_message(llm_messages, _dedup_hint)
+            logger.warning(f"🔁 轨迹去重: 完全相同的工具调用连续 {ctx._consecutive_duplicate_count + 1} 次，注入提示")
 
         # HITL pending 检测：如果工具返回了 pending_user_input，暂停执行等待用户响应。
         # 防止 LLM 看到 pending 结果后再次调用 hitl（连续 2 次调用 bug）。
@@ -1379,10 +1393,22 @@ class RVRBExecutor(RVRExecutor):
                 }
             )
 
+            # Record tool call signature for dedup detection
+            ctx.record_tool_call(tool_name, tool_input)
+
         if tool_results:
             # Context Pollution 清理（与 stream 版本对齐）
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
+
+        # Trajectory dedup (non-stream, same logic as stream)
+        if ctx.detect_repeated_call(threshold=3):
+            _dedup_hint = (
+                "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
+                "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
+            )
+            append_user_message(llm_messages, _dedup_hint)
+            logger.warning(f"🔁 轨迹去重: 完全相同的工具调用连续 {ctx._consecutive_duplicate_count + 1} 次，注入提示")
 
         # HITL pending 检测（non-stream 版本，逻辑与 stream 版本一致）
         for _tr in tool_results:

@@ -409,9 +409,10 @@ class EventBroadcaster:
                         f"🔧 更新 tool_input 缓存: tool_id={tool_id}, keys={list(tool_input.keys())}"
                     )
 
-                # 🆕 HITL 工具特殊处理：在 tool_use 完成时发送表单请求事件
+                # HITL 工具特殊处理：在 tool_use 完成时发送表单请求事件
                 # 前端需要在工具执行前就收到表单信息，以便渲染表单界面
-                if tool_name == "hitl" and tool_input:
+                _HITL_TOOL_NAME = "hitl"  # Single source: tools/hitl_tool.py
+                if tool_name == _HITL_TOOL_NAME and tool_input:
                     logger.info(f"🎯 [HITL] 检测到 hitl 工具调用完成，发送表单请求事件")
                     await self._emit_hitl_request_event(session_id, tool_input)
 

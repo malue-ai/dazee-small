@@ -519,6 +519,12 @@ class RuntimeContext:
     # === 自适应终止（V11）===
     consecutive_failures: int = 0  # 连续失败次数（工具错误/超时等）
 
+    # === 工具调用轨迹（去重检测）===
+    # 记录最近的 (tool_name, params_hash) 用于检测完全相同的重复调用
+    # 参考 TrajTune (2025) 的运行时轨迹监控思路
+    _tool_call_signatures: List[str] = field(default_factory=list)
+    _consecutive_duplicate_count: int = 0
+
     # === 回溯状态（V12 回溯↔终止联动）===
     total_backtracks: int = 0  # 累计回溯次数
     backtracks_exhausted: bool = False  # 回溯是否已耗尽
@@ -630,6 +636,49 @@ class RuntimeContext:
         """更新最后活动时间（每次 LLM 响应或工具调用时调用）"""
         self.last_activity_time = datetime.now()
 
+    # === 工具调用轨迹（去重检测）===
+
+    def record_tool_call(self, tool_name: str, tool_input: dict) -> None:
+        """
+        Record a tool call signature for deduplication.
+
+        Stores a deterministic hash of (tool_name, sorted_params).
+        """
+        import hashlib
+        import json as _json
+
+        sig = hashlib.md5(
+            f"{tool_name}:{_json.dumps(tool_input, sort_keys=True, ensure_ascii=False)}".encode()
+        ).hexdigest()
+
+        if self._tool_call_signatures and self._tool_call_signatures[-1] == sig:
+            self._consecutive_duplicate_count += 1
+        else:
+            self._consecutive_duplicate_count = 0
+
+        self._tool_call_signatures.append(sig)
+        # Keep bounded
+        if len(self._tool_call_signatures) > 50:
+            self._tool_call_signatures = self._tool_call_signatures[-20:]
+
+    def detect_repeated_call(self, threshold: int = 3) -> bool:
+        """
+        Check if the same (tool_name, params) was called consecutively.
+
+        This is a deterministic deduplication check (same input = same output),
+        not a semantic judgment. Analogous to HTTP request deduplication.
+
+        Args:
+            threshold: Minimum number of consecutive identical calls to trigger.
+                       3 means: A() → A() → A() with identical params triggers.
+
+        Returns:
+            True if consecutive identical calls >= threshold.
+        """
+        # _consecutive_duplicate_count tracks duplicates after the first call,
+        # so 3 identical calls → count=2. Trigger when count >= threshold-1.
+        return self._consecutive_duplicate_count >= threshold - 1
+
     # === 状态重置方法 ===
 
     def reset_for_turn(self) -> None:
@@ -652,6 +701,9 @@ class RuntimeContext:
         self.step_index = 0
         self.current_turn = 0
         self.consecutive_failures = 0
+        # 工具轨迹重置
+        self._tool_call_signatures = []
+        self._consecutive_duplicate_count = 0
         # V12 回溯状态重置
         self.total_backtracks = 0
         self.backtracks_exhausted = False

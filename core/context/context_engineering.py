@@ -421,14 +421,20 @@ class ToolMasker:
 
     def infer_state_from_action(self, action: str, tool_name: Optional[str] = None) -> AgentState:
         """
-        从动作推断状态
+        Infer agent state from action/tool name (UI hint only).
+
+        WARNING: This uses keyword/prefix matching for DISPLAY PURPOSES ONLY
+        (frontend status label like "searching...", "coding...").
+        It does NOT influence any agent execution decisions.
+        Do NOT use the return value for routing, tool selection, or any
+        semantic decision — those must be LLM-driven.
 
         Args:
-            action: 动作描述
-            tool_name: 工具名称
+            action: Action description
+            tool_name: Tool name
 
         Returns:
-            推断的状态
+            Inferred state (for UI display)
         """
         action_lower = action.lower()
 
