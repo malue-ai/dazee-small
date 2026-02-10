@@ -870,24 +870,48 @@ function handleStreamEvent(event: { type: string; data: any }): void {
 /**
  * 从 AI 回复中解析 JSON 代码块，自动填充表单
  * 支持格式：```json { "name": "...", "description": "...", "instructions": "..." } ```
+ *
+ * 注意：instructions 字段可能包含 Markdown 代码块（如 ```markdown ... ```），
+ * 导致简单的非贪婪正则 /([\s\S]*?)```/ 在第一个内嵌 ``` 处就截断，JSON 解析失败。
+ * 因此需要尝试所有可能的闭合 ``` 位置，从最远处向前逐一尝试 JSON.parse。
  */
 function parseAndFillForm(text: string): void {
   if (!text) return
 
-  // 匹配 ```json ... ``` 代码块（(?!\w) 防止匹配到内容中的 ```python 等语言标记）
-  const jsonBlockRegex = /```json\s*\n?([\s\S]*?)```(?!\w)/g
-  let match: RegExpExecArray | null = null
   let lastJson: Record<string, string> | null = null
 
-  while ((match = jsonBlockRegex.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1].trim())
-      if (typeof parsed === 'object' && parsed !== null) {
-        lastJson = parsed
-      }
-    } catch {
-      // JSON 解析失败，跳过
+  // 查找所有 ```json 代码块起始位置
+  const jsonStartRegex = /```json\s*\n?/g
+  let marker: RegExpExecArray | null = null
+
+  while ((marker = jsonStartRegex.exec(text)) !== null) {
+    const contentStart = marker.index + marker[0].length
+
+    // 收集 contentStart 之后所有 ``` 的位置
+    const closingPositions: number[] = []
+    let searchFrom = contentStart
+    while (true) {
+      const idx = text.indexOf('```', searchFrom)
+      if (idx === -1) break
+      closingPositions.push(idx)
+      searchFrom = idx + 3
     }
+
+    // 从最远的位置向前尝试（贪婪：优先取最大的有效 JSON 块）
+    for (let i = closingPositions.length - 1; i >= 0; i--) {
+      const candidate = text.slice(contentStart, closingPositions[i]).trim()
+      try {
+        const parsed = JSON.parse(candidate)
+        if (typeof parsed === 'object' && parsed !== null) {
+          lastJson = parsed
+          break
+        }
+      } catch {
+        // JSON 解析失败，尝试更早的闭合位置
+      }
+    }
+
+    if (lastJson) break // 已找到有效 JSON，停止搜索
   }
 
   if (!lastJson) return
