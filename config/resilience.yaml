@@ -62,18 +62,6 @@ circuit_breakers:
     failure_threshold: 10
     timeout: 20.0
 
-# Agent 执行层断路器（防止 Agent 死循环）
-agent_circuit_breaker:
-  # 复杂度 → 软轮次限制（超过后强制文本回复）
-  soft_turn_limits:
-    simple: 5
-    medium: 15
-    complex: 30
-  # 同一工具连续调用 N 次触发断路
-  consecutive_same_tool_limit: 3
-  # 强制文本回复后仍调用工具 → 硬停止
-  force_text_hard_stop: 2
-
 # 降级策略
 fallback:
   # LLM 服务降级
