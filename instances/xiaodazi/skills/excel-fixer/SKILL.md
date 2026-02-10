@@ -1,6 +1,8 @@
 ---
 name: excel-fixer
 description: Auto-detect and fix common Excel formatting issues like merged cells, inconsistent types, duplicate headers, and encoding problems.
+version: "1.0.0"
+depends_on: [excel-analyzer]
 metadata:
   xiaodazi:
     dependency_level: lightweight

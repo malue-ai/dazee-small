@@ -289,6 +289,7 @@ async def run_e2e(
     clean: bool = False,
     suite_name: str | None = None,
     defer_grading: bool = False,
+    **kwargs,
 ) -> int:
     """Run E2E evaluation, return exit code (0=pass, 1=fail).
 
@@ -353,10 +354,13 @@ async def run_e2e(
     if completed:
         _warn(f"Checkpoint: {completed} already done → resuming from next")
 
-    # --- Pass 1: Execute all cases (resilient — timeout/error won't crash the loop) ---
+    # --- Pass 1: Execute all cases (resilient, supports parallel) ---
+    parallel = kwargs.get("parallel", 1)
     task_results: list[TaskResult] = []
     failed_cases: list[str] = []
-    for task in suite.tasks:
+
+    async def _run_one(task):
+        """Run a single case with error handling."""
         _log("▶", f"Case {task.id}: {task.description}")
         try:
             tr = await run_case(
@@ -375,10 +379,9 @@ async def run_e2e(
                 passed = tr.pass_rate >= 1.0
                 status = f"{Colors.GREEN}PASS{Colors.RESET}" if passed else f"{Colors.RED}FAIL{Colors.RESET}"
                 print(f"  [{status}] {task.id}: {task.description}")
-                task_results.append(tr)
+                return tr
         except TimeoutError as e:
             _fail(f"{task.id} TIMEOUT: {e}")
-            _warn(f"Saving partial checkpoint and continuing to next case")
             checkpoint.setdefault("completed_cases", []).append(task.id)
             checkpoint.setdefault("results", {})[task.id] = {
                 "task_id": task.id, "error": f"TimeoutError: {e}", "graded": False,
@@ -387,13 +390,30 @@ async def run_e2e(
             failed_cases.append(task.id)
         except Exception as e:
             _fail(f"{task.id} ERROR: {type(e).__name__}: {e}")
-            _warn(f"Saving checkpoint and continuing")
             checkpoint.setdefault("completed_cases", []).append(task.id)
             checkpoint.setdefault("results", {})[task.id] = {
                 "task_id": task.id, "error": f"{type(e).__name__}: {e}", "graded": False,
             }
             save_checkpoint(checkpoint, ckpt_file)
             failed_cases.append(task.id)
+        return None
+
+    if parallel > 1:
+        _log("⚡", f"Parallel execution: {parallel} concurrent cases")
+        import asyncio as _aio
+        semaphore = _aio.Semaphore(parallel)
+
+        async def _run_with_sem(task):
+            async with semaphore:
+                return await _run_one(task)
+
+        results = await _aio.gather(*[_run_with_sem(t) for t in suite.tasks])
+        task_results = [r for r in results if r is not None]
+    else:
+        for task in suite.tasks:
+            tr = await _run_one(task)
+            if tr is not None:
+                task_results.append(tr)
 
     if failed_cases:
         _warn(f"Cases with errors: {failed_cases}")
@@ -600,6 +620,8 @@ Examples:
                         help="Suite name (phase1_core / phase2_scenarios) or path to YAML")
     parser.add_argument("--defer-grading", action="store_true",
                         help="Execute all cases first, grade all at end (recommended for long tasks)")
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="Number of cases to run in parallel (default: 1 = sequential)")
     return parser.parse_args()
 
 
@@ -667,6 +689,7 @@ async def async_main() -> int:
             clean=args.clean,
             suite_name=args.suite,
             defer_grading=args.defer_grading,
+            parallel=args.parallel,
         )
         return exit_code
 

@@ -1,6 +1,16 @@
 ---
 name: translator
 description: Multi-language translator for text, documents, and conversations. Supports Chinese, English, Japanese, Korean, and more.
+version: "1.0.0"
+parameters:
+  - name: text
+    type: string
+    required: true
+    description: "要翻译的文本或文件路径"
+  - name: target_language
+    type: string
+    default: "zh"
+    description: "目标语言代码（zh/en/ja/ko 等）"
 metadata:
   xiaodazi:
     dependency_level: builtin

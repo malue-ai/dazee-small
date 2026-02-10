@@ -176,24 +176,44 @@ class InstanceMemoryManager:
 
     # ==================== remember（双写）====================
 
+    # ---------- P0: 显式身份/偏好检测 ----------
+    # 用户"我是…""我用…""我喜欢…"等 identity statements 应高优先级写入。
+    _IDENTITY_PATTERNS = [
+        re.compile(r"^我是.{2,}", re.I),
+        re.compile(r"^我(常|经常|平时|主要)用", re.I),
+        re.compile(r"^我(喜欢|偏好|习惯)", re.I),
+        re.compile(r"^我的(职业|角色|岗位|工作)是", re.I),
+    ]
+
+    @staticmethod
+    def _is_identity_statement(content: str) -> bool:
+        """Check if content is an explicit identity/preference statement."""
+        stripped = content.strip()
+        return any(
+            p.search(stripped)
+            for p in InstanceMemoryManager._IDENTITY_PATTERNS
+        )
+
     async def remember(
         self,
         content: str,
         category: str = "general",
         project_id: Optional[str] = None,
+        priority: str = "normal",
     ) -> None:
         """
-        记住新信息（双写策略）
+        Remember new information (dual-write strategy).
 
-        1. 冲突检测（Mem0 QualityController）
-        2. 写入 MEMORY.md 对应段落（Layer 1）
-        3. 更新 FTS5 索引（Layer 2）
-        4. 写入 Mem0 向量存储（Layer 3）
+        1. Conflict detection (Mem0 QualityController) with last-write-wins
+        2. Write to MEMORY.md section (Layer 1)
+        3. Update FTS5 index (Layer 2)
+        4. Write to Mem0 vector store (Layer 3)
 
         Args:
-            content: 记忆内容
-            category: 分类（preference/fact/workflow/style/general）
-            project_id: 项目 ID（可选）
+            content: Memory content
+            category: Category (preference/fact/workflow/style/general)
+            project_id: Project ID (optional)
+            priority: "high" for identity statements, "normal" otherwise
         """
         if not self._enabled:
             return
@@ -206,12 +226,21 @@ class InstanceMemoryManager:
             logger.debug(f"跳过临时指令: {content[:50]}")
             return
 
-        # Layer 3: 冲突检测（如果 Mem0 启用）
+        # Auto-detect high-priority identity statements
+        if priority == "normal" and self._is_identity_statement(content):
+            priority = "high"
+            # Auto-categorize identity statements
+            if category == "general":
+                category = "fact" if "我是" in content or "职业" in content else "preference"
+            logger.info(f"🏷️ 检测到身份声明，提升优先级: [{category}] {content[:50]}")
+
+        # Layer 3: 冲突检测（如果 Mem0 启用）+ last-write-wins
         if self._mem0_enabled:
             conflicts = await self._check_conflicts(content, category)
             if conflicts:
                 logger.info(
-                    f"记忆冲突检测: {len(conflicts)} 个冲突，自动解决"
+                    f"记忆冲突检测: {len(conflicts)} 个冲突，"
+                    f"采用 last-write-wins 策略覆盖旧记忆"
                 )
 
         # Layer 1: 写入 MEMORY.md

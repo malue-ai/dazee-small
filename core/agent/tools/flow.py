@@ -202,6 +202,11 @@ class ToolExecutionFlow:
             if tool_name in self._handlers:
                 return await self._handlers[tool_name].execute(tool_input, context, tool_id)
 
+            # 非 plan 工具执行 → 重置 PlanTodoHandler 的连续计数器
+            plan_handler = self._handlers.get("plan")
+            if plan_handler and hasattr(plan_handler, "reset_consecutive_count"):
+                plan_handler.reset_consecutive_count()
+
             # 通用工具执行
             if not context.tool_executor:
                 raise ValueError("tool_executor 未配置")

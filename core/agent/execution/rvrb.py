@@ -1152,6 +1152,44 @@ class RVRBExecutor(RVRExecutor):
                         exc_info=True,
                     )
 
+        # ---------- P0: 最终回复兜底（与 RVRExecutor 保持一致）----------
+        if not ctx.is_completed() or not (ctx.final_result and ctx.final_result.strip()):
+            _last_msg = llm_messages[-1] if llm_messages else None
+            _last_role = (
+                getattr(_last_msg, "role", None)
+                or (_last_msg.get("role") if isinstance(_last_msg, dict) else None)
+            )
+            _last_content = (
+                getattr(_last_msg, "content", "")
+                or (_last_msg.get("content", "") if isinstance(_last_msg, dict) else "")
+            )
+            _needs_summary = (
+                _last_role != "assistant"
+                or not (isinstance(_last_content, str) and _last_content.strip())
+            )
+
+            if _needs_summary and llm:
+                logger.info("🔄 最终回复兜底(RVRB): 循环结束但无非空 assistant 回复，生成总结...")
+                try:
+                    async for event in self._process_stream(
+                        llm=llm,
+                        messages=llm_messages,
+                        system_prompt=system_prompt,
+                        tools=[],
+                        ctx=ctx,
+                        session_id=session_id,
+                        broadcaster=broadcaster,
+                        usage_tracker=usage_tracker,
+                        is_first_turn=False,
+                    ):
+                        yield event
+
+                    final_resp = ctx.last_llm_response
+                    if final_resp and final_resp.content:
+                        ctx.set_completed(final_resp.content, final_resp.stop_reason)
+                except Exception as e:
+                    logger.warning(f"最终回复兜底(RVRB)失败: {e}", exc_info=True)
+
         # 清理状态
         self._clear_rvrb_state(session_id)
         logger.info(f"✅ RVRBExecutor 执行完成: turns={ctx.current_turn}")

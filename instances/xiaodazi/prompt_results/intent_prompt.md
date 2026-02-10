@@ -1,10 +1,8 @@
 # 意图分类器
 
-分析用户请求，输出 JSON 格式的意图分类结果。
+分析用户请求，输出 JSON。
 
 ## 输出格式
-
-必须严格输出以下 JSON 格式：
 
 ```json
 {
@@ -12,121 +10,198 @@
   "skip_memory": true|false,
   "is_follow_up": true|false,
   "wants_to_stop": true|false,
-  "wants_rollback": true|false,
   "relevant_skill_groups": ["group1", "group2"]
 }
 ```
 
 ## complexity（复杂度）
 
-- **simple**: 单步骤，可通过单次回答或单次工具调用完成
-- **medium**: 2-5 步骤，步骤清晰且相对独立
-- **complex**: 5+ 步骤，多工具协同、多次 UI 操作或需要循环验证
+- **simple**: 单步骤，直接回答或单次工具调用
+  - 示例1: "今天天气怎么样"（直接调用天气技能）
+  - 示例2: "打开飞书"（单次应用启动）
+  - 示例3: "截取当前屏幕"（单次截图操作）
 
-不确定时选更高级别（medium > simple，complex > medium）。
+- **medium**: 2-4 步骤，需少量规划
+  - 示例1: "帮我写一封请假邮件"（需获取原因时间，生成内容，2-3步）
+  - 示例2: "分析这个Excel表格并告诉我最大值"（读取、分析、输出）
+  - 示例3: "把下载文件夹里的图片移动到图片文件夹"（扫描、移动、确认）
+
+- **complex**: 5+ 步骤，需完整规划
+  - 示例1: "整理下载文件夹，按类型分类，把超过半年的旧文件列个清单"（扫描、分类、移动、筛选、生成清单）
+  - 示例2: "打开飞书给合伙人群发一句问候"（打开应用、观察界面、搜索群聊、点击进入、输入发送、验证）
+  - 示例3: "帮我把所有项目文档中的'测试环境'替换为'预发布环境'，并备份原文件"（多文件读取、替换、验证、备份）
 
 ## skip_memory（跳过记忆检索）
 
-以下情况设为 `true`，其他默认 `false`：
-- 通用知识问答（不涉及用户个人信息或历史偏好）
-- 实时信息查询（天气、时间、新闻等）
-- 系统功能咨询（"你能做什么"）
+默认 false。设为 true 的情况：
+- 请求为通用性、无个性化信息查询（如天气、时间）
+- 请求明确不依赖历史信息（如"不用管我之前说的"）
+- 系统维护类操作（如"打开系统设置"）
 
 ## is_follow_up（是否为追问）
 
-用户请求是对上一轮对话的延续、补充或修改。典型特征：指代词（"再来一个"）、增量修改（"换个风格"）、确认/否定（"对"/"算了"）。默认 `false`。
+默认 false。设为 true 的情况：
+- 用户使用代词指向前文（如"那明天呢？"、"上面的文件"）
+- 用户要求继续或调整之前的任务（如"再写详细点"、"换个风格"）
+- 用户询问之前操作的结果（如"刚才的替换完成了吗？"）
 
 ## wants_to_stop（用户是否希望停止/取消）
 
-用户明确表示停止、取消、不做了时为 `true`。默认 `false`。
-
-## wants_rollback（用户是否要求撤销之前的修改）
-
-**仅当最新一条用户消息**明确要求撤销/恢复 Agent 之前的文件修改时才为 `true`。
-
-判断规则：
-- 只看对话中**最后一条**用户消息（不看历史消息）
-- 如果最后一条消息是新任务（如"删除某文件"、"写个报告"），即使之前的消息提过"恢复"，也是 `false`
-- 要求恢复**其他东西**（如网络、系统、数据）不是 rollback
-
-默认 `false`。
+默认 false。设为 true 的情况：
+- 用户明确表示停止（如"算了"、"取消"、"不用了"）
+- 用户要求恢复原样（如"恢复修改"、"回滚"）
+- 用户中断当前流程（如"先停一下"、"等一下"）
 
 ## relevant_skill_groups（需要哪些技能分组）
 
-从以下分组中选择所有可能相关的，宁多勿漏：
-
-- **writing** - 写作、润色、改写、风格学习、PDF 报告
-- **data_analysis** - Excel/CSV 分析、图表、报表
-- **file_operation** - 文件搜索/移动/删除/重命名、Word 文档
-- **translation** - 多语言翻译
-- **research** - 学术论文搜索、文献综述
-- **meeting** - 会议记录分析、行动项提取
-- **career** - 职位分析、简历优化、面试准备
-- **learning** - 个人导师、系统学习、测验
-- **creative** - 头脑风暴、方案构思
-- **diagram** - 流程图、架构图、思维导图
-- **image_gen** - AI 图像生成、配图
-- **media** - 语音转文字、文字转语音
-- **health** - 营养分析、用药管理
-- **productivity** - 笔记、待办、日历、邮件
-- **app_automation** - 打开/操作桌面应用、UI 交互
-- **code** - GitHub 仓库、代码管理
+1. **文件操作**: 文件读取、写入、移动、删除、重命名、备份等本地文件系统操作
+2. **写作编辑**: 文本生成、内容编辑、格式转换、翻译等文字处理任务
+3. **数据分析**: 表格处理、数据统计、图表生成等数据分析任务
+4. **桌面控制**: 应用启动、界面操作、截图、系统设置等桌面交互
+5. **搜索检索**: 本地文件搜索、知识库查询、信息查找
+6. **规划管理**: 任务拆解、步骤规划、进度跟踪、多步骤协调
+7. **用户交互**: HITL确认、偏好学习、记忆管理、个性化服务
+8. **系统工具**: Shell命令执行、环境检测、权限管理、系统级操作
 
 ## Few-Shot 示例
 
 <example>
-<query>今天天气怎么样</query>
-<output>{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}</output>
-<reasoning>单步查询，无需个人记忆</reasoning>
+<user_query>今天天气怎么样？</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": true,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["桌面控制", "用户交互"]
+}
 </example>
 
 <example>
-<query>帮我写一封请假邮件，明天要去看病</query>
-<output>{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}</output>
-<reasoning>需要确认信息+生成内容，2-3步；需要记忆（用户称呼、邮件风格）</reasoning>
+<user_query>帮我写一封请假邮件，原因是家里有事，时间从明天到后天。</user_query>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["写作编辑", "用户交互"]
+}
 </example>
 
 <example>
-<query>整理下载文件夹，按类型分类，把超过半年的旧文件列清单</query>
-<output>{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"]}</output>
-<reasoning>扫描→分类→移动→筛选→生成清单，5+步骤</reasoning>
+<user_query>整理我的下载文件夹，把图片、文档和压缩包分别放到对应的子文件夹里。</user_query>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["文件操作", "规划管理", "搜索检索"]
+}
 </example>
 
 <example>
-<query>改成正式一点的语气</query>
-<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}</output>
-<reasoning>"改成"是对上一轮输出的修改，是追问</reasoning>
+<user_query>打开飞书，然后给合伙人群发一条消息说下午的会议取消。</user_query>
+{
+  "complexity": "complex",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["桌面控制", "规划管理", "用户交互"]
+}
 </example>
 
 <example>
-<query>算了，不用了</query>
-<output>{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": true, "wants_rollback": false, "relevant_skill_groups": []}</output>
-<reasoning>明确取消意图</reasoning>
+<user_query>我刚才让你整理的文件，能恢复原样吗？</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": true,
+  "relevant_skill_groups": ["文件操作", "用户交互"]
+}
 </example>
 
 <example>
-<query>都不对 给我恢复到之前的</query>
-<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": true, "relevant_skill_groups": ["file_operation"]}</output>
-<reasoning>用户否定了上一轮 Agent 对文件的修改，要求恢复到修改前的状态</reasoning>
+<user_query>算了，不用整理了。</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": true,
+  "relevant_skill_groups": ["用户交互"]
+}
 </example>
 
 <example>
-<query>帮我恢复一下网络连接</query>
-<output>{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"]}</output>
-<reasoning>虽然包含"恢复"，但指的是修复网络问题，不是撤销 Agent 的文件修改</reasoning>
+<user_query>你记得我上次说的写作风格吗？用那个风格写一篇关于咖啡的短文。</user_query>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["写作编辑", "用户交互", "搜索检索"]
+}
 </example>
 
 <example>
-<history>用户之前说过"恢复原文件"（已处理完毕），现在发新消息：</history>
-<query>删除桌面Q2_planning.md文件</query>
-<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"]}</output>
-<reasoning>最新消息是"删除文件"，是一个新任务。虽然历史中有"恢复原文件"，但那是之前已完成的请求，不影响当前意图判断</reasoning>
+<user_query>帮我分析一下这个月开支的Excel表格，告诉我哪些项目超支了。</user_query>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["数据分析", "文件操作"]
+}
+</example>
+
+<example>
+<user_query>截取当前屏幕并保存到桌面。</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": true,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["桌面控制", "文件操作"]
+}
+</example>
+
+<example>
+<user_query>我刚刚问的天气是北京的吗？</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["用户交互"]
+}
+</example>
+
+<example>
+<user_query>打开系统设置，我要开屏幕录制权限。</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": true,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["系统工具", "桌面控制"]
+}
+</example>
+
+<example>
+<user_query>搜索我知识库里关于AI Agent的资料。</user_query>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["搜索检索", "用户交互"]
+}
 </example>
 
 ## 重要说明
 
-1. 不确定复杂度时，选更高级别
-2. 不确定是否需要记忆时，`skip_memory` 设为 `false`
-3. 技能分组不确定时，宁可多选不要遗漏
-4. 一个任务可能需要多个技能分组
-5. `wants_rollback` 和 `wants_to_stop` 只看**最新一条**用户消息，不看历史
+- 所有字段必须有值，不能为空或null
+- `skip_memory`、`is_follow_up`、`wants_to_stop` 默认均为 false，除非明确符合对应条件
+- `relevant_skill_groups` 选择原则：宁多勿漏，只要可能涉及的分组都应包含
+- 复杂度判断基于预估步骤数，而非最终执行步骤数
+- 追问判断需结合上下文，如果无法确定上下文相关性，默认设为 false
+- 停止意图优先级最高，只要用户明确表示停止/取消，`wants_to_stop` 必须为 true

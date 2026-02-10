@@ -175,7 +175,7 @@ Actions:
             node_id=node_id,
         )
 
-        result = {
+        result: Dict[str, Any] = {
             "success": response.ok,
             "action": "run",
             "node": node_id,
@@ -184,6 +184,17 @@ Actions:
             "error": response.error if not response.ok else None,
             "elapsed_ms": response.elapsed_ms,
         }
+
+        # Structured error classification for failed commands
+        if not response.ok and response.error:
+            err_lower = response.error.lower()
+            if "超时" in response.error or "timeout" in err_lower:
+                result["error_type"] = "timeout"
+            elif "permission" in err_lower or "权限" in response.error:
+                result["error_type"] = "permission_denied"
+                result["recovery_hint"] = "open_system_preferences:accessibility"
+            elif "not found" in err_lower or "command not found" in err_lower:
+                result["error_type"] = "dependency_missing"
 
         # Set compression hint based on command type.
         # Read commands return data the Agent needs intact; skip compression.

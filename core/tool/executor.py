@@ -288,11 +288,68 @@ class ToolExecutor:
             return {"success": False, "error": f"工具 {tool_name} 未加载"}
 
         try:
-            result = await self._execute_tool(tool_name, tool_instance, tool_input, ctx)
+            # Execution timeout: prevents stuck tools from blocking the Agent
+            timeout_s = getattr(tool_instance, "execution_timeout", 60)
+            result = await asyncio.wait_for(
+                self._execute_tool(tool_name, tool_instance, tool_input, ctx),
+                timeout=timeout_s,
+            )
+            # Track usage for adaptive Skill ordering (async, non-blocking)
+            self._record_usage(tool_name, result)
             return await self._maybe_compact(tool_name, effective_tool_id, result, skip_compaction)
+        except asyncio.TimeoutError:
+            from core.tool.types import ToolError, ToolErrorType
+            logger.error(f"工具 {tool_name} 执行超时")
+            return ToolError(
+                error_type=ToolErrorType.TIMEOUT,
+                message=f"工具 {tool_name} 执行超时",
+            ).to_dict()
+        except PermissionError as e:
+            from core.tool.types import ToolError, ToolErrorType
+            logger.error(f"工具 {tool_name} 权限不足: {e}", exc_info=True)
+            return ToolError(
+                error_type=ToolErrorType.PERMISSION_DENIED,
+                message=str(e),
+            ).to_dict()
         except Exception as e:
+            from core.tool.types import ToolError, ToolErrorType
+            error_str = str(e)
             logger.error(f"执行工具 {tool_name} 失败: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
+
+            # Classify common errors into structured types
+            error_type = ToolErrorType.PERMANENT
+            recovery = None
+            lower = error_str.lower()
+            if "timeout" in lower or "timed out" in lower:
+                error_type = ToolErrorType.TIMEOUT
+            elif "permission" in lower or "not authorized" in lower:
+                error_type = ToolErrorType.PERMISSION_DENIED
+            elif "not found" in lower or "not installed" in lower:
+                error_type = ToolErrorType.DEPENDENCY_MISSING
+            elif "rate limit" in lower or "429" in lower:
+                error_type = ToolErrorType.RATE_LIMITED
+                recovery = "retry_after:30"
+
+            return ToolError(
+                error_type=error_type,
+                message=error_str,
+                recovery_hint=recovery,
+            ).to_dict()
+
+    @staticmethod
+    def _record_usage(tool_name: str, result: Any) -> None:
+        """Fire-and-forget usage recording for adaptive Skill ordering."""
+        try:
+            from core.skill.usage_tracker import get_usage_tracker
+            success = True
+            if isinstance(result, dict):
+                success = result.get("success", True)
+            tracker = get_usage_tracker()
+            # Schedule async write without awaiting (non-blocking)
+            import asyncio
+            asyncio.ensure_future(tracker.record(tool_name, success))
+        except Exception:
+            pass  # Never let tracking failure affect tool execution
 
     async def _execute_tool(
         self, tool_name: str, tool_instance: Any, tool_input: Dict[str, Any], context: ToolContext

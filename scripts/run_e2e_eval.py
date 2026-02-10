@@ -35,6 +35,7 @@ SUITES_DIR = PROJECT_ROOT / "evaluation" / "suites" / "xiaodazi" / "e2e"
 SUITE_REGISTRY = {
     "phase1_core": SUITES_DIR / "phase1_core.yaml",
     "phase2_scenarios": SUITES_DIR / "phase2_scenarios.yaml",
+    "phase3_full": SUITES_DIR / "phase3_full.yaml",
 }
 DEFAULT_SUITE = "phase1_core"
 

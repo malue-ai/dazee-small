@@ -147,7 +147,61 @@ class SkillsLoader:
         # 打印加载摘要
         self._log_summary()
 
+        # 检查 Skill 间依赖关系（纯日志，不阻断）
+        self._validate_dependencies()
+
         return self._entries
+
+    def refresh_skill_status(self, name: str) -> Optional[SkillEntry]:
+        """
+        Re-check a single Skill's runtime status.
+
+        Call this when:
+          - A tool execution fails with permission/dependency error
+          - User says "I've granted the permission"
+          - Frontend triggers a status refresh
+
+        Cost: < 1ms for auth checks, < 10ms for bin/package checks.
+        Does NOT re-read SKILL.md or re-parse config.
+
+        Args:
+            name: Skill name
+
+        Returns:
+            Updated SkillEntry, or None if not found.
+        """
+        entry = self.get_skill(name)
+        if not entry:
+            return None
+
+        old_status = entry.status
+        self._check_status(entry)
+
+        if entry.status != old_status:
+            logger.info(
+                f"Skill 状态变更: {name} {old_status.value} → {entry.status.value}"
+            )
+        return entry
+
+    def refresh_all_auth_skills(self) -> int:
+        """
+        Re-check all Skills with NEED_AUTH status.
+
+        Useful after user returns from System Preferences.
+        Only re-checks skills that were previously denied — no wasted cycles.
+
+        Returns:
+            Number of skills that changed to READY.
+        """
+        recovered = 0
+        for entry in self._entries:
+            if entry.status == SkillStatus.NEED_AUTH:
+                old_status = entry.status
+                self._check_status(entry)
+                if entry.status == SkillStatus.READY:
+                    recovered += 1
+                    logger.info(f"Skill 已恢复: {entry.name} (授权已获得)")
+        return recovered
 
     def get_all_skills(self) -> List[SkillEntry]:
         """获取所有已加载的 Skills"""
@@ -335,6 +389,17 @@ class SkillsLoader:
             # V12.2: 从 frontmatter 提取 quickstart 代码片段
             quickstart = self._extract_quickstart(skill_md_path)
 
+            # 从 frontmatter 提取 parameters schema（可选）
+            parameters = []
+            try:
+                meta = SkillPromptBuilder._parse_frontmatter(
+                    skill_md_path.read_text(encoding="utf-8")
+                )
+                if meta and isinstance(meta.get("parameters"), list):
+                    parameters = meta["parameters"]
+            except Exception:
+                pass
+
             summaries.append(
                 SkillSummary(
                     name=entry.name,
@@ -342,6 +407,7 @@ class SkillsLoader:
                     location=skill_md_path.resolve(),
                     emoji=emoji,
                     quickstart=quickstart,
+                    parameters=parameters,
                 )
             )
 
@@ -577,11 +643,15 @@ class SkillsLoader:
                 entry.status_message = f"缺少命令: {', '.join(missing)}"
                 return
 
-        # 检查系统授权
+        # 检查系统授权（运行时检测，已授权则直接 READY）
         if entry.system_auth:
-            entry.status = SkillStatus.NEED_AUTH
-            entry.status_message = f"需要系统授权: {entry.system_auth}"
-            return
+            if self._check_system_auth_granted(entry.system_auth):
+                # 已授权，正常可用
+                logger.debug(f"系统授权已获得: {entry.name} ({entry.system_auth})")
+            else:
+                entry.status = SkillStatus.NEED_AUTH
+                entry.status_message = f"需要系统授权: {entry.system_auth}"
+                return
 
         # 检查外部应用
         if entry.requires_app:
@@ -623,6 +693,51 @@ class SkillsLoader:
         # 全部通过
         entry.status = SkillStatus.READY
         entry.status_message = "就绪"
+
+    @staticmethod
+    def _check_system_auth_granted(auth_type: str) -> bool:
+        """
+        Check if a macOS system authorization is already granted.
+
+        Uses native macOS APIs for silent checks — never triggers a dialog.
+
+        Args:
+            auth_type: Authorization type from skills.yaml (e.g. "accessibility",
+                       "screen_recording", "reminders", "calendar")
+
+        Returns:
+            True if granted, False if denied or unknown.
+        """
+        if platform.system() != "Darwin":
+            return True  # Non-macOS: skip auth check
+
+        if auth_type == "accessibility":
+            try:
+                import objc
+                bundle = objc.loadBundle(
+                    'ApplicationServices', {},
+                    '/System/Library/Frameworks/ApplicationServices.framework',
+                )
+                funcs: dict = {}
+                objc.loadBundleFunctions(
+                    bundle, funcs, [('AXIsProcessTrusted', b'Z')]
+                )
+                ax_func = funcs.get('AXIsProcessTrusted')
+                return bool(ax_func()) if ax_func else False
+            except Exception:
+                return False
+
+        if auth_type == "screen_recording":
+            try:
+                from Quartz import CGPreflightScreenCaptureAccess
+                return bool(CGPreflightScreenCaptureAccess())
+            except Exception:
+                return False
+
+        # For other auth types (reminders, calendar, etc.),
+        # we can't easily pre-check — treat as needing auth.
+        # The Agent will handle the dialog when the skill is actually used.
+        return False
 
     def _check_app_installed(self, app_name: str, config: Dict[str, Any]) -> bool:
         """
@@ -780,6 +895,60 @@ class SkillsLoader:
                 f"backend={entry.backend_type.value} "
                 f"status={entry.status.value}"
             )
+
+    def _validate_dependencies(self) -> None:
+        """
+        Validate inter-Skill dependency declarations (logging only, non-blocking).
+
+        Reads depends_on / conflicts_with from SKILL.md frontmatter.
+        Warns about missing dependencies or active conflicts.
+        """
+        all_names = {e.name for e in self._entries}
+        available_names = {e.name for e in self._entries if e.is_available()}
+
+        for entry in self._entries:
+            if not entry.skill_path:
+                continue
+
+            skill_md = Path(entry.skill_path) / "SKILL.md"
+            if not skill_md.exists():
+                continue
+
+            try:
+                from core.prompt.skill_prompt_builder import SkillPromptBuilder
+                meta = SkillPromptBuilder._parse_frontmatter(
+                    skill_md.read_text(encoding="utf-8")
+                )
+                if not meta:
+                    continue
+
+                # depends_on check
+                depends_on = meta.get("depends_on") or []
+                if isinstance(depends_on, list):
+                    for dep in depends_on:
+                        if dep not in all_names:
+                            logger.warning(
+                                f"Skill '{entry.name}' depends_on '{dep}' "
+                                f"which is not registered"
+                            )
+                        elif dep not in available_names:
+                            logger.warning(
+                                f"Skill '{entry.name}' depends_on '{dep}' "
+                                f"which is not available (status: "
+                                f"{next((e.status.value for e in self._entries if e.name == dep), '?')})"
+                            )
+
+                # conflicts_with check
+                conflicts_with = meta.get("conflicts_with") or []
+                if isinstance(conflicts_with, list):
+                    for conflict in conflicts_with:
+                        if conflict in available_names:
+                            logger.warning(
+                                f"Skill '{entry.name}' conflicts_with '{conflict}' "
+                                f"but both are available — possible conflict"
+                            )
+            except Exception:
+                pass  # Non-critical, skip silently
 
 
 # ================================================================

@@ -1036,6 +1036,47 @@ class RVRExecutor(BaseExecutor):
                         exc_info=True,
                     )
 
+        # ---------- P0: 最终回复兜底 ----------
+        # 如果循环结束时最后一条消息不是非空 assistant 回复（例如 A3
+        # 的工具执行成功但 content 为空），触发一次"仅生成最终回复"的
+        # LLM 调用，确保用户总能看到结论。
+        if not ctx.is_completed() or not (ctx.final_result and ctx.final_result.strip()):
+            _last_msg = llm_messages[-1] if llm_messages else None
+            _last_role = (
+                getattr(_last_msg, "role", None)
+                or (_last_msg.get("role") if isinstance(_last_msg, dict) else None)
+            )
+            _last_content = (
+                getattr(_last_msg, "content", "")
+                or (_last_msg.get("content", "") if isinstance(_last_msg, dict) else "")
+            )
+            _needs_summary = (
+                _last_role != "assistant"
+                or not (isinstance(_last_content, str) and _last_content.strip())
+            )
+
+            if _needs_summary and llm:
+                logger.info("🔄 最终回复兜底: 循环结束但无非空 assistant 回复，生成总结...")
+                try:
+                    async for event in self._process_stream(
+                        llm=llm,
+                        messages=llm_messages,
+                        system_prompt=system_prompt,
+                        tools=[],  # No tools — just summarize
+                        ctx=ctx,
+                        session_id=session_id,
+                        broadcaster=broadcaster,
+                        usage_tracker=usage_tracker,
+                        is_first_turn=False,
+                    ):
+                        yield event
+
+                    final_resp = ctx.last_llm_response
+                    if final_resp and final_resp.content:
+                        ctx.set_completed(final_resp.content, final_resp.stop_reason)
+                except Exception as e:
+                    logger.warning(f"最终回复兜底失败: {e}", exc_info=True)
+
         logger.info(f"✅ RVRExecutor 执行完成: turns={ctx.current_turn}")
 
     # ==================== HITL 拒绝处理（V11.1）====================

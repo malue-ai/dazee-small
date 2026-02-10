@@ -1,0 +1,669 @@
+{
+  "report_id": "e2e_phase2_scenarios_20260210_114555",
+  "suite_id": "xiaodazi_e2e_phase2_scenarios",
+  "suite_name": "E2E Phase2 开源宣发场景",
+  "task_results": [
+    {
+      "task_id": "G2",
+      "task_description": "表格搭子 — 格式混乱季度销售 Excel 全自动分析（核心 Demo）",
+      "trials": [
+        {
+          "trial_id": "G2_trial_1",
+          "task_id": "G2",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我分析这份季度销售数据。注意这个表格格式比较乱（日期格式不统一、有些金额带了人民币符号、还有空行）， 你先帮我清洗干净，然后告诉我： 1. 哪个产品卖得最好？ 2. 各地区销售额排名 3. 有没有异常数据？ 最后输出一份简短的分析报告。\n\n\n---\n📎 附件:\n📎 quarterly_sales_raw.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet): /Users/liuyi/xiaodazi/zenflux_agent/data/instances/xiaodazi/storage/uploads/20260210/3d5d60a0_quarterly_sales_raw.xlsx",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:28.674896"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:28.674903"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "task_id": "7ebf8fca-27ca-46bc-bfff-f390a37c21d3",
+              "conversation_id": "391637b4-6562-41f5-abee-098934747b9b"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_no_tool_errors",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "total_calls": 0,
+                "error_count": 0,
+                "errors": []
+              },
+              "timestamp": "2026-02-10 11:45:55.839046",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_with_custom_rubric",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {},
+              "timestamp": "2026-02-10 11:45:55.839069",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-10 11:45:55.838900",
+          "completed_at": "2026-02-10 11:45:55.839079"
+        }
+      ]
+    },
+    {
+      "task_id": "G4",
+      "task_description": "办公搭子 — 会议纪要提取行动项+推算截止日期",
+      "trials": [
+        {
+          "trial_id": "G4_trial_1",
+          "task_id": "G4",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我整理这份会议纪要，提取所有行动项。 每个行动项要包含：责任人、具体任务、截止日期。 注意有些截止日期是相对的（比如\"下周三\"），你要根据会议日期推算出具体日期。 最后整理成表格形式。\n\n\n---\n📎 附件:\n📄 meeting_notes_raw.txt | text/plain | 1.5 KB:\n```\n产品需求评审会 - 2026-02-10 周二 14:00-15:30\n地点：3 号会议室\n参会人：老李（PM）、小张（前端）、小王（后端）、小陈（设计）、小赵（测试）\n\n---\n\n老李开场说新版本最重要的功能是全文搜索，用户投诉找不到历史记录已经好几个月了。\n小张说前端搜索框和结果列表大概需要两周时间，如果要做高亮匹配可能再加三天。\n小王回应说后端 Elasticsearch 接口可以先出一版 \n... (内容过长已截断)\n```\n   原始文件: /Users/liuyi/xiaodazi/zenflux_agent/data/instances/xiaodazi/storage/uploads/20260210/56a5dc5d_meeting_notes_raw.txt",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:30.757303"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:30.757308"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "task_id": "d189862f-bba9-40b7-8842-d23aea1a4a26",
+              "conversation_id": "81c14827-249e-4a43-9df1-70b34f318e86"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "model",
+              "grader_name": "grade_with_custom_rubric",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {},
+              "timestamp": "2026-02-10 11:45:55.839692",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-10 11:45:55.839613",
+          "completed_at": "2026-02-10 11:45:55.839695"
+        }
+      ]
+    },
+    {
+      "task_id": "G3",
+      "task_description": "研究搭子 — 论文初稿润色+引用遗漏检查",
+      "trials": [
+        {
+          "trial_id": "G3_trial_1",
+          "task_id": "G3",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我润色这篇论文的摘要部分，保持学术风格，注意术语一致性 （比如 Agent 和智能体不要混用）。\n",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:32.793113"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:32.793118"
+              },
+              {
+                "role": "user",
+                "content": "帮我润色这篇论文的摘要部分，保持学术风格，注意术语一致性 （比如 Agent 和智能体不要混用）。\n",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:36.859380"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:36.859385"
+              },
+              {
+                "role": "user",
+                "content": "检查一下正文里有没有引用遗漏——就是提到了某个研究或观点但没有给出参考文献的地方。\n",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:36.859387"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:36.859389"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "5e8b0c7f-b47d-4c26-869c-09d0a4a514b6"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "model",
+              "grader_name": "grade_with_custom_rubric",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {},
+              "timestamp": "2026-02-10 11:45:55.840195",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-10 11:45:55.840124",
+          "completed_at": "2026-02-10 11:45:55.840197"
+        }
+      ]
+    },
+    {
+      "task_id": "G1",
+      "task_description": "写稿搭子 — 学习毒舌风格+跨会话验证风格记忆",
+      "trials": [
+        {
+          "trial_id": "G1_trial_1",
+          "task_id": "G1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "我是一个公众号作者，这是我的文章范文。帮我分析一下我的写作风格特点，然后记住它。",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:38.916791"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:38.916797"
+              },
+              {
+                "role": "user",
+                "content": "我是一个公众号作者，这是我的文章范文。帮我分析一下我的写作风格特点，然后记住它。",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:40.981177"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:40.981184"
+              },
+              {
+                "role": "user",
+                "content": "用我的风格写一篇关于奶茶的短文（300字左右）",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:40.981186"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:40.981187"
+              },
+              {
+                "role": "user",
+                "content": "写一篇关于健身房的短文（300字左右）",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:43.032351"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:43.032356"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "8d868bf3-0204-468c-b450-425e8a47cd28"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "model",
+              "grader_name": "grade_with_custom_rubric",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {},
+              "timestamp": "2026-02-10 11:45:55.840682",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-10 11:45:55.840612",
+          "completed_at": "2026-02-10 11:45:55.840685"
+        }
+      ]
+    },
+    {
+      "task_id": "F4",
+      "task_description": "上下文工程 — 3份大文件+6轮对话，验证 scratchpad 卸载与数据一致性",
+      "trials": [
+        {
+          "trial_id": "F4_trial_1",
+          "task_id": "F4",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "分析 Q1 报告，告诉我总收入和增长情况",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:45.076113"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:45.076117"
+              },
+              {
+                "role": "user",
+                "content": "分析 Q1 报告，告诉我总收入和增长情况",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:47.118701"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:47.118707"
+              },
+              {
+                "role": "user",
+                "content": "现在对比 Q1 和 Q2，哪个季度表现更好？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:47.118708"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:47.118710"
+              },
+              {
+                "role": "user",
+                "content": "分析 Q1 报告，告诉我总收入和增长情况",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:49.163555"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:49.163560"
+              },
+              {
+                "role": "user",
+                "content": "现在对比 Q1 和 Q2，哪个季度表现更好？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:49.163561"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:49.163562"
+              },
+              {
+                "role": "user",
+                "content": "结合竞品分析报告，评估我们在市场中的位置",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:49.163563"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:49.163564"
+              },
+              {
+                "role": "user",
+                "content": "分析 Q1 报告，告诉我总收入和增长情况",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219762"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219769"
+              },
+              {
+                "role": "user",
+                "content": "现在对比 Q1 和 Q2，哪个季度表现更好？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219771"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219772"
+              },
+              {
+                "role": "user",
+                "content": "结合竞品分析报告，评估我们在市场中的位置",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219774"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219775"
+              },
+              {
+                "role": "user",
+                "content": "综合以上所有信息，写一段 500 字的战略分析摘要",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219777"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:51.219779"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "1102cf56-8132-42b4-8205-50b64db5e2f5"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_no_tool_errors",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "total_calls": 0,
+                "error_count": 0,
+                "errors": []
+              },
+              "timestamp": "2026-02-10 11:45:55.841176",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_with_custom_rubric",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {},
+              "timestamp": "2026-02-10 11:45:55.841187",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-10 11:45:55.841114",
+          "completed_at": "2026-02-10 11:45:55.841192"
+        }
+      ]
+    },
+    {
+      "task_id": "H1",
+      "task_description": "LLM 服务降级 — API 错误时的降级策略与上下文保留",
+      "trials": [
+        {
+          "trial_id": "H1_trial_1",
+          "task_id": "H1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我写一段关于人工智能发展趋势的分析（200字）",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:53.270065"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:53.270068"
+              },
+              {
+                "role": "user",
+                "content": "帮我写一段关于人工智能发展趋势的分析（200字）",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:55.310981"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:55.310987"
+              },
+              {
+                "role": "user",
+                "content": "把刚才的分析翻译成英文",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:55.310988"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-10 11:45:55.310989"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "9f35d5c6-98b7-4a87-8e82-2bec4502bda3"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "pipeline_diagnosis": {},
+                "overall_score": 3.0,
+                "task_completed": null,
+                "strengths": [],
+                "optimization_suggestions": [],
+                "scores": {},
+                "weighted_score": 3.0,
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-10 11:45:55.845955",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-10 11:45:55.841617",
+          "completed_at": "2026-02-10 11:45:55.845965"
+        }
+      ]
+    }
+  ],
+  "total_tasks": 6,
+  "passed_tasks": 6,
+  "failed_tasks": 0,
+  "unstable_tasks": 0,
+  "total_token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "total_duration_seconds": 0.0,
+  "created_at": "2026-02-10 11:45:55.846555"
+}

@@ -566,6 +566,38 @@ capabilities:
         description: 简短说明本次截屏目的
     required: []
 
+- name: open_system_preferences
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  cache_stable: true
+  implementation:
+    module: tools.open_system_preferences
+    class: OpenSystemPreferencesTool
+  capabilities:
+    - system_settings
+    - permission_management
+  priority: 95
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      直接打开系统设置面板，让用户授权指定权限。
+      权限不足时直接调用，不要用文字描述操作步骤。
+  input_schema:
+    type: object
+    properties:
+      permission:
+        type: string
+        enum: [screen_recording, accessibility, camera, location, full_disk_access, automation, notifications]
+        description: 要打开的权限设置类型
+    required: [permission]
+
 - name: scheduled_task
   type: TOOL
   subtype: CUSTOM

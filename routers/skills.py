@@ -673,6 +673,74 @@ async def get_skill_file_content(
 
 
 # ============================================================
+# 状态刷新（权限变更后调用）
+# ============================================================
+
+
+@router.post(
+    "/refresh-auth",
+    response_model=dict,
+    summary="刷新需要授权的 Skills 状态",
+    description="用户授权后调用，重新检测 NEED_AUTH 状态的 Skills，已授权的自动恢复为 READY。零开销：只检测之前标记为 NEED_AUTH 的 Skills。",
+)
+async def refresh_auth_skills(
+    agent_id: str = Query(..., description="实例 ID"),
+):
+    """
+    刷新需要授权的 Skills 状态。
+
+    使用场景：
+    - 用户从系统设置返回后，前端调用此接口刷新状态
+    - 仅 re-check 状态为 NEED_AUTH 的 Skills（不是全量扫描）
+    - 使用 macOS 原生 API 静默检测，不触发弹窗
+    """
+    _validate_name(agent_id, "agent_id")
+
+    from services.agent_registry import get_agent_registry
+
+    registry = get_agent_registry()
+
+    # 获取 Agent 实例（如果已创建）
+    if not registry.has_agent(agent_id):
+        return {
+            "success": False,
+            "message": "Agent 实例未启动，无法刷新状态",
+            "recovered": 0,
+        }
+
+    try:
+        agent = await registry.get_agent(agent_id)
+        skills_loader = getattr(agent, "_skills_loader", None)
+
+        if not skills_loader:
+            return {
+                "success": False,
+                "message": "Skills 加载器不可用",
+                "recovered": 0,
+            }
+
+        recovered = skills_loader.refresh_all_auth_skills()
+
+        return {
+            "success": True,
+            "recovered": recovered,
+            "message": (
+                f"{recovered} 个 Skill 已恢复可用"
+                if recovered > 0
+                else "暂无新的授权变更"
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"刷新 Skills 授权状态失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"刷新失败: {str(e)}",
+            "recovered": 0,
+        }
+
+
+# ============================================================
 # 安装/卸载 Skills
 # ============================================================
 
@@ -913,6 +981,24 @@ async def update_skill_content(request: SkillUpdateContentRequest):
         )
 
     try:
+        # Backup old version before overwriting (P2-1: version management)
+        if skill_md_path.exists():
+            versions_dir = skill_dir / ".versions"
+            versions_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_name = f"SKILL.md.{timestamp}"
+            backup_path = versions_dir / backup_name
+            try:
+                old_content = skill_md_path.read_text(encoding="utf-8")
+                backup_path.write_text(old_content, encoding="utf-8")
+                # Keep only last 10 versions
+                backups = sorted(versions_dir.glob("SKILL.md.*"))
+                for old_backup in backups[:-10]:
+                    old_backup.unlink(missing_ok=True)
+                logger.debug(f"已备份 SKILL.md → {backup_name}")
+            except Exception as e:
+                logger.warning(f"备份 SKILL.md 失败 (non-fatal): {e}")
+
         # 写入文件（异步）
         async with aiofiles.open(skill_md_path, "w", encoding="utf-8") as f:
             await f.write(request.content)

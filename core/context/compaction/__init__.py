@@ -519,6 +519,22 @@ def trim_by_token_budget(
 
     original_count = len(messages)
 
+    # ---------- P0: 绝对上限告警 ----------
+    # 在昂贵的 token 计算前做粗略估算（1 char ≈ 0.33 token）
+    _ABSOLUTE_WARN_TOKENS = 50_000
+    _ABSOLUTE_ERROR_TOKENS = 100_000
+    _rough_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    _rough_tokens = _rough_chars // 3
+    if _rough_tokens > _ABSOLUTE_ERROR_TOKENS:
+        logger.error(
+            f"🚨 上下文绝对上限告警: 粗估 {_rough_tokens:,} tokens > {_ABSOLUTE_ERROR_TOKENS:,}，"
+            f"将强制裁剪（消息数={original_count}）"
+        )
+    elif _rough_tokens > _ABSOLUTE_WARN_TOKENS:
+        logger.warning(
+            f"⚠️ 上下文绝对上限预警: 粗估 {_rough_tokens:,} tokens > {_ABSOLUTE_WARN_TOKENS:,}（消息数={original_count}）"
+        )
+
     # 边界情况：消息数很少，无需裁剪
     min_preserve = preserve_first_messages + preserve_last_messages
     if original_count <= min_preserve:

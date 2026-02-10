@@ -35,6 +35,133 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+# macOS permission pre-flight check (silent, no dialog trigger)
+# ============================================================
+#
+# Key principle: NEVER call screencapture/peekaboo before checking permission.
+#   - CGPreflightScreenCaptureAccess() → silent True/False, no dialog
+#   - screencapture / peekaboo see → WILL trigger macOS system dialog if denied
+#
+# Flow:
+#   1. Silent check via macOS native API (< 1ms, no side effects)
+#   2. If granted → cache "granted", proceed
+#   3. If denied → open System Preferences ONCE, return error
+#   4. On next call → re-check (user may have granted), no repeated dialog
+#
+
+_MACOS_PREF_URLS = {
+    "screen_recording": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    "accessibility": "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+}
+
+# Per-process permission cache: "granted" | "denied_once" | None
+_permission_cache: Dict[str, str] = {}
+
+
+def _check_screen_recording_native() -> bool:
+    """
+    Check macOS Screen Recording permission via native CoreGraphics API.
+
+    CGPreflightScreenCaptureAccess() returns True/False WITHOUT
+    triggering any system dialog. Available on macOS 10.15+.
+    """
+    try:
+        from Quartz import CGPreflightScreenCaptureAccess
+        return bool(CGPreflightScreenCaptureAccess())
+    except ImportError:
+        logger.debug("Quartz not available, cannot pre-check screen recording")
+        return True  # Assume granted if we can't check
+    except Exception as e:
+        logger.debug(f"CGPreflightScreenCaptureAccess error: {e}")
+        return True
+
+
+def _check_accessibility_native() -> bool:
+    """
+    Check macOS Accessibility permission via native API.
+
+    AXIsProcessTrusted() returns True/False without triggering dialog.
+    """
+    try:
+        import objc
+        bundle = objc.loadBundle(
+            'ApplicationServices', {},
+            '/System/Library/Frameworks/ApplicationServices.framework',
+        )
+        funcs: dict = {}
+        objc.loadBundleFunctions(bundle, funcs, [('AXIsProcessTrusted', b'Z')])
+        ax_func = funcs.get('AXIsProcessTrusted')
+        if ax_func:
+            return bool(ax_func())
+        return True
+    except Exception as e:
+        logger.debug(f"AXIsProcessTrusted check error: {e}")
+        return True
+
+
+async def _preflight_permission(
+    node_manager, perm_type: str = "screen_recording"
+) -> bool:
+    """
+    Silent permission pre-flight check + auto-open settings on first denial.
+
+    Behavior:
+      - granted → return True (cached for process lifetime)
+      - denied, first time → open System Preferences, return False
+      - denied, subsequent → re-check (user may have just toggled), no re-open
+      - still denied → return False (agent should stop retrying)
+
+    NEVER triggers macOS system dialog.
+    """
+    global _permission_cache
+
+    # Fast path: already confirmed granted
+    if _permission_cache.get(perm_type) == "granted":
+        return True
+
+    # Run the native check in a thread (< 1ms but technically blocking)
+    if perm_type == "screen_recording":
+        granted = await asyncio.to_thread(_check_screen_recording_native)
+    elif perm_type == "accessibility":
+        granted = await asyncio.to_thread(_check_accessibility_native)
+    else:
+        return True  # Unknown permission type, assume granted
+
+    if granted:
+        _permission_cache[perm_type] = "granted"
+        return True
+
+    # Permission denied
+    prev = _permission_cache.get(perm_type)
+
+    if prev != "denied_once":
+        # First denial → open System Preferences directly
+        _permission_cache[perm_type] = "denied_once"
+        await _open_system_preferences(node_manager, perm_type)
+        logger.info(
+            f"权限未授予 ({perm_type}), 已自动打开系统设置"
+        )
+    else:
+        # Already opened settings before, user hasn't granted yet
+        logger.debug(f"权限仍未授予 ({perm_type}), 不重复打开设置")
+
+    return False
+
+
+async def _open_system_preferences(node_manager, perm_type: str) -> None:
+    """Directly open macOS System Preferences to the permission panel."""
+    url = _MACOS_PREF_URLS.get(perm_type)
+    if not url:
+        return
+    try:
+        await node_manager.run_command(
+            command=["open", url], node_id="local", timeout_ms=5000,
+        )
+    except Exception as e:
+        logger.warning(f"打开系统设置失败: {e}")
+
+
+# ============================================================
 # peekaboo see (primary: UI elements + window info)
 # ============================================================
 
@@ -214,6 +341,8 @@ class ObserveScreenTool(BaseTool):
     Capture screen via peekaboo see + local OCR. No LLM calls.
     """
 
+    execution_timeout = 30  # Screen capture should complete within 30s
+
     def __init__(self, node_manager=None):
         self._node_manager = node_manager
         self._initialized = False
@@ -297,6 +426,23 @@ class ObserveScreenTool(BaseTool):
         app = (params.get("app") or "").strip()
         window_title = (params.get("window_title") or "").strip()
         description = (params.get("description") or "").strip()
+
+        # === Permission pre-flight: silent native API check, no dialog ===
+        perm_ok = await _preflight_permission(
+            self._node_manager_ref, "screen_recording"
+        )
+        if not perm_ok:
+            from core.tool.types import ToolError, ToolErrorType
+            first_time = _permission_cache.get("screen_recording") == "denied_once"
+            return ToolError(
+                error_type=ToolErrorType.PERMISSION_DENIED,
+                message=(
+                    "已自动打开「系统设置 → 隐私与安全性 → 屏幕录制」，请授权后重试"
+                    if first_time else
+                    "屏幕录制权限尚未开启，请在系统设置中允许后重试"
+                ),
+                recovery_hint="open_system_preferences:screen_recording",
+            ).to_dict()
 
         # === Parallel: peekaboo see + screenshot for OCR ===
         # peekaboo see handles its own screenshot internally

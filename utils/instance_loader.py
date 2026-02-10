@@ -1370,6 +1370,7 @@ async def create_agent_from_instance(
             # 注入 loader 引用和 group_registry（供 tool_provider 动态生成 skills_prompt）
             prompt_cache.runtime_context["_skills_loader"] = skills_loader
             prompt_cache.runtime_context["_skill_group_registry"] = group_registry
+
             logger.info(
                 f"   SkillGroupRegistry 已注入: {group_registry}"
             )

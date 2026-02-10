@@ -589,6 +589,7 @@ class AgentRegistry:
                         config.prompt_cache.runtime_context = {}
                     config.prompt_cache.runtime_context["_skills_loader"] = skills_loader
                     config.prompt_cache.runtime_context["_skill_group_registry"] = group_registry
+
                     logger.info(f"   SkillGroupRegistry 已注入: {group_registry}")
             except Exception as e:
                 logger.warning(f"Skills 注入失败（不阻断启动）: {e}", exc_info=True)

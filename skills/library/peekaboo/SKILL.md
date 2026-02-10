@@ -151,3 +151,10 @@ peekaboo type "Line 1\nLine 2" --delay 10
 Notes
 - Requires Screen Recording + Accessibility permissions.
 - Use `peekaboo see --annotate` to identify targets before clicking.
+
+Permissions
+- If peekaboo fails (empty output, permission error), call `open_system_preferences` tool
+  with `permission="screen_recording"` or `permission="accessibility"` to open the settings
+  panel directly. Do NOT describe the steps in text — just open it.
+- Only prompt the user once per permission type. If already prompted, skip.
+- After user grants permission, retry the peekaboo command.

@@ -75,6 +75,55 @@ class InvocationType(Enum):
     STREAMING = "streaming"
 
 
+# ==================== 结构化工具错误 ====================
+
+
+class ToolErrorType(str, Enum):
+    """
+    Structured error types for tool failures.
+
+    Agent can use error_type to decide recovery strategy programmatically,
+    instead of guessing from free-text error messages.
+    """
+
+    PERMISSION_DENIED = "permission_denied"     # → auto-open system preferences
+    DEPENDENCY_MISSING = "dependency_missing"   # → prompt install
+    TIMEOUT = "timeout"                         # → inform user, stop retry
+    INPUT_INVALID = "input_invalid"             # → Agent fixes params and retries
+    RATE_LIMITED = "rate_limited"               # → wait and retry
+    AUTH_EXPIRED = "auth_expired"               # → guide re-auth
+    TRANSIENT = "transient"                     # → retry immediately
+    PERMANENT = "permanent"                     # → switch approach
+
+
+@dataclass
+class ToolError:
+    """
+    Structured tool error with recovery hints.
+
+    Backward-compatible: to_dict() returns the same {"success": False, "error": ...}
+    format, but adds error_type and recovery_hint for programmatic handling.
+    """
+
+    error_type: ToolErrorType
+    message: str
+    recovery_hint: Optional[str] = None
+    retry_after_seconds: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict format (backward-compatible with existing error format)."""
+        result: Dict[str, Any] = {
+            "success": False,
+            "error": self.message,
+            "error_type": self.error_type.value,
+        }
+        if self.recovery_hint:
+            result["recovery_hint"] = self.recovery_hint
+        if self.retry_after_seconds > 0:
+            result["retry_after_seconds"] = self.retry_after_seconds
+        return result
+
+
 # ==================== 工具上下文 ====================
 
 
@@ -277,6 +326,7 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     input_schema: Optional[Dict[str, Any]] = None
+    execution_timeout: int = 60  # seconds; override per tool (e.g. browser=120)
 
     @abstractmethod
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
@@ -454,9 +504,11 @@ __all__ = [
     "CapabilityType",
     "CapabilitySubtype",
     "InvocationType",
+    "ToolErrorType",
     # 数据类
     "ToolContext",
     "ToolResult",
+    "ToolError",
     "Capability",
     "InvocationStrategy",
     "ToolCharacteristics",

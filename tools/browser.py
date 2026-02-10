@@ -169,6 +169,8 @@ class BrowserTool(BaseTool):
     not pixel coordinates.
     """
 
+    execution_timeout = 120  # Browser ops may be slow (page loads, etc.)
+
     def __init__(self):
         self._playwright = None
         self._browser = None

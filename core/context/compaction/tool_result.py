@@ -34,6 +34,14 @@ DEFAULT_STORAGE_DIR = ""  # 空则使用 get_user_data_dir()/workspace/storage/t
 # 压缩标记前缀（用于识别已压缩的内容）
 COMPRESSED_MARKER = "[COMPRESSED:"
 
+# ---------- 按工具类型分流策略 ----------
+# 搜索/API 类：强压缩，只保留摘要 + 文件路径
+_SEARCH_TOOLS = {"web_search", "exa_search", "arxiv_search", "knowledge_search"}
+# 读文件类：短文件不压缩、长文件写全文到文件 + 元信息预览
+_FILE_READ_TOOLS = {"nodes"}
+# 读文件时的"短文件"阈值（字符数），以下不压缩
+_FILE_SHORT_THRESHOLD = 2000
+
 
 class ToolResultCompressor:
     """
@@ -93,32 +101,34 @@ class ToolResultCompressor:
         tool_id: str,
         result: Any,
         threshold_override: Optional[int] = None,
+        preserve: bool = False,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
-        如果超过阈值则压缩工具结果
+        If result exceeds threshold, compress according to tool type.
+
+        Type-based strategies:
+        - Search/API tools: extract top-N items + save full JSON to file.
+        - File-read tools (nodes): short files (<2K) kept as-is for editing;
+          long files saved to scratchpad with metadata preview.
+        - Other tools: default head+tail compression.
 
         Args:
-            tool_name: 工具名称
-            tool_id: 工具调用 ID
-            result: 工具结果（字符串或可序列化对象）
-            threshold_override: 可选的阈值覆盖（优先于实例默认阈值）
+            tool_name: Tool name
+            tool_id: Tool call ID
+            result: Tool result (string or serializable object)
+            threshold_override: Optional threshold override
+            preserve: If True, skip compression (caller indicates this result
+                      is being actively edited and must stay verbatim)
 
         Returns:
-            (压缩后的文本或原文本, 压缩元数据或 None)
-
-            如果未压缩，返回 (原文本, None)
-            如果已压缩，返回 (压缩文本, metadata)
-
-            metadata 格式：
-            {
-                "ref_id": "abc123def456",
-                "file_path": "workspace/storage/tool_results/abc123def456.json",
-                "original_length": 5000,
-                "tool_name": "web_search",
-                "tool_id": "toolu_xxx"
-            }
+            (compressed_or_original_text, metadata_or_None)
         """
-        # 序列化结果
+        # Skip compression if caller explicitly preserves (e.g., current edit target)
+        if preserve:
+            result_str = result if isinstance(result, str) else str(result)
+            return result_str, None
+
+        # Serialize result
         if isinstance(result, str):
             result_str = result
         else:
@@ -127,26 +137,111 @@ class ToolResultCompressor:
             except (TypeError, ValueError):
                 result_str = str(result)
 
-        # 检查是否需要压缩（支持阈值覆盖）
+        # Check threshold
         effective_threshold = threshold_override if threshold_override is not None else self.threshold
         if len(result_str) <= effective_threshold:
             return result_str, None
 
-        # 生成引用 ID
+        # ---------- Type-based strategy selection ----------
+        if tool_name in _SEARCH_TOOLS:
+            return await self._compress_search_result(tool_name, tool_id, result_str)
+        elif tool_name in _FILE_READ_TOOLS and len(result_str) > _FILE_SHORT_THRESHOLD:
+            return await self._compress_file_read_result(tool_name, tool_id, result_str)
+        else:
+            return await self._compress_default(tool_name, tool_id, result_str)
+
+    # ---------- Strategy: search / API ----------
+
+    async def _compress_search_result(
+        self, tool_name: str, tool_id: str, result_str: str,
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Save full search JSON to file; return top-N item summaries."""
         ref_id = self._generate_ref_id(tool_name, tool_id, result_str)
+        file_path = await self._save_full_content(ref_id, tool_name, tool_id, result_str)
 
-        # 保存完整内容到本地文件
-        file_path = await self._save_full_content(
-            ref_id=ref_id, tool_name=tool_name, tool_id=tool_id, content=result_str
+        # Try to extract structured items (JSON array of objects)
+        top_n = 5
+        preview_lines: List[str] = []
+        try:
+            data = json.loads(result_str)
+            items = data if isinstance(data, list) else data.get("results", data.get("items", []))
+            if isinstance(items, list):
+                for i, item in enumerate(items[:top_n]):
+                    title = item.get("title", item.get("name", ""))
+                    url = item.get("url", item.get("link", ""))
+                    snippet = item.get("snippet", item.get("abstract", item.get("summary", "")))
+                    if snippet and len(snippet) > 200:
+                        snippet = snippet[:200] + "..."
+                    line = f"{i+1}. {title}"
+                    if url:
+                        line += f"  {url}"
+                    if snippet:
+                        line += f"\n   {snippet}"
+                    preview_lines.append(line)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            # Fall back to head lines
+            lines = result_str.split("\n")
+            preview_lines = lines[:self.head_lines]
+
+        preview = "\n".join(preview_lines) if preview_lines else result_str[:500]
+        compressed_text = (
+            f"{COMPRESSED_MARKER}{ref_id}] 搜索结果摘要 - {tool_name}\n"
+            f"共 {len(result_str)} 字符 | Top {top_n} 条:\n\n"
+            f"{preview}\n\n"
+            f"完整内容: {file_path}\n"
+            f"查看方式: cat {file_path}"
         )
 
-        # 生成压缩文本
-        compressed_text = self._generate_compressed_text(
-            tool_name=tool_name, result_str=result_str, ref_id=ref_id, file_path=file_path
+        metadata = self._build_metadata(ref_id, file_path, result_str, tool_name, tool_id)
+        self._update_stats(result_str, compressed_text, tool_name)
+        return compressed_text, metadata
+
+    # ---------- Strategy: file read (long) ----------
+
+    async def _compress_file_read_result(
+        self, tool_name: str, tool_id: str, result_str: str,
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Save full file content to scratchpad; return metadata + preview."""
+        ref_id = self._generate_ref_id(tool_name, tool_id, result_str)
+        file_path = await self._save_full_content(ref_id, tool_name, tool_id, result_str)
+
+        lines = result_str.split("\n")
+        total_lines = len(lines)
+        preview = "\n".join(lines[:10])  # first 10 lines as preview
+
+        compressed_text = (
+            f"{COMPRESSED_MARKER}{ref_id}] 文件内容 - {tool_name}\n"
+            f"总行数: {total_lines} | 总字符: {len(result_str)}\n\n"
+            f"=== 前 10 行预览 ===\n{preview}\n\n"
+            f"完整内容: {file_path}\n"
+            f"按段读取: sed -n '起始行,结束行p' {file_path}\n"
+            f"编辑时请按行范围读取需要修改的段落，不要整篇加载"
         )
 
-        # 构建元数据
-        metadata = {
+        metadata = self._build_metadata(ref_id, file_path, result_str, tool_name, tool_id)
+        self._update_stats(result_str, compressed_text, tool_name)
+        return compressed_text, metadata
+
+    # ---------- Strategy: default (head + tail) ----------
+
+    async def _compress_default(
+        self, tool_name: str, tool_id: str, result_str: str,
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Original head+tail compression with file backup."""
+        ref_id = self._generate_ref_id(tool_name, tool_id, result_str)
+        file_path = await self._save_full_content(ref_id, tool_name, tool_id, result_str)
+        compressed_text = self._generate_compressed_text(tool_name, result_str, ref_id, file_path)
+        metadata = self._build_metadata(ref_id, file_path, result_str, tool_name, tool_id)
+        self._update_stats(result_str, compressed_text, tool_name)
+        return compressed_text, metadata
+
+    # ---------- Helpers ----------
+
+    def _build_metadata(
+        self, ref_id: str, file_path: Path, result_str: str,
+        tool_name: str, tool_id: str,
+    ) -> Dict[str, Any]:
+        return {
             "ref_id": ref_id,
             "file_path": str(file_path),
             "original_length": len(result_str),
@@ -155,17 +250,14 @@ class ToolResultCompressor:
             "compressed_at": datetime.now().isoformat(),
         }
 
-        # 更新统计
+    def _update_stats(self, original: str, compressed: str, tool_name: str) -> None:
         self._stats["total_compressed"] += 1
-        self._stats["total_bytes_saved"] += len(result_str) - len(compressed_text)
-
+        self._stats["total_bytes_saved"] += len(original) - len(compressed)
         logger.info(
             f"工具结果已压缩: {tool_name} "
-            f"({len(result_str)} -> {len(compressed_text)} 字符, "
-            f"节省 {len(result_str) - len(compressed_text)} 字符)"
+            f"({len(original)} -> {len(compressed)} 字符, "
+            f"节省 {len(original) - len(compressed)} 字符)"
         )
-
-        return compressed_text, metadata
 
     def _generate_ref_id(self, tool_name: str, tool_id: str, content: str) -> str:
         """

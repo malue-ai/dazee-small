@@ -1,0 +1,19 @@
+{
+  "report_id": "opus_p3_20260210_174751",
+  "suite_id": "xiaodazi_e2e_phase3_full",
+  "suite_name": "E2E Phase3 全量用例",
+  "task_results": [],
+  "total_tasks": 0,
+  "passed_tasks": 0,
+  "failed_tasks": 0,
+  "unstable_tasks": 0,
+  "total_token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "total_duration_seconds": 1.0013580322265625e-05,
+  "created_at": "2026-02-10 17:47:51.101146"
+}

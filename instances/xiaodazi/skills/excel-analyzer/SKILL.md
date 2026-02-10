@@ -1,6 +1,17 @@
 ---
 name: excel-analyzer
 description: Analyze and process Excel/CSV files using pandas and openpyxl. Supports data summary, filtering, pivot tables, and chart generation.
+version: "1.0.0"
+parameters:
+  - name: file_path
+    type: string
+    required: true
+    description: "Excel/CSV 文件路径"
+  - name: task
+    type: string
+    enum: [summary, filter, pivot, chart, custom]
+    default: summary
+    description: "分析任务类型"
 metadata:
   xiaodazi:
     dependency_level: lightweight

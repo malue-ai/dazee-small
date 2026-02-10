@@ -34,6 +34,7 @@ class SkillSummary:
     quickstart: str = ""  # 快速启动代码片段（从 SKILL.md frontmatter 提取）
     requires_bins: List[str] = field(default_factory=list)
     requires_env: List[str] = field(default_factory=list)
+    parameters: List[Dict] = field(default_factory=list)  # optional structured params
 
 
 class SkillPromptBuilder:
@@ -67,6 +68,14 @@ class SkillPromptBuilder:
         if not skills:
             return ""
 
+        # Adaptive ordering: sort by usage frequency (zero cost if no data yet)
+        try:
+            from core.skill.usage_tracker import get_usage_tracker
+            tracker = get_usage_tracker()
+            skills = tracker.sort_skills(list(skills))
+        except Exception:
+            pass  # Cold start or import error: keep default order
+
         lines = ["<available_skills>"]
 
         for skill in skills:
@@ -81,6 +90,21 @@ class SkillPromptBuilder:
             lines.append(f"    <description>{emoji_prefix}{skill.description}</description>")
             if skill.quickstart:
                 lines.append(f"    <quickstart>\n{skill.quickstart}\n    </quickstart>")
+            if skill.parameters:
+                params_parts = []
+                for p in skill.parameters:
+                    pname = p.get("name", "")
+                    ptype = p.get("type", "string")
+                    pdesc = p.get("description", "")
+                    req = " required" if p.get("required") else ""
+                    enum = f" enum={p['enum']}" if p.get("enum") else ""
+                    default = f" default={p['default']}" if "default" in p else ""
+                    params_parts.append(
+                        f"      <param name=\"{pname}\" type=\"{ptype}\"{req}{enum}{default}>{pdesc}</param>"
+                    )
+                lines.append("    <parameters>")
+                lines.extend(params_parts)
+                lines.append("    </parameters>")
             lines.append("  </skill>")
 
         lines.append("</available_skills>")
@@ -341,6 +365,11 @@ Do NOT say "not found" or make up alternatives. Try reading `instances/xiaodazi/
             requires_bins = _ensure_str_list(requires.get("bins"))
             requires_env = _ensure_str_list(requires.get("env"))
 
+            # parameters: optional structured param schema
+            parameters = meta.get("parameters") or []
+            if not isinstance(parameters, list):
+                parameters = []
+
             return SkillSummary(
                 name=name,
                 description=str(description),
@@ -348,6 +377,7 @@ Do NOT say "not found" or make up alternatives. Try reading `instances/xiaodazi/
                 emoji=emoji,
                 requires_bins=requires_bins,
                 requires_env=requires_env,
+                parameters=parameters,
             )
 
         except Exception as e:

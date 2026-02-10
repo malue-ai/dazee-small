@@ -1,0 +1,150 @@
+id: regression_auto
+name: 自动回归测试 (2026-02-10)
+description: 从测评失败中自动生成的回归套件，共 6 个用例
+category: regression
+default_trials: 2
+metadata:
+  generated_at: '2026-02-10T18:48:38.567194'
+  source: loop_automation
+tasks:
+- id: REG_B4
+  description: '[回归] 长任务自动确认（100文件分类）'
+  category: regression_capability_gap
+  input:
+    user_query: 长任务自动确认（100文件分类）
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: B4
+    original_suite: E2E Phase3 全量用例
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality
+- id: REG_B6
+  description: '[回归] 用户画像累积构建（跨4会话）'
+  category: regression_capability_gap
+  input:
+    user_query: 用户画像累积构建（跨4会话）
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: B6
+    original_suite: E2E Phase3 全量用例
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality
+- id: REG_B7
+  description: '[回归] 记忆冲突检测与更新'
+  category: regression_capability_gap
+  input:
+    user_query: 记忆冲突检测与更新
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: B7
+    original_suite: E2E Phase3 全量用例
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality
+- id: REG_C2
+  description: '[回归] 10轮对话Token累积对比'
+  category: regression_token_waste
+  input:
+    user_query: 10轮对话Token累积对比
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  - type: code
+    name: check_token_limit
+    check: check_token_limit(20000)
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - token_waste
+  metadata:
+    original_task_id: C2
+    original_suite: E2E Phase3 全量用例
+    failure_category: token_waste
+    failing_graders:
+    - check_token_limit
+- id: REG_D3
+  description: '[回归] 多步骤内容创作'
+  category: regression_capability_gap
+  input:
+    user_query: 多步骤内容创作
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: D3
+    original_suite: E2E Phase3 全量用例
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality
+- id: REG_E2
+  description: '[回归] 日程创建+提醒通知'
+  category: regression_capability_gap
+  input:
+    user_query: 日程创建+提醒通知
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: E2
+    original_suite: E2E Phase3 全量用例
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality

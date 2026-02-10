@@ -1,0 +1,35 @@
+id: regression_auto
+name: 自动回归测试 (2026-02-10)
+description: 从测评失败中自动生成的回归套件，共 1 个用例
+category: regression
+default_trials: 2
+metadata:
+  generated_at: '2026-02-10T17:38:40.113177'
+  source: loop_automation
+tasks:
+- id: REG_C3
+  description: '[回归] 复杂工具调用Token消耗'
+  category: regression_token_waste
+  input:
+    user_query: 复杂工具调用Token消耗
+    conversation_history: []
+    context:
+      original_suite: E2E Phase3 全量用例
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  - type: code
+    name: check_token_limit
+    check: check_token_limit(20000)
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - token_waste
+  metadata:
+    original_task_id: C3
+    original_suite: E2E Phase3 全量用例
+    failure_category: token_waste
+    failing_graders:
+    - check_token_limit
