@@ -72,6 +72,94 @@ pub struct ShellResult {
     pub timed_out: bool,
 }
 
+// ============================================================================
+// 本地工作区：文件/目录操作
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalFileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub children: Option<Vec<LocalFileEntry>>,
+}
+
+/// 递归读取目录内容
+fn read_dir_entries(
+    dir_path: &str,
+    current_depth: u32,
+    max_depth: u32,
+) -> Result<Vec<LocalFileEntry>, std::io::Error> {
+    let mut entries = Vec::new();
+
+    let ignored_dirs = [
+        "node_modules",
+        "__pycache__",
+        "target",
+        "dist",
+        ".git",
+        "venv",
+        ".venv",
+        ".next",
+        ".nuxt",
+        "build",
+        ".cache",
+        ".idea",
+        ".vscode",
+    ];
+
+    for entry in std::fs::read_dir(dir_path)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // 跳过隐藏文件（以 . 开头）
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        // 跳过常见的忽略目录
+        if metadata.is_dir() && ignored_dirs.contains(&name.as_str()) {
+            continue;
+        }
+
+        let mut file_entry = LocalFileEntry {
+            name,
+            path: entry.path().to_string_lossy().to_string(),
+            is_dir: metadata.is_dir(),
+            size: if metadata.is_dir() { 0 } else { metadata.len() },
+            children: None,
+        };
+
+        if metadata.is_dir() && current_depth < max_depth {
+            match read_dir_entries(
+                &entry.path().to_string_lossy(),
+                current_depth + 1,
+                max_depth,
+            ) {
+                Ok(children) => file_entry.children = Some(children),
+                Err(_) => file_entry.children = Some(vec![]),
+            }
+        }
+
+        entries.push(file_entry);
+    }
+
+    // 排序：目录优先，然后按字母顺序
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+
+    Ok(entries)
+}
+
 /// 后端运行状态
 struct BackendState {
     /// sidecar 进程（仅打包模式）
@@ -296,6 +384,138 @@ async fn get_node_info() -> Result<NodeInfo, String> {
     })
 }
 
+// ============================================================================
+// 本地工作区命令
+// ============================================================================
+
+/// 读取本地目录（递归，带深度限制）
+#[tauri::command]
+async fn read_local_dir(path: String, max_depth: Option<u32>) -> Result<Vec<LocalFileEntry>, String> {
+    let depth = max_depth.unwrap_or(3);
+    read_dir_entries(&path, 0, depth).map_err(|e| format!("读取目录失败: {}", e))
+}
+
+/// 读取本地文本文件内容
+#[tauri::command]
+async fn read_local_file_text(path: String, max_size: Option<u64>) -> Result<String, String> {
+    let max = max_size.unwrap_or(2_000_000); // 默认 2MB 限制
+
+    let metadata =
+        std::fs::metadata(&path).map_err(|e| format!("无法读取文件信息: {}", e))?;
+
+    if metadata.len() > max {
+        return Err(format!(
+            "文件过大 ({:.1} MB)，超过 {:.0} MB 限制",
+            metadata.len() as f64 / 1_000_000.0,
+            max as f64 / 1_000_000.0
+        ));
+    }
+
+    std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))
+}
+
+/// 检查路径是否为目录
+#[tauri::command]
+async fn check_is_directory(path: String) -> Result<bool, String> {
+    Ok(std::path::Path::new(&path).is_dir())
+}
+
+/// 移动/重命名文件或目录
+#[tauri::command]
+async fn move_local_file(from_path: String, to_path: String) -> Result<(), String> {
+    // 确保目标父目录存在
+    if let Some(parent) = std::path::Path::new(&to_path).parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目标目录失败: {}", e))?;
+        }
+    }
+    // 检查目标路径是否已存在
+    if std::path::Path::new(&to_path).exists() {
+        return Err("目标路径已存在同名文件或文件夹".to_string());
+    }
+    std::fs::rename(&from_path, &to_path)
+        .map_err(|e| format!("移动失败: {}", e))
+}
+
+/// 删除文件或目录
+#[tauri::command]
+async fn delete_local_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err("路径不存在".to_string());
+    }
+    if p.is_dir() {
+        std::fs::remove_dir_all(&path)
+            .map_err(|e| format!("删除目录失败: {}", e))
+    } else {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("删除文件失败: {}", e))
+    }
+}
+
+/// 创建文件（可含初始内容）
+#[tauri::command]
+async fn create_local_file(path: String, content: Option<String>) -> Result<(), String> {
+    if std::path::Path::new(&path).exists() {
+        return Err("文件已存在".to_string());
+    }
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建父目录失败: {}", e))?;
+    }
+    std::fs::write(&path, content.unwrap_or_default())
+        .map_err(|e| format!("创建文件失败: {}", e))
+}
+
+/// 读取本地文件为 base64 编码（支持二进制文件如图片、PDF 等）
+#[tauri::command]
+async fn read_local_file_binary(path: String, max_size: Option<u64>) -> Result<String, String> {
+    use base64::Engine;
+    let max = max_size.unwrap_or(10_000_000); // 默认 10MB 限制
+
+    let metadata =
+        std::fs::metadata(&path).map_err(|e| format!("无法读取文件信息: {}", e))?;
+
+    if metadata.len() > max {
+        return Err(format!(
+            "文件过大 ({:.1} MB)，超过 {:.0} MB 限制",
+            metadata.len() as f64 / 1_000_000.0,
+            max as f64 / 1_000_000.0
+        ));
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+/// 创建目录
+#[tauri::command]
+async fn create_local_dir(path: String) -> Result<(), String> {
+    if std::path::Path::new(&path).exists() {
+        return Err("目录已存在".to_string());
+    }
+    std::fs::create_dir_all(&path)
+        .map_err(|e| format!("创建目录失败: {}", e))
+}
+
+/// 获取启动时传入的路径参数（拖拽文件夹到 exe 时系统传入）
+#[tauri::command]
+async fn get_startup_paths() -> Vec<String> {
+    std::env::args()
+        .skip(1) // 跳过第一个参数（exe 自身路径）
+        .filter(|arg| {
+            // 只保留实际存在的路径（排除 Tauri 内部参数）
+            let p = std::path::Path::new(arg);
+            p.exists()
+        })
+        .collect()
+}
+
+// ============================================================================
+// 系统设置命令
+// ============================================================================
+
 #[tauri::command]
 async fn open_system_preferences(pane: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -405,6 +625,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(BackendState {
             child: None,
             port: initial_port,
@@ -658,6 +879,15 @@ fn main() {
             which_command,
             get_node_info,
             open_system_preferences,
+            read_local_dir,
+            read_local_file_text,
+            read_local_file_binary,
+            check_is_directory,
+            move_local_file,
+            delete_local_path,
+            create_local_file,
+            create_local_dir,
+            get_startup_paths,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

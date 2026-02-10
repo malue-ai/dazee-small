@@ -61,6 +61,7 @@ import {
   getFileTypeLabel as getLabel, 
   formatFileSize 
 } from '@/utils'
+import { resolveResourceUrl } from '@/api'
 import { 
   X, 
   Download, 
@@ -105,10 +106,10 @@ const isImage = computed(() => {
   return isImageFile(props.file.file_type) && !imageError.value
 })
 
-/** 预览 URL */
+/** 预览 URL（解析相对路径为完整 URL，兼容 Tauri 打包模式） */
 const previewUrl = computed(() => {
   if (!props.file) return ''
-  return props.file.file_url || props.file.preview_url || ''
+  return resolveResourceUrl(props.file.file_url || props.file.preview_url || '')
 })
 
 /** 文件图标组件 */

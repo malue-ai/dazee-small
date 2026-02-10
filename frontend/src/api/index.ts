@@ -166,6 +166,32 @@ export function getFullApiUrl(path: string): string {
   return `${_baseUrl}${path}`
 }
 
+/**
+ * 解析资源 URL：将后端返回的相对路径转为浏览器可访问的完整 URL
+ * 
+ * 开发模式下 Vite proxy 能代理 /api/... 请求，相对路径可以直接用。
+ * 但 Tauri 打包后前端从 tauri://localhost 加载，必须拼接后端绝对地址。
+ * 
+ * @example
+ *   resolveResourceUrl('/api/v1/files/xxx.pdf')
+ *   // dev:   '/api/v1/files/xxx.pdf'
+ *   // tauri: 'http://127.0.0.1:18900/api/v1/files/xxx.pdf'
+ */
+export function resolveResourceUrl(url: string): string {
+  if (!url) return ''
+  // 已经是绝对 URL，直接返回
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url
+  // 后端返回的 /api/v1/... 相对路径 → 转为完整 URL
+  if (url.startsWith('/api/')) {
+    return `${_baseUrl}${url.slice(4)}` // strip '/api', _baseUrl 已包含 '/api'
+  }
+  // 其他相对路径（如 /v1/...），通过 baseUrl 拼接
+  if (url.startsWith('/')) {
+    return `${_baseUrl}${url}`
+  }
+  return url
+}
+
 // 创建 axios 实例
 const api = axios.create({
   baseURL: _baseUrl,

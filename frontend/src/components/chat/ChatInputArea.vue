@@ -2,14 +2,15 @@
   <div class="px-6 pb-6 pt-2 bg-transparent pointer-events-none sticky bottom-0 z-30">
     <div 
       class="pointer-events-auto max-w-4xl mx-auto bg-white border rounded-2xl p-3 shadow-lg transition-all duration-300 focus-within:shadow-xl focus-within:border-primary/30"
-      :class="isDragOver ? 'border-primary border-dashed bg-primary/5' : 'border-border'"
+      :class="(isDragOver || props.externalDragOver) ? 'border-primary border-dashed bg-primary/5' : 'border-border'"
+      @dragenter.prevent
       @dragover.prevent="onDragOver"
-      @dragleave.prevent="onDragLeave"
+      @dragleave="onDragLeave"
       @drop.prevent="onDrop"
     >
       <!-- 拖拽提示层 -->
       <div
-        v-if="isDragOver"
+        v-if="isDragOver || props.externalDragOver"
         class="absolute inset-0 flex items-center justify-center rounded-2xl z-10 pointer-events-none"
       >
         <span class="text-sm text-primary font-medium">释放以添加文件</span>
@@ -82,6 +83,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import type { AttachedFile } from '@/types'
 import { Loader2, Plus, Square, ArrowUp } from 'lucide-vue-next'
+import { useLocalWorkspaceStore } from '@/stores/localWorkspace'
 
 // ==================== Props ====================
 
@@ -96,13 +98,16 @@ interface Props {
   uploading?: boolean
   /** 是否禁用 */
   disabled?: boolean
+  /** 外部拖拽悬停状态（由 Tauri 全局拖拽控制） */
+  externalDragOver?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   stopping: false,
   uploading: false,
-  disabled: false
+  disabled: false,
+  externalDragOver: false,
 })
 
 // ==================== Emits ====================
@@ -113,10 +118,12 @@ const emit = defineEmits<{
   (e: 'stop'): void
   (e: 'upload-click'): void
   (e: 'files-dropped', files: File[]): void
+  (e: 'workspace-file-dropped', fileInfo: { path: string; name: string; size: number }): void
 }>()
 
 // ==================== State ====================
 
+const workspaceStore = useLocalWorkspaceStore()
 const editorRef = ref<HTMLDivElement | null>(null)
 const isComposing = ref(false)
 const editorEmpty = ref(true)
@@ -204,8 +211,12 @@ function onPaste(e: ClipboardEvent) {
 // ==================== 拖拽放置文件 ====================
 
 function onDragOver(e: DragEvent) {
-  // 只在有文件时显示拖拽状态
-  if (e.dataTransfer?.types.includes('Files')) {
+  // 检测是否有可接受的拖拽内容，显示视觉反馈
+  const hasFiles = Array.from(e.dataTransfer?.types || []).indexOf('Files') >= 0
+  const hasWorkspaceFile = !!(workspaceStore.draggedItem && !workspaceStore.draggedItem.is_dir)
+
+  if (hasFiles || hasWorkspaceFile) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
     if (dragLeaveTimer) { clearTimeout(dragLeaveTimer); dragLeaveTimer = null }
     isDragOver.value = true
   }
@@ -220,6 +231,16 @@ function onDrop(e: DragEvent) {
   isDragOver.value = false
   if (dragLeaveTimer) { clearTimeout(dragLeaveTimer); dragLeaveTimer = null }
 
+  // 优先处理工作区文件拖拽（通过 store 状态检测）
+  const wsItem = workspaceStore.draggedItem
+  if (wsItem && !wsItem.is_dir) {
+    const fileInfo = { path: wsItem.path, name: wsItem.name, size: wsItem.size }
+    workspaceStore.clearDrag()
+    emit('workspace-file-dropped', fileInfo)
+    return
+  }
+
+  // 系统文件拖拽（非 Tauri 环境下的 fallback）
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length > 0) {
     emit('files-dropped', files)

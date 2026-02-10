@@ -89,6 +89,18 @@
             <Plus class="w-4 h-4" />
           </button>
 
+          <!-- 本地工作区切换按钮 -->
+          <button 
+            @click="showLocalWorkspace = !showLocalWorkspace"
+            class="flex-shrink-0 p-1.5 rounded-md transition-colors"
+            :class="showLocalWorkspace 
+              ? 'bg-primary/10 text-primary' 
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+            title="工作区文件夹"
+          >
+            <FolderOpen class="w-4 h-4" />
+          </button>
+
           <!-- 历史记录按钮 -->
           <div ref="historyDropdownRef" class="relative flex-shrink-0">
             <button 
@@ -153,6 +165,16 @@
           @toggle-sidebar="showRightSidebar = !showRightSidebar"
         /> -->
 
+        <!-- 非 Agent 模式：浮动工作区按钮 -->
+        <button
+          v-if="!isAgentMode && !showLocalWorkspace"
+          @click="showLocalWorkspace = true"
+          class="absolute right-4 top-4 z-20 p-2 bg-white/80 backdrop-blur-sm rounded-xl shadow-md border border-border hover:bg-white hover:shadow-lg text-muted-foreground hover:text-primary transition-all duration-200"
+          title="打开工作区"
+        >
+          <FolderOpen class="w-4 h-4" />
+        </button>
+
         <!-- 消息列表区域 -->
         <MessageList
           ref="messageListRef"
@@ -186,17 +208,21 @@
         </Transition>
 
         <!-- 输入框区域 -->
-        <ChatInputArea
-          ref="inputAreaRef"
-          v-model="inputMessage"
-          :loading="isCurrentLoading"
-          :stopping="chat.isStopping.value"
-          :uploading="fileUpload.isUploading.value"
-          @send="handleSendMessage"
-          @stop="handleStopGeneration"
-          @upload-click="handleUploadClick"
-          @files-dropped="handleFilesDropped"
-        />
+        <div ref="inputAreaWrapperRef">
+          <ChatInputArea
+            ref="inputAreaRef"
+            v-model="inputMessage"
+            :loading="isCurrentLoading"
+            :stopping="chat.isStopping.value"
+            :uploading="fileUpload.isUploading.value"
+            :external-drag-over="tauriDragTarget === 'chatInput'"
+            @send="handleSendMessage"
+            @stop="handleStopGeneration"
+            @upload-click="handleUploadClick"
+            @files-dropped="handleFilesDropped"
+            @workspace-file-dropped="handleWorkspaceFileDropped"
+          />
+        </div>
       </div>
 
       <!-- [隐藏] 右侧面板（任务/工作区）- 暂时不需要，后续恢复时取消注释并将 showRightSidebar 改回 ref(true) -->
@@ -268,6 +294,20 @@
             </div>
         </div>
       </Transition> -->
+
+      <!-- 本地工作区侧边栏 -->
+      <Transition name="slide-right">
+        <div 
+          v-if="showLocalWorkspace"
+          ref="workspaceSidebarWrapperRef"
+          class="w-[350px] flex-shrink-0 bg-white flex flex-col overflow-hidden my-3 mr-3 ml-2 rounded-2xl shadow-lg border border-border"
+        >
+          <LocalWorkspaceSidebar 
+            :external-drag-over="tauriDragTarget === 'workspace'"
+            @close="showLocalWorkspace = false" 
+          />
+        </div>
+      </Transition>
     </div>
           
     <!-- 文件上传 input -->
@@ -352,11 +392,14 @@ import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAgentStore } from '@/stores/agent'
 import { useGuideStore } from '@/stores/guide'
+import { useLocalWorkspaceStore } from '@/stores/localWorkspace'
 
 // Composables
 import { useChat } from '@/composables/useChat'
 import { useFileUpload } from '@/composables/useFileUpload'
-import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2, Rocket } from 'lucide-vue-next'
+import { invoke } from '@tauri-apps/api/core'
+import { isTauriEnv } from '@/api/tauri'
+import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2, Rocket, FolderOpen } from 'lucide-vue-next'
 
 // Components
 import ConversationSidebar from '@/components/chat/ConversationSidebar.vue'
@@ -372,6 +415,7 @@ import SimpleConfirmModal from '@/components/modals/SimpleConfirmModal.vue'
 import RollbackOptionsModal from '@/components/modals/RollbackOptionsModal.vue'
 import LongRunConfirmModal from '@/components/modals/LongRunConfirmModal.vue'
 import HITLConfirmModal from '@/components/modals/HITLConfirmModal.vue'
+import LocalWorkspaceSidebar from '@/components/workspace/LocalWorkspaceSidebar.vue'
 
 // Types
 import type { Conversation, AttachedFile, PlanData, HITLResponse, FileItem } from '@/types'
@@ -385,6 +429,7 @@ const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
 const agentStore = useAgentStore()
 const guideStore = useGuideStore()
+const localWorkspaceStore = useLocalWorkspaceStore()
 const chat = useChat()
 const fileUpload = useFileUpload()
 const hitl = chat.hitl
@@ -395,6 +440,7 @@ const hitl = chat.hitl
 const sidebarCollapsed = ref(false)
 const showRightSidebar = ref(false)
 const rightSidebarTab = ref<'plan' | 'workspace'>('plan')
+const showLocalWorkspace = ref(true)
 const showHistoryDropdown = ref(false)
 const historyDropdownRef = ref<HTMLElement | null>(null)
 
@@ -461,6 +507,52 @@ function handleSimpleModalCancel() {
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 const inputAreaRef = ref<InstanceType<typeof ChatInputArea> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const workspaceSidebarWrapperRef = ref<HTMLElement | null>(null)
+const inputAreaWrapperRef = ref<HTMLElement | null>(null)
+
+// Tauri 全局拖拽路由状态
+const tauriDragTarget = ref<'workspace' | 'chatInput' | null>(null)
+// 追踪上一次拖拽的文件信息（用于在 draggedItem 被清除后仍能获取信息）
+let lastDraggedFileInfo: { path: string; name: string; size: number } | null = null
+
+/**
+ * 核心机制：监听 store.draggedItem 变化（同步 flush）
+ * 当 draggedItem 从有值变为 null（拖拽结束），使用 dragEnd 坐标判断是否在输入框区域内。
+ * 
+ * 流程：handleDragEnd(e) → setDragEndPosition(x,y) → clearDrag() → draggedItem=null → 此 watch 触发
+ * flush: 'sync' 确保在 clearDrag() 执行时立即触发，坐标已在之前设置好。
+ * 
+ * 不依赖任何 dragover / drop 事件（Tauri WebView2 会吞掉这些事件的传播）。
+ */
+watch(() => localWorkspaceStore.draggedItem, (newVal, oldVal) => {
+  // 记录正在拖拽的文件信息
+  if (newVal && !newVal.is_dir) {
+    lastDraggedFileInfo = { path: newVal.path, name: newVal.name, size: newVal.size ?? 0 }
+  }
+  // 拖拽结束（draggedItem 从有值变为 null）
+  if (!newVal && oldVal && lastDraggedFileInfo) {
+    const endX = localWorkspaceStore.dragEndX
+    const endY = localWorkspaceStore.dragEndY
+    const el = inputAreaWrapperRef.value
+    let isOverInput = false
+
+    if (el && endX > 0 && endY > 0) {
+      const rect = el.getBoundingClientRect()
+      isOverInput = endX >= rect.left && endX <= rect.right &&
+                    endY >= rect.top && endY <= rect.bottom
+    }
+
+    if (isOverInput) {
+      const fileInfo = { ...lastDraggedFileInfo }
+      lastDraggedFileInfo = null
+      handleWorkspaceFileDropped(fileInfo)
+    } else {
+      lastDraggedFileInfo = null
+    }
+  } else if (!newVal) {
+    lastDraggedFileInfo = null
+  }
+}, { flush: 'sync' })
 
 // ==================== Computed ====================
 
@@ -561,11 +653,140 @@ onMounted(async () => {
   if (guideStore.isActive && guideStore.currentStep === 5) {
     sidebarCollapsed.value = false
   }
+
+  // 从创建项目页返回时 或 跳过引导检测到无模型时，Step 10：确保侧边栏展开
+  if (guideStore.isActive && guideStore.currentStep === 10) {
+    sidebarCollapsed.value = false
+    // 注意：canSkip 不在此处修改
+    // - 正常流程（1→9→10）：canSkip 在 SettingsView 中已设为 true
+    // - 强制编辑（跳过引导→检测无模型→10）：canSkip 由 GuideOverlay.handleSkip 设为 false
+  }
+
+  // 恢复上次保存的工作区文件夹
+  localWorkspaceStore.restoreFolders()
+
+  // Tauri 全局拖拽路由：基于落点坐标分发到工作区或聊天输入框
+  await initTauriDragDrop()
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleHistoryClickOutside)
+  cleanupTauriDragDrop()
 })
+
+// ==================== Tauri 全局拖拽路由 ====================
+
+let unlistenTauriDragDrop: (() => void) | null = null
+
+/** 检查逻辑坐标是否在某个元素内 */
+function isInsideElement(el: HTMLElement | null, logicalX: number, logicalY: number): boolean {
+  if (!el) return false
+  const rect = el.getBoundingClientRect()
+  return logicalX >= rect.left && logicalX <= rect.right && logicalY >= rect.top && logicalY <= rect.bottom
+}
+
+async function initTauriDragDrop() {
+  if (!isTauriEnv()) return
+  try {
+    const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+    unlistenTauriDragDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
+      const pos = (event.payload as any).position
+      // Tauri 返回的是 PhysicalPosition（物理像素），需要转换为逻辑像素（CSS 像素）
+      const dpr = window.devicePixelRatio || 1
+      const x = (pos?.x ?? 0) / dpr
+      const y = (pos?.y ?? 0) / dpr
+
+      if (event.payload.type === 'over') {
+        // 根据坐标判断悬停在哪个区域
+        if (showLocalWorkspace.value && isInsideElement(workspaceSidebarWrapperRef.value, x, y)) {
+          tauriDragTarget.value = 'workspace'
+        } else if (isInsideElement(inputAreaWrapperRef.value, x, y)) {
+          tauriDragTarget.value = 'chatInput'
+        } else {
+          tauriDragTarget.value = null
+        }
+      } else if (event.payload.type === 'leave') {
+        tauriDragTarget.value = null
+      } else if (event.payload.type === 'drop') {
+        const target = tauriDragTarget.value
+        tauriDragTarget.value = null
+
+        const paths = event.payload.paths
+        if (!paths || paths.length === 0) return
+
+        if (target === 'workspace') {
+          // 拖放到工作区：添加文件夹
+          for (const p of paths) {
+            try {
+              const isDir = await invoke<boolean>('check_is_directory', { path: p })
+              if (isDir) {
+                await localWorkspaceStore.addFolder(p)
+              } else {
+                const lastSep = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+                if (lastSep > 0) await localWorkspaceStore.addFolder(p.substring(0, lastSep))
+              }
+            } catch (e) { console.error('处理拖拽路径失败:', p, e) }
+          }
+        } else if (target === 'chatInput') {
+          // 拖放到聊天输入框：上传文件
+          fileUpload.isUploading.value = true
+          try {
+            for (const p of paths) {
+              try {
+                const isDir = await invoke<boolean>('check_is_directory', { path: p })
+                if (isDir) continue // 跳过目录
+
+                // 提取文件名
+                const lastSep = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+                const fileName = lastSep >= 0 ? p.substring(lastSep + 1) : p
+
+                // 读取文件为 base64
+                const base64Data = await invoke<string>('read_local_file_binary', { path: p })
+                const binaryStr = atob(base64Data)
+                const bytes = new Uint8Array(binaryStr.length)
+                for (let i = 0; i < binaryStr.length; i++) {
+                  bytes[i] = binaryStr.charCodeAt(i)
+                }
+
+                // 推断 MIME 类型
+                const ext = fileName.split('.').pop()?.toLowerCase() || ''
+                const mimeMap: Record<string, string> = {
+                  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+                  json: 'application/json', pdf: 'application/pdf',
+                  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                  gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+                  html: 'text/html', css: 'text/css', js: 'text/javascript',
+                  ts: 'text/typescript', py: 'text/x-python',
+                }
+                const mimeType = mimeMap[ext] || 'application/octet-stream'
+
+                const blob = new Blob([bytes], { type: mimeType })
+                const file = new File([blob], fileName, { type: mimeType })
+
+                const result = await fileUpload.uploadFile(file)
+                if (result) {
+                  fileUpload.selectedFiles.value.push(result)
+                  inputAreaRef.value?.insertFile(result)
+                }
+              } catch (e) { console.error('处理拖拽文件失败:', p, e) }
+            }
+          } finally {
+            fileUpload.isUploading.value = false
+          }
+        }
+      }
+    })
+  } catch (e) { console.error('初始化 Tauri 拖拽监听失败:', e) }
+}
+
+function cleanupTauriDragDrop() {
+  if (unlistenTauriDragDrop) { unlistenTauriDragDrop(); unlistenTauriDragDrop = null }
+}
+
+// ==================== 工作区文件 → 输入框 拖拽 ====================
+// 方案：dragend 坐标检测（完全不依赖 dragover/drop 事件）
+// LocalFileTreeNode.handleDragEnd → setDragEndPosition(x,y) → clearDrag()
+// → sync watch 检测坐标是否在输入框区域内 → 触发 handleWorkspaceFileDropped
 
 // ==================== 历史下拉框：点击外部关闭 ====================
 
@@ -919,6 +1140,53 @@ async function handleFilesDropped(files: File[]): Promise<void> {
     }
   } catch {
     showConfirm({ title: '上传失败', message: '文件上传失败，请重试', type: 'error', showCancel: false })
+  } finally {
+    fileUpload.isUploading.value = false
+  }
+}
+
+/** 处理工作区文件拖入聊天输入框 */
+async function handleWorkspaceFileDropped(fileInfo: { path: string; name: string; size: number }): Promise<void> {
+  if (!isTauriEnv()) return
+
+  fileUpload.isUploading.value = true
+  try {
+    // 通过 Tauri 读取本地文件为 base64
+    const base64Data = await invoke<string>('read_local_file_binary', { path: fileInfo.path })
+
+    // 解码 base64 为二进制
+    const binaryStr = atob(base64Data)
+    const bytes = new Uint8Array(binaryStr.length)
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i)
+    }
+
+    // 推断 MIME 类型
+    const ext = fileInfo.name.split('.').pop()?.toLowerCase() || ''
+    const mimeMap: Record<string, string> = {
+      txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+      json: 'application/json', pdf: 'application/pdf',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+      html: 'text/html', css: 'text/css', js: 'text/javascript',
+      ts: 'text/typescript', py: 'text/x-python', rs: 'text/x-rust',
+      yaml: 'text/yaml', yml: 'text/yaml', xml: 'text/xml',
+      log: 'text/plain', env: 'text/plain', sh: 'text/x-shellscript',
+    }
+    const mimeType = mimeMap[ext] || 'application/octet-stream'
+
+    // 创建 File 对象并走标准上传流程
+    const blob = new Blob([bytes], { type: mimeType })
+    const file = new File([blob], fileInfo.name, { type: mimeType })
+
+    const result = await fileUpload.uploadFile(file)
+    if (result) {
+      fileUpload.selectedFiles.value.push(result)
+      inputAreaRef.value?.insertFile(result)
+    }
+  } catch (e) {
+    console.error('❌ 工作区文件上传失败:', e)
+    showConfirm({ title: '上传失败', message: '工作区文件上传失败，请重试', type: 'error', showCancel: false })
   } finally {
     fileUpload.isUploading.value = false
   }

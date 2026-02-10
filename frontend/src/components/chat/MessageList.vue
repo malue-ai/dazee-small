@@ -78,9 +78,26 @@
                 </div>
               </div>
             </div>
-            <!-- 文字内容 -->
-            <div v-if="message.content" class="bg-accent text-foreground px-5 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words max-w-full">
-              <MarkdownRenderer :content="parseUserMessage(message.content)" />
+            <!-- 文字内容 + 悬浮操作栏 -->
+            <div v-if="message.content" class="user-message-wrapper">
+              <div class="bg-accent text-foreground px-5 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words max-w-full">
+                <MarkdownRenderer :content="parseUserMessage(message.content)" />
+              </div>
+              <!-- 悬浮操作栏：发送时间 + 复制（消息下方右对齐） -->
+              <div class="user-message-actions">
+                <span class="text-[11px] text-muted-foreground/50 whitespace-nowrap">{{ formatMessageTime(message.timestamp) }}</span>
+                <button
+                  class="p-1 rounded-md transition-colors"
+                  :class="copiedMessageId === message.id 
+                    ? 'text-green-500' 
+                    : 'text-muted-foreground/40 hover:text-foreground hover:bg-muted'"
+                  :title="copiedMessageId === message.id ? '已复制' : '复制消息'"
+                  @click="copyMessage(message)"
+                >
+                  <Check v-if="copiedMessageId === message.id" class="w-3.5 h-3.5" />
+                  <Copy v-else class="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
           
@@ -154,7 +171,7 @@ import type { UIMessage, AttachedFile, AgentSummary } from '@/types'
 import { getFileTypeLabel as getLabel } from '@/utils'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import MessageContent from './MessageContent.vue'
-import { Sparkles, Bot, FileText, Loader2 } from 'lucide-vue-next'
+import { Sparkles, Bot, FileText, Loader2, Copy, Check } from 'lucide-vue-next'
 
 // ==================== Props ====================
 
@@ -199,6 +216,49 @@ const emit = defineEmits<{
 }>()
 
 // ==================== State ====================
+
+/** 已复制消息的 ID（用于显示"已复制"反馈） */
+const copiedMessageId = ref<string | number | null>(null)
+
+/** 复制用户消息内容到剪贴板 */
+async function copyMessage(message: UIMessage) {
+  const text = parseUserMessage(message.content)
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedMessageId.value = message.id
+    setTimeout(() => {
+      copiedMessageId.value = null
+    }, 1500)
+  } catch {
+    // fallback
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    copiedMessageId.value = message.id
+    setTimeout(() => { copiedMessageId.value = null }, 1500)
+  }
+}
+
+/** 格式化消息发送时间 */
+function formatMessageTime(date: Date): string {
+  if (!date) return ''
+  const d = new Date(date)
+  const now = new Date()
+  const hours = d.getHours().toString().padStart(2, '0')
+  const minutes = d.getMinutes().toString().padStart(2, '0')
+  
+  // 如果是今天，只显示时分
+  if (d.toDateString() === now.toDateString()) {
+    return `${hours}:${minutes}`
+  }
+  // 否则显示月/日 时:分
+  const month = (d.getMonth() + 1).toString().padStart(2, '0')
+  const day = d.getDate().toString().padStart(2, '0')
+  return `${month}/${day} ${hours}:${minutes}`
+}
 
 /** 用户是否手动滚动过 */
 const userHasScrolled = ref(false)
@@ -581,5 +641,24 @@ defineExpose({
 .thinking-inline.is-streaming {
   /* 移除左侧高亮边框 */
   border-left: none;
+}
+
+/* 用户消息悬浮操作栏 */
+.user-message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+  padding-right: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  height: 22px;
+}
+
+.user-message-wrapper:hover .user-message-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 </style>

@@ -6,6 +6,7 @@
 import { ref, computed } from 'vue'
 import type { AttachedFile } from '@/types'
 import { getFileIcon, isImageFile as checkIsImage } from '@/utils'
+import { getApiBaseUrl, resolveResourceUrl } from '@/api'
 
 /**
  * 文件上传 Composable
@@ -98,7 +99,8 @@ export function useFileUpload() {
     formData.append('user_id', 'local')
 
     try {
-      const response = await fetch('/api/v1/files/upload', {
+      const uploadUrl = `${getApiBaseUrl()}/v1/files/upload`
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         body: formData
       })
@@ -175,7 +177,7 @@ export function useFileUpload() {
    * @param file - 文件信息
    */
   function getPreviewUrl(file: AttachedFile): string {
-    return file.file_url || file.preview_url || ''
+    return resolveResourceUrl(file.file_url || file.preview_url || '')
   }
 
   /**

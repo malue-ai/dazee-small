@@ -81,6 +81,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { getFullApiUrl } from '@/api'
 import { 
   FileText, 
   FileCode, 
@@ -218,7 +219,7 @@ async function loadFile() {
   try {
     if (isImage.value) {
       // 图片使用 URL
-      imageUrl.value = `/api/v1/workspace/${props.conversationId}/files/${normalizePathForUrl(props.filePath)}?download=true`
+      imageUrl.value = getFullApiUrl(`/v1/workspace/${props.conversationId}/files/${normalizePathForUrl(props.filePath)}?download=true`)
     } else {
       // 文本文件获取内容
       const content = await workspaceStore.getFileContent(props.conversationId, props.filePath)

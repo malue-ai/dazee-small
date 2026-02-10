@@ -125,7 +125,7 @@ const pos = ref<{ x: number; y: number } | null>(null)
 const containerStyle = computed(() => {
   if (!pos.value) {
     // 默认位置：右上角
-    return { top: '16px', right: '16px' }
+    return { top: '60px', right: '16px' }
   }
   return {
     top: `${pos.value.y}px`,

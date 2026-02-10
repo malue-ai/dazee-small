@@ -105,10 +105,14 @@
           >
             <Bot class="w-4 h-4 flex-shrink-0" :class="agent.agent_id === currentAgentId ? 'text-primary' : 'text-muted-foreground/50 group-hover:text-muted-foreground'" />
             <span class="truncate text-sm font-medium flex-1">{{ agent.name }}</span>
-            <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+            <div 
+              class="flex items-center gap-0.5 transition-all"
+              :class="isGuideEditTarget(agent) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+            >
               <button
+                :ref="(el) => setEditBtnRef(agent.agent_id, el)"
                 class="p-1 text-muted-foreground/50 hover:text-primary hover:bg-primary/10 rounded transition-colors"
-                @click.stop="emit('edit-agent', agent.agent_id)"
+                @click.stop="handleEditClick(agent.agent_id)"
                 title="编辑项目"
               >
                 <Pencil class="w-3.5 h-3.5" />
@@ -170,7 +174,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, type ComponentPublicInstance } from 'vue'
 import type { Conversation, AgentSummary } from '@/types'
 import { useGuideStore } from '@/stores/guide'
 import { formatShortTime } from '@/utils'
@@ -245,13 +249,61 @@ const guideStore = useGuideStore()
 const createProjectBtnRef = ref<HTMLElement | null>(null)
 const settingsBtnRef = ref<HTMLElement | null>(null)
 
-// 引导 Step 1：高亮设置按钮 | Step 5：高亮"新建项目"按钮
+/** Agent 编辑按钮 ref 映射（用于引导 Step 10 高亮） */
+const editBtnRefs = new Map<string, HTMLElement>()
+
+function setEditBtnRef(agentId: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) {
+    editBtnRefs.set(agentId, el)
+  } else {
+    editBtnRefs.delete(agentId)
+  }
+}
+
+/** 找到默认项目（优先匹配 xiaodazi，否则取第一个） */
+function findDefaultAgent(): typeof props.agents[number] | undefined {
+  return props.agents.find(a =>
+    a.name.includes('xiaodazi') || a.name.includes('小打字') || a.agent_id.includes('xiaodazi')
+  ) || props.agents[0]
+}
+
+/** 判断某个 Agent 是否为引导步骤 10 的目标（用于保持编辑按钮可见） */
+function isGuideEditTarget(agent: typeof props.agents[number]): boolean {
+  if (!guideStore.isActive || guideStore.currentStep !== 10) return false
+  const target = findDefaultAgent()
+  return !!target && target.agent_id === agent.agent_id
+}
+
+/** 设置步骤 10 的高亮目标 */
+function setupGuideStep10() {
+  if (!guideStore.isActive || guideStore.currentStep !== 10) return
+  const target = findDefaultAgent()
+  if (!target) return
+  nextTick(() => {
+    const el = editBtnRefs.get(target.agent_id)
+    if (el) {
+      guideStore.setTarget(el)
+    }
+  })
+}
+
+/** 编辑按钮点击处理（引导步骤 10 推进） */
+function handleEditClick(agentId: string) {
+  if (guideStore.isActive && guideStore.currentStep === 10) {
+    guideStore.nextStep() // → step 11
+  }
+  emit('edit-agent', agentId)
+}
+
+// 引导 Step 1：高亮设置按钮 | Step 5：高亮"新建项目"按钮 | Step 10：高亮编辑按钮
 onMounted(() => {
   if (guideStore.isActive) {
     if (guideStore.currentStep === 1 && settingsBtnRef.value) {
       guideStore.setTarget(settingsBtnRef.value)
     } else if (guideStore.currentStep === 5 && createProjectBtnRef.value) {
       guideStore.setTarget(createProjectBtnRef.value)
+    } else if (guideStore.currentStep === 10) {
+      setupGuideStep10()
     }
   }
 })
@@ -261,6 +313,21 @@ watch(() => guideStore.currentStep, (step) => {
     guideStore.setTarget(settingsBtnRef.value)
   } else if (step === 5 && createProjectBtnRef.value) {
     guideStore.setTarget(createProjectBtnRef.value)
+  } else if (step === 10) {
+    setupGuideStep10()
+  }
+})
+
+// 监听 agents 列表变化：步骤 10 时 Agent 列表可能异步加载完成，
+// 需要在 v-for 重新渲染注册 ref 后再设置高亮目标
+watch(() => props.agents.length, () => {
+  if (guideStore.isActive && guideStore.currentStep === 10) {
+    // agents 变化后 DOM 需要下一帧更新，ref 回调才会执行
+    nextTick(() => {
+      nextTick(() => {
+        setupGuideStep10()
+      })
+    })
   }
 })
 

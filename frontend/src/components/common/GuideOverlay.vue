@@ -7,9 +7,63 @@
  * 目标区域留空，允许用户直接点击被高亮的元素。
  */
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { useGuideStore } from '@/stores/guide'
+import { useAgentStore } from '@/stores/agent'
+import { getAgentDetail } from '@/api/agent'
 
 const guideStore = useGuideStore()
+const agentStore = useAgentStore()
+const router = useRouter()
+
+// ==================== 跳过引导：检查默认项目是否有模型 ====================
+
+const isCheckingSkip = ref(false)
+
+/**
+ * 处理跳过引导：
+ * 1. 查找默认 xiaodazi 项目
+ * 2. 通过 API 检查其是否已配置 AI 模型
+ * 3. 如果没有模型 → 跳转到编辑引导（Step 10），不允许跳过
+ * 4. 如果有模型 → 正常跳过
+ */
+async function handleSkip() {
+  if (isCheckingSkip.value) return
+  isCheckingSkip.value = true
+
+  try {
+    // 确保 Agent 列表已加载
+    if (agentStore.agents.length === 0) {
+      await agentStore.fetchList()
+    }
+
+    // 查找默认项目（优先匹配 xiaodazi，否则取第一个）
+    const defaultAgent = agentStore.agents.find(a =>
+      a.name.includes('xiaodazi') || a.name.includes('小打字') || a.agent_id.includes('xiaodazi')
+    ) || agentStore.agents[0]
+
+    if (defaultAgent) {
+      try {
+        const detail = await getAgentDetail(defaultAgent.agent_id)
+        if (!detail.model) {
+          // 没有配置模型 → 强制进入编辑引导，不允许跳过
+          guideStore.canSkip = false
+          guideStore.goToStep(10)
+          router.push({ name: 'chat' })
+          return
+        }
+      } catch (e) {
+        console.warn('⚠️ 检查默认项目模型配置失败:', e)
+        // API 失败时仍允许跳过，避免阻塞用户
+      }
+    }
+
+    // 默认项目已有模型（或无项目/检查失败）→ 正常跳过
+    guideStore.skipGuide()
+  } finally {
+    isCheckingSkip.value = false
+  }
+}
 
 const PADDING = 8   // 高亮区域向外扩展的像素
 const GAP = 14       // 提示气泡与高亮区域的间距
@@ -307,10 +361,11 @@ const tooltipStyle = computed(() => {
             >
               <button
                 v-if="guideStore.canSkip"
-                @click="guideStore.skipGuide()"
-                class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                @click="handleSkip"
+                :disabled="isCheckingSkip"
+                class="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-wait"
               >
-                跳过引导
+                {{ isCheckingSkip ? '检查中...' : '跳过引导' }}
               </button>
               <span v-else class="text-[10px] text-muted-foreground/60">
                 请先完成配置

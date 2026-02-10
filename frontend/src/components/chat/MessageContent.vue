@@ -103,6 +103,7 @@
 import { ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import ToolBlock from './ToolBlock.vue'
+import { resolveResourceUrl } from '@/api'
 import { 
   CheckCircle2, 
   XCircle, 
@@ -277,15 +278,15 @@ function hasPairedToolUse(toolUseId) {
   return contentBlocks.value.some(b => b.type === 'tool_use' && b.id === toolUseId)
 }
 
-// 获取图片 src
+// 获取图片 src（resolveResourceUrl 确保 Tauri 打包后相对路径也能访问后端）
 function getImageSrc(block) {
   if (block.source?.type === 'base64') {
     return `data:${block.source.media_type};base64,${block.source.data}`
   }
   if (block.source?.type === 'url') {
-    return block.source.url
+    return resolveResourceUrl(block.source.url)
   }
-  return block.url || ''
+  return resolveResourceUrl(block.url || '')
 }
 
 // 格式化文件大小

@@ -615,3 +615,10 @@ code.code-snippet {
   font-size: 0.85em;
   border: 1px solid rgba(0, 0, 0, 0.04);
 }
+
+/* 工作区拖拽时：强制全局 grabbing 光标 + 禁止文字选择 */
+body.workspace-dragging,
+body.workspace-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}

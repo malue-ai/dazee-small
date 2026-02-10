@@ -1,7 +1,7 @@
 /**
  * Guide Store — 新手引导状态管理
  *
- * 管理分步交互式引导教程（共 9 步）。
+ * 管理分步交互式引导教程（共 13 步）。
  *
  * == 设置阶段 ==
  * Step 1:  主页面 — 高亮设置按钮，引导进入设置
@@ -15,6 +15,12 @@
  * Step 7:  创建项目页 — 高亮发送按钮
  * Step 8:  创建项目页 — 高亮配置区域，引导查看/修改配置
  * Step 9:  创建项目页 — 高亮"创建"按钮
+ *
+ * == 编辑项目阶段 ==
+ * Step 10: 主页面 — 高亮默认项目的编辑按钮
+ * Step 11: 编辑项目页 — 高亮左侧面板（自然语言修改）
+ * Step 12: 编辑项目页 — 高亮右侧面板（表单修改 + 选择模型）
+ * Step 13: 编辑项目页 — 高亮"保存"按钮
  */
 import { defineStore } from 'pinia'
 import { ref, shallowRef, computed } from 'vue'
@@ -43,14 +49,20 @@ const STEP_CONFIGS: Record<number, GuideStepConfig> = {
   7:  { tooltip: '点击发送消息', position: 'top', showNextButton: false },
   8:  { tooltip: 'AI 已为你生成项目配置，你可以自由修改内容，完成后点击下一步', position: 'left', showNextButton: true },
   9:  { tooltip: '点击创建，完成你的第一个项目！', position: 'bottom', showNextButton: false },
+  // == 编辑项目阶段 ==
+  10: { tooltip: '项目创建成功！现在来学习如何编辑项目，点击编辑按钮进入编辑页面', position: 'right', showNextButton: false },
+  11: { tooltip: '在左侧，你可以通过自然语言描述来修改项目内容，AI 会帮你自动更新配置', position: 'right', showNextButton: true },
+  12: { tooltip: '在右侧，你可以直接修改表单内容。请务必选择一个 AI 模型，然后点击下一步', position: 'left', showNextButton: true },
+  13: { tooltip: '点击保存，完成项目配置！', position: 'bottom', showNextButton: false },
 }
 
-const MAX_STEP = 9
+const MAX_STEP = 13
 
-/** 引导分为两大阶段，用于显示进度 */
+/** 引导分为三大阶段，用于显示进度 */
 const PHASES = [
   { label: '基础配置', start: 1, end: 4 },
   { label: '创建项目', start: 5, end: 9 },
+  { label: '编辑项目', start: 10, end: 13 },
 ]
 
 export const useGuideStore = defineStore('guide', () => {

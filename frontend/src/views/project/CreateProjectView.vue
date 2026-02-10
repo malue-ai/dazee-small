@@ -1,7 +1,7 @@
 <template>
   <div class="h-screen w-full flex bg-background text-foreground font-sans overflow-hidden">
     <!-- ==================== 左侧：聊天引导面板 ==================== -->
-    <div class="w-1/2 flex flex-col border-r border-border">
+    <div ref="leftPanelRef" class="w-1/2 flex flex-col border-r border-border">
       <!-- 顶部导航 -->
       <div class="h-14 flex items-center gap-3 px-5 border-b border-border flex-shrink-0">
         <button 
@@ -88,7 +88,7 @@
     </div>
 
     <!-- ==================== 右侧：项目配置面板 ==================== -->
-    <div class="w-1/2 flex flex-col bg-muted/30">
+    <div ref="rightPanelRef" class="w-1/2 flex flex-col bg-muted/30">
       <!-- 顶部预览卡 + 操作按钮 -->
       <div class="h-14 flex items-center justify-between px-6 border-b border-border flex-shrink-0">
         <div class="flex items-center gap-3">
@@ -250,7 +250,9 @@
 
           <!-- AI 模型 -->
           <div class="space-y-2">
-            <label class="text-sm font-medium text-foreground">AI 模型</label>
+            <label class="text-sm font-medium text-foreground">
+              AI 模型 <span class="text-destructive">*</span>
+            </label>
             <div class="relative" ref="modelDropdownRef">
               <!-- 触发按钮 -->
               <button
@@ -644,6 +646,8 @@ const iconFile = ref<File | null>(null)
 const sendBtnRef = ref<HTMLElement | null>(null)
 const configAreaRef = ref<HTMLElement | null>(null)
 const createBtnRef = ref<HTMLElement | null>(null)
+const leftPanelRef = ref<HTMLElement | null>(null)
+const rightPanelRef = ref<HTMLElement | null>(null)
 
 /** 打字机动画进行中 */
 const isTypewriting = ref(false)
@@ -672,8 +676,8 @@ const projectIcon = computed(() => {
 /** 是否可以发送消息（不在生成中、不在打字机动画中且有内容） */
 const canSend = computed(() => inputText.value.trim().length > 0 && !isGenerating.value && !isTypewriting.value)
 
-/** 是否可以创建项目（名称和描述都必填） */
-const canCreate = computed(() => form.name.trim().length > 0 && form.description.trim().length > 0)
+/** 是否可以创建项目（名称、描述、模型都必填） */
+const canCreate = computed(() => form.name.trim().length > 0 && form.description.trim().length > 0 && !!form.model)
 
 // ==================== 方法 ====================
 
@@ -1029,9 +1033,9 @@ async function handleCreate() {
     // Start tracking creation progress (global notification + WS)
     agentCreationStore.startCreation(agent_id, name)
 
-    // 引导完成
+    // 引导：创建成功后推进到编辑项目阶段（Step 10）
     if (guideStore.isActive) {
-      guideStore.completeGuide()
+      guideStore.nextStep() // → step 10
     }
 
     // 立即返回首页，通知卡片会在右上角显示创建进度
@@ -1060,6 +1064,11 @@ async function handleSave() {
       ...(form.model ? { model: form.model } : {}),
       ...(form.dataDir.trim() ? { data_dir: form.dataDir.trim() } : {})
     })
+
+    // 引导 Step 13：保存成功后完成引导
+    if (guideStore.isActive && guideStore.currentStep === 13) {
+      guideStore.completeGuide()
+    }
 
     // 保存成功，跳转到 Agent 对话页
     router.replace({ name: 'agent', params: { agentId: editAgentId.value } })
@@ -1122,6 +1131,15 @@ onMounted(() => {
       content: '你正在编辑项目配置。可以直接在右侧修改表单，也可以在这里告诉我你想怎么调整，我会帮你更新配置。'
     }]
     loadAgentData()
+
+    // 引导 Step 11：进入编辑页后，高亮左侧面板
+    if (guideStore.isActive && guideStore.currentStep === 11) {
+      nextTick(() => {
+        if (leftPanelRef.value) {
+          guideStore.setTarget(leftPanelRef.value)
+        }
+      })
+    }
   } else {
     // 创建模式：设置初始引导消息
     messages.value = [{
@@ -1163,8 +1181,59 @@ watch(() => guideStore.currentStep, (step) => {
         guideStore.setTarget(configAreaRef.value)
       }
     })
+    // 注册前置校验：必须选择模型才能进入创建步骤
+    guideStore.setBeforeNextStep(() => {
+      if (!form.model) {
+        return '请先选择一个 AI 模型'
+      }
+      return true
+    })
   } else if (step === 9) {
     // Step 9：高亮"创建"按钮
+    // 校验不通过时回退到 Step 8（配置区域）
+    if (!canCreate.value) {
+      nextTick(() => {
+        guideStore.goToStep(8, '请先完善配置：选择 AI 模型后再继续')
+      })
+      return
+    }
+    nextTick(() => {
+      if (createBtnRef.value) {
+        guideStore.setTarget(createBtnRef.value)
+      }
+    })
+  } else if (step === 11) {
+    // Step 11：高亮左侧面板（自然语言修改）
+    nextTick(() => {
+      if (leftPanelRef.value) {
+        guideStore.setTarget(leftPanelRef.value)
+      }
+    })
+  } else if (step === 12) {
+    // Step 12：高亮右侧面板（表单修改 + 选择模型）
+    // 确保切到配置标签
+    activeTab.value = 'config'
+    nextTick(() => {
+      if (rightPanelRef.value) {
+        guideStore.setTarget(rightPanelRef.value)
+      }
+    })
+    // 注册前置校验：必须选择模型才能进入保存步骤
+    guideStore.setBeforeNextStep(() => {
+      if (!form.model) {
+        return '请先选择一个 AI 模型'
+      }
+      return true
+    })
+  } else if (step === 13) {
+    // Step 13：高亮"保存"按钮
+    // 校验不通过时回退到 Step 12（右侧面板）
+    if (!canCreate.value) {
+      nextTick(() => {
+        guideStore.goToStep(12, '请先完善配置：选择 AI 模型后再继续')
+      })
+      return
+    }
     nextTick(() => {
       if (createBtnRef.value) {
         guideStore.setTarget(createBtnRef.value)
