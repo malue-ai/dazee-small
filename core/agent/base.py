@@ -363,6 +363,7 @@ class Agent:
             user_id=user_id,
             user_query=user_query,
             available_tools=tools_for_llm,
+            metadata={"plan": self._plan_cache.get("plan")},
         )
 
         # Phase 2: User Context 注入（用户记忆、Playbook 策略提示、知识库上下文）

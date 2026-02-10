@@ -242,17 +242,20 @@ class SkillGroupRegistry:
 
         Only includes user-facing groups (excludes _always).
         Result is cached (registry is immutable at runtime).
+
+        V12.1: 展示更多 skill 名称（8→10），提升小模型匹配命中率。
         """
         if self._desc_cache is not None:
             return self._desc_cache
 
+        max_skills_shown = 10
         lines = []
         for name, group in self._groups.items():
             if name == ALWAYS_GROUP:
                 continue
             # Include skill names for better LLM matching
-            skill_names = ", ".join(group.skills[:6])
-            if len(group.skills) > 6:
+            skill_names = ", ".join(group.skills[:max_skills_shown])
+            if len(group.skills) > max_skills_shown:
                 skill_names += f" 等{len(group.skills)}个"
             lines.append(f"- **{name}**: {group.description} ({skill_names})")
         self._desc_cache = "\n".join(lines)

@@ -1,19 +1,21 @@
 """
-Intent Recognition Prompt - V12.0 桌面端版
+Intent Recognition Prompt - V12.1 桌面端版
 
-输出 5 个核心字段：
+输出 6 个核心字段：
 - complexity: 复杂度等级 (simple/medium/complex)
 - skip_memory: 是否跳过记忆检索
 - is_follow_up: 是否为追问
 - wants_to_stop: 用户是否希望停止/取消
-- relevant_skill_groups: 需要哪些技能分组（多选）
+- wants_rollback: 用户是否要求恢复/撤销
+- relevant_skill_groups: 需要哪些技能分组（多选，重召回）
 
 其他字段（needs_plan）由代码从 complexity 推断。
 
 设计原则：
 - 极简输出，减少 LLM 产生矛盾的可能
-- Few-Shot 示例驱动决策
+- Few-Shot 示例驱动决策（多选示例 ≥ 40%，消除单选偏见）
 - LLM-First：语义理解，不做关键词匹配
+- 重召回：relevant_skill_groups 宁多勿漏
 """
 
 from typing import Optional
@@ -97,19 +99,35 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 ---
 
-## relevant_skill_groups（需要哪些技能分组）
+## relevant_skill_groups（需要哪些技能分组）⚠️ 最重要
 
-从以下分组中选择**所有可能相关的**（可多选，宁多勿漏）：
+**核心原则：宁多勿漏。漏选 = 该能力完全不可用；多选仅多加载少量提示词，代价极低。**
+
+### 决策两步法
+1. **拆动作**：这个请求包含几个动作？（如 "搜论文写综述" = 搜索 + 写作 = 2 个动作）
+2. **逐个匹配**：每个动作独立匹配分组，**全部选上**，不要合并
+
+最多选 **6** 个分组（0-6），纯聊天/问答填 []。
+
+### 可选分组
 {skill_groups_description}
 
-**原则**：
-- 一个请求可能涉及多个分组（如"分析 Excel 写总结" → ["data_analysis", "writing"]）
-- **重召回**：不确定是否需要时，选上（宁可多选，不要漏掉）
-- 纯聊天/问答/计算等不需要任何技能时，填 []
+### ⚠️ 常见需要多选的信号
+- 提到**写/总结/报告/润色/改写** → 加上 writing
+- 提到**文件/PDF/Word/格式转换/归档** → 加上 file_operation
+- 提到**搜索/调研/论文/网页/爬取** → 加上 research
+- 提到**数据/分析/Excel/表格/图表** → 加上 data_analysis
+- 提到**应用操作/打开App/截图/UI自动化** → 加上 app_automation
+- 提到**邮件/日历/笔记/提醒/消息/待办** → 加上 productivity
+- 提到**翻译/多语言** → 加上 translation
+- 提到**视频/音频/语音/TTS/转录** → 加上 media
+- **纯聊天/闲聊/问答/计算/打招呼** → []（不需要任何 skill）
 
 ---
 
 ## Few-Shot 示例
+
+<!-- 单动作 → 单分组 -->
 
 <example>
 <query>今天上海天气怎么样？</query>
@@ -119,16 +137,6 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <example>
 <query>帮我写一篇关于咖啡文化的文章</query>
 <output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
-</example>
-
-<example>
-<query>分析这个 Excel 数据，找出销售趋势，写一段总结</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "writing"]}}</output>
-</example>
-
-<example>
-<query>打开飞书给合伙人群发一句问候</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
 <example>
@@ -162,18 +170,8 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 </example>
 
 <example>
-<query>好的 谢谢你</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
-</example>
-
-<example>
 <query>Python 是什么？</query>
 <output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
-</example>
-
-<example>
-<query>帮我搜一下最近的 transformer 论文</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research"]}}</output>
 </example>
 
 <example>
@@ -187,11 +185,6 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 </example>
 
 <example>
-<query>帮我分析这份会议记录，提取行动项</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["meeting"]}}</output>
-</example>
-
-<example>
 <query>帮我头脑风暴一下，公众号怎么涨粉</query>
 <output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["creative"]}}</output>
 </example>
@@ -201,19 +194,60 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["diagram"]}}</output>
 </example>
 
+<!-- 多动作 → 必须多选 ⚠️ -->
+
 <example>
-<query>帮我分析这个职位描述，优化简历</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["career"]}}</output>
+<query>分析这个 Excel 数据，找出销售趋势，写一段总结</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "writing"]}}</output>
+<note>分析数据 → data_analysis ＋ 写总结 → writing</note>
 </example>
 
 <example>
-<query>教我学数据分析，从零开始</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["learning"]}}</output>
+<query>帮我搜一下最近的 AI Agent 论文，写个综述</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "writing"]}}</output>
+<note>搜论文 → research ＋ 写综述 → writing</note>
+</example>
+
+<example>
+<query>把这张图片上的英文 OCR 出来翻译成中文</query>
+<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation", "translation"]}}</output>
+<note>OCR 提取文字 → file_operation ＋ 翻译 → translation</note>
 </example>
 
 <example>
 <query>帮我把这篇文章去掉 AI 味，然后生成一份 PDF 报告</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing", "file_operation"]}}</output>
+<note>去 AI 味 → writing ＋ 生成 PDF → file_operation</note>
+</example>
+
+<example>
+<query>调研一下竞品的最新动态，写一份对比分析报告</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "writing"]}}</output>
+<note>调研竞品 → research ＋ 写报告 → writing</note>
+</example>
+
+<example>
+<query>整理这些发票，按月份归档到对应文件夹</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "file_operation"]}}</output>
+<note>整理发票数据 → data_analysis ＋ 归档到文件夹 → file_operation</note>
+</example>
+
+<example>
+<query>读一下这个 PDF 合同，提取关键条款，整理成 Word 文档</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "file_operation", "writing"]}}</output>
+<note>读 PDF → research ＋ 整理内容 → writing ＋ 输出 Word → file_operation</note>
+</example>
+
+<example>
+<query>帮我分析这份会议记录，提取行动项，发邮件给参会人</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["meeting", "productivity"]}}</output>
+<note>分析会议 → meeting ＋ 发邮件 → productivity</note>
+</example>
+
+<example>
+<query>帮我把这个视频转成文字，翻译成英文，写一篇博客发布</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media", "translation", "writing", "content_creation"]}}</output>
+<note>视频转文字 → media ＋ 翻译 → translation ＋ 写博客 → writing ＋ 内容发布 → content_creation</note>
 </example>
 
 ---
@@ -224,7 +258,9 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 - 不确定 skip_memory 时选 false（保守）
 - 不确定 is_follow_up 时选 false（保守）
 - 不确定 wants_rollback 时选 false（保守，只有明确恢复/撤销请求才为 true）
-- relevant_skill_groups 宁多勿漏，不确定时多选
+- **relevant_skill_groups 经常需要多选**（上面示例中近半数是多选）
+- 拆分用户请求中的每个动作，分别匹配分组
+- **不确定某个分组是否需要时 → 选上**（多选无害，漏选致命）
 
 现在分析用户的请求，只输出 JSON："""
 

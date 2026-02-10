@@ -177,12 +177,18 @@ class ToolSystemRoleProvider(BaseInjector):
 
     async def _get_skills_prompt(self, context: InjectionContext) -> str:
         """
-        动态生成 Skills 提示词（V12.0: 意图驱动按需注入）
+        动态生成 Skills 提示词（V12.1: 意图驱动 + Plan-Aware 按需注入）
 
         优先级链：
         1. intent.relevant_skill_groups 有值 -> 按分组过滤注入
-        2. intent.relevant_skill_groups 为 None -> Fallback 全量注入（保守）
-        3. 无 intent -> 使用缓存的静态 skills_prompt
+        2. Plan.required_skills 存在 -> 反查分组，与 intent 合并（union）
+        3. intent.relevant_skill_groups 为 None -> Fallback 全量注入（保守）
+        4. 无 intent -> 使用缓存的静态 skills_prompt
+
+        V12.1 Plan-Aware 补偿：
+        - Intent（Haiku）负责"当前轮需要什么"（每轮重新分析）
+        - Plan（主模型）负责"整体任务需要什么"（跨轮持久）
+        - 两者 union 合并，最大化召回率
         """
         # 尝试动态生成（需要 skills_loader 和 group_registry）
         if context.has_prompt_cache and context.prompt_cache.runtime_context:
@@ -198,6 +204,11 @@ class ToolSystemRoleProvider(BaseInjector):
                     groups = context.intent.relevant_skill_groups
                     if isinstance(groups, list):
                         relevant_groups = groups  # 空列表 = 只注入 _always
+
+                # V12.1: Plan-Aware 补偿 — 合并 plan.required_skills
+                relevant_groups = self._merge_plan_skills(
+                    relevant_groups, context, group_registry
+                )
 
                 try:
                     prompt = await skills_loader.build_skills_prompt(
@@ -219,3 +230,68 @@ class ToolSystemRoleProvider(BaseInjector):
             return context.prompt_cache.runtime_context.get("skills_prompt", "")
 
         return ""
+
+    @staticmethod
+    def _merge_plan_skills(
+        intent_groups, context: InjectionContext, group_registry
+    ):
+        """
+        Plan-Aware 补偿：将 plan.required_skills 反查为 group，与 intent 合并。
+
+        设计原则：
+        - intent_groups 为 None（全量 Fallback）时不合并（已经是最大集合）
+        - plan 不存在或无 required_skills 时原样返回
+        - 合并策略：union（宁多勿漏）
+
+        Args:
+            intent_groups: intent 分析的 relevant_skill_groups（None 或 list）
+            context: InjectionContext（从 metadata 获取 plan）
+            group_registry: SkillGroupRegistry（反查 skill → group）
+
+        Returns:
+            合并后的 groups list，或 None（保持全量 Fallback）
+        """
+        # None = 全量 Fallback，无需合并
+        if intent_groups is None:
+            return None
+
+        # 需要 group_registry 做反查
+        if not group_registry or not hasattr(group_registry, "get_groups_for_skill"):
+            return intent_groups
+
+        # 从 metadata 获取 plan
+        plan = context.get("plan")
+        if not plan or not isinstance(plan, dict):
+            return intent_groups
+
+        plan_skills = plan.get("required_skills")
+        if not plan_skills or not isinstance(plan_skills, list):
+            return intent_groups
+
+        # 反查：skill name → group names
+        plan_groups = set()
+        for skill_name in plan_skills:
+            if not isinstance(skill_name, str):
+                continue
+            groups_for_skill = group_registry.get_groups_for_skill(skill_name)
+            plan_groups.update(groups_for_skill)
+
+        # 过滤掉 _always（它始终注入，不需要显式选择）
+        plan_groups.discard("_always")
+
+        if not plan_groups:
+            return intent_groups
+
+        # Union 合并
+        intent_set = set(intent_groups)
+        added = plan_groups - intent_set
+        if added:
+            merged = sorted(intent_set | plan_groups)
+            logger.info(
+                f"Plan-Aware 补偿: intent={intent_groups}, "
+                f"plan_skills={plan_skills} → +groups={sorted(added)}, "
+                f"merged={merged}"
+            )
+            return merged
+
+        return intent_groups

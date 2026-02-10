@@ -54,6 +54,7 @@ _INTENT_TOOL = {
             "relevant_skill_groups": {
                 "type": "array",
                 "items": {"type": "string"},
+                "maxItems": 6,
             },
         },
         "required": [
