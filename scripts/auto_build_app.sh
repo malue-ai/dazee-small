@@ -283,8 +283,9 @@ else
 fi
 
 # 激活 venv（后续所有 pip install / PyInstaller / build_backend.py 都在此环境中执行）
+# 注意：activate 脚本内部的 hash -r 可能返回非零，加 || true 防止 set -e 退出
 info "激活虚拟环境: $VENV_DIR"
-source "$VENV_DIR/bin/activate"
+source "$VENV_DIR/bin/activate" 2>/dev/null || true
 PYTHON_CMD="$VENV_DIR/bin/python3"
 
 # 验证 venv 激活成功
