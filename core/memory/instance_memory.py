@@ -439,6 +439,9 @@ class InstanceMemoryManager:
 
     _FTS_MAX_RETRIES = 3
 
+    # Class-level cache: reuse SQLite engine across instances with the same DB path
+    _fts_engine_cache: dict = {}
+
     async def _ensure_fts(self) -> None:
         """
         Lazy-init FTS5 index table with retry.
@@ -481,10 +484,14 @@ class InstanceMemoryManager:
             # SQLite WAL 模式保证并发读写安全。
             # 参考: https://www.sqlite.org/wal.html
             fts_db_dir = str(self._base_dir.parent / "store")
-            engine = create_local_engine(
-                db_dir=fts_db_dir, db_name="memory_fts.db",
-                use_null_pool=True,
-            )
+            cache_key = f"{fts_db_dir}:memory_fts.db"
+            engine = InstanceMemoryManager._fts_engine_cache.get(cache_key)
+            if engine is None:
+                engine = create_local_engine(
+                    db_dir=fts_db_dir, db_name="memory_fts.db",
+                    use_null_pool=True,
+                )
+                InstanceMemoryManager._fts_engine_cache[cache_key] = engine
             self._fts_engine = engine
             self._fts_session_factory = None  # lazy
 

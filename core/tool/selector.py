@@ -420,7 +420,7 @@ class ToolSelector:
             invalid_tools = [t for t in schema_tools if not self.registry.get(t)]
 
             if invalid_tools:
-                logger.warning(f"Schema 中的无效工具（已过滤）: {invalid_tools}")
+                logger.debug(f"Schema 中的无效工具（已过滤）: {invalid_tools}")
 
             if valid_tools:
                 allowed_tools = valid_tools  # 设置白名单

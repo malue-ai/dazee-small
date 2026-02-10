@@ -13,13 +13,14 @@ parameters:
     description: "Optional output file path (default: print to stdout)"
 metadata:
   xiaodazi:
-    dependency_level: lightweight
+    dependency_level: builtin
     os: [common]
     backend_type: local
     user_facing: true
-    auto_install: "pip install rapidocr-onnxruntime"
-    python_packages:
-      - rapidocr-onnxruntime
+    # NOTE: 依赖管理由 skills.yaml 按 OS 分区处理：
+    # - macOS: darwin/builtin（Vision Framework 内置，零安装）
+    # - Windows/Linux: lightweight（auto_install: pip install rapidocr-onnxruntime）
+    # SKILL.md 不声明 python_packages / auto_install，避免与 skills.yaml 冲突
 ---
 
 # 多语言 OCR — 图片文字提取

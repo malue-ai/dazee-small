@@ -1698,18 +1698,19 @@ class ChatService:
                     try:
                         # Include backtrack metadata from RuntimeContext for E2E verification
                         msg_metadata = {"usage": usage_response.model_dump(mode="json")}
-                        if hasattr(ctx, "total_backtracks"):
+                        runtime_ctx = getattr(agent, "_last_runtime_ctx", None)
+                        if runtime_ctx and getattr(runtime_ctx, "total_backtracks", 0) > 0:
                             msg_metadata["backtrack"] = {
-                                "count": ctx.total_backtracks,
-                                "exhausted": getattr(ctx, "backtracks_exhausted", False),
-                                "escalation": getattr(ctx, "backtrack_escalation", None),
+                                "count": runtime_ctx.total_backtracks,
+                                "exhausted": getattr(runtime_ctx, "backtracks_exhausted", False),
+                                "escalation": getattr(runtime_ctx, "backtrack_escalation", None),
                             }
                         await self.conversation_service.update_message(
                             message_id=assistant_message_id,
                             metadata=msg_metadata,
                         )
                     except Exception as update_err:
-                        logger.warning("更新 Usage 数据失败", extra={"error": str(update_err)})
+                        logger.warning("更新 Usage 数据失败", exc_info=True, extra={"error": str(update_err)})
 
                 except Exception as audit_err:
                     logger.warning(

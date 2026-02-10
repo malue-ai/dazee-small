@@ -129,6 +129,7 @@ class UserTaskScheduler:
 
             from infra.local_store.models import LocalScheduledTask
 
+            assert self._workspace._session_factory is not None, "Workspace not started"
             async with self._workspace._session_factory() as session:
                 result = await session.execute(
                     select(LocalScheduledTask).where(
@@ -138,8 +139,23 @@ class UserTaskScheduler:
                 )
                 active_tasks = list(result.scalars().all())
 
+                # Deduplicate by (title, trigger_type, next_run_at) —
+                # prevents the same logical task from firing twice.
+                seen = set()
                 count = 0
                 for task in active_tasks:
+                    dedup_key = (
+                        task.title or "",
+                        task.trigger_type or "",
+                        str(task.next_run_at or ""),
+                    )
+                    if dedup_key in seen:
+                        logger.warning(
+                            f"⚠️ [Scheduler] 跳过重复任务: id={task.id}, "
+                            f"title={task.title}, trigger={task.trigger_type}"
+                        )
+                        continue
+                    seen.add(dedup_key)
                     if self._register_job(task):
                         count += 1
 
@@ -303,6 +319,7 @@ class UserTaskScheduler:
 
         # ---- Phase 1: 加载任务（短暂持有 session，立即释放） ----
         task_snapshot = None
+        assert self._workspace._session_factory is not None, "Workspace not started"
         async with self._workspace._session_factory() as session:
             task = await get_scheduled_task(session, task_id)
 
@@ -353,6 +370,7 @@ class UserTaskScheduler:
 
         # ---- Phase 3: 标记执行完成（短暂持有 session） ----
         try:
+            assert self._workspace._session_factory is not None, "Workspace not started"
             async with self._workspace._session_factory() as session:
                 updated_task = await mark_task_executed(session, task_id)
 

@@ -348,6 +348,8 @@ class Agent:
 
         # 初始化运行时上下文（终止由 AdaptiveTerminator 驱动，不设 max_turns 限制）
         ctx = create_runtime_context(session_id=session_id)
+        # Expose RuntimeContext so ChatService can read backtrack metadata after execution
+        self._last_runtime_ctx = ctx
 
         # 工具选择
         tools_for_llm, selection = await self._select_tools(intent, ctx)

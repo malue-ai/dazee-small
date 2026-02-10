@@ -567,17 +567,21 @@ class AgentRegistry:
 
         # V12.1: 注入 SkillsLoader + SkillGroupRegistry 到 prompt_cache.runtime_context
         # 供 ToolSystemRoleProvider 在运行时按 intent 动态生成 skills_prompt
+        # Reuse loader from instance_loader if already loaded (avoids duplicate scan)
         if instance_config and instance_config.skills_first_config:
             try:
-                from core.skill import create_skills_loader
                 from core.skill.group_registry import SkillGroupRegistry
 
-                skills_loader = create_skills_loader(
-                    skills_config=instance_config.skills_first_config,
-                    instance_skills_dir=get_instances_dir() / config.name / "skills",
-                    instance_name=config.name,
-                )
-                await skills_loader.load()
+                skills_loader = getattr(agent, "_skills_loader", None)
+                if skills_loader is None:
+                    from core.skill import create_skills_loader
+
+                    skills_loader = create_skills_loader(
+                        skills_config=instance_config.skills_first_config,
+                        instance_skills_dir=get_instances_dir() / config.name / "skills",
+                        instance_name=config.name,
+                    )
+                    await skills_loader.load()
 
                 skill_groups_cfg = (instance_config.raw_config or {}).get("skill_groups", {})
                 group_registry = SkillGroupRegistry(skill_groups_cfg)

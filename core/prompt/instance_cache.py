@@ -627,45 +627,53 @@ class InstancePromptCache:
         else:
             logger.info("   Task 1/5: AgentSchema（已存在，跳过）")
 
-        # Task 2: 生成意图识别提示词
-        if regen_flags.get("intent_prompt", True) or not self.intent_prompt:
-            if progress_callback:
-                await progress_callback(3, "生成意图识别...")
+        # Tasks 2-5: independent of each other, run in parallel after Task 1
+        import asyncio
+
+        parallel_tasks = []
+
+        need_intent = regen_flags.get("intent_prompt", True) or not self.intent_prompt
+        need_simple = regen_flags.get("simple_prompt", True) or not self.system_prompt_simple
+        need_medium = regen_flags.get("medium_prompt", True) or not self.system_prompt_medium
+        need_complex = regen_flags.get("complex_prompt", True) or not self.system_prompt_complex
+
+        if need_intent:
             logger.info("   Task 2/5: 生成意图识别提示词...")
-            await self._generate_intent_prompt_decomposed(raw_prompt)
-            logger.info(f"   ✅ 意图识别提示词: {len(self.intent_prompt or '')} 字符")
+            parallel_tasks.append(self._generate_intent_prompt_decomposed(raw_prompt))
         else:
             logger.info("   Task 2/5: 意图识别提示词（已存在，跳过）")
 
-        # Task 3: 生成简单任务提示词
-        if regen_flags.get("simple_prompt", True) or not self.system_prompt_simple:
-            if progress_callback:
-                await progress_callback(4, "生成场景提示词(1/3)...")
+        if need_simple:
             logger.info("   Task 3/5: 生成简单任务提示词...")
-            await self._generate_simple_prompt_decomposed(raw_prompt)
-            logger.info(f"   ✅ 简单任务提示词: {len(self.system_prompt_simple or '')} 字符")
+            parallel_tasks.append(self._generate_simple_prompt_decomposed(raw_prompt))
         else:
             logger.info("   Task 3/5: 简单任务提示词（已存在，跳过）")
 
-        # Task 4: 生成中等任务提示词
-        if regen_flags.get("medium_prompt", True) or not self.system_prompt_medium:
-            if progress_callback:
-                await progress_callback(5, "生成场景提示词(2/3)...")
+        if need_medium:
             logger.info("   Task 4/5: 生成中等任务提示词...")
-            await self._generate_medium_prompt_decomposed(raw_prompt)
-            logger.info(f"   ✅ 中等任务提示词: {len(self.system_prompt_medium or '')} 字符")
+            parallel_tasks.append(self._generate_medium_prompt_decomposed(raw_prompt))
         else:
             logger.info("   Task 4/5: 中等任务提示词（已存在，跳过）")
 
-        # Task 5: 生成复杂任务提示词
-        if regen_flags.get("complex_prompt", True) or not self.system_prompt_complex:
-            if progress_callback:
-                await progress_callback(6, "生成场景提示词(3/3)...")
+        if need_complex:
             logger.info("   Task 5/5: 生成复杂任务提示词...")
-            await self._generate_complex_prompt_decomposed(raw_prompt)
-            logger.info(f"   ✅ 复杂任务提示词: {len(self.system_prompt_complex or '')} 字符")
+            parallel_tasks.append(self._generate_complex_prompt_decomposed(raw_prompt))
         else:
             logger.info("   Task 5/5: 复杂任务提示词（已存在，跳过）")
+
+        if parallel_tasks:
+            if progress_callback:
+                await progress_callback(3, f"并行生成 {len(parallel_tasks)} 个提示词...")
+            await asyncio.gather(*parallel_tasks)
+
+        if need_intent:
+            logger.info(f"   ✅ 意图识别提示词: {len(self.intent_prompt or '')} 字符")
+        if need_simple:
+            logger.info(f"   ✅ 简单任务提示词: {len(self.system_prompt_simple or '')} 字符")
+        if need_medium:
+            logger.info(f"   ✅ 中等任务提示词: {len(self.system_prompt_medium or '')} 字符")
+        if need_complex:
+            logger.info(f"   ✅ 复杂任务提示词: {len(self.system_prompt_complex or '')} 字符")
 
         # 创建 PromptSchema
         self.prompt_schema = PromptSchema(raw_prompt=raw_prompt)

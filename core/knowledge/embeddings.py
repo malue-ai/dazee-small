@@ -21,7 +21,7 @@ Auto 模式优先级：GGUF 本地 → sentence-transformers → OpenAI 云端
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 
@@ -174,7 +174,7 @@ async def download_gguf_model(
         )
 
     def _do_download() -> str:
-        return hf_hub_download(
+        return hf_hub_download(  # type: ignore[call-overload]
             repo_id=repo_id,
             filename=filename,
             local_dir=str(models_dir),
@@ -445,7 +445,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
         self._filename = filename or os.getenv("GGUF_MODEL", DEFAULT_GGUF_FILE)
         self._dimensions = dimensions
         self._model_path = model_path
-        self._model = None  # Lazy init
+        self._model: Any = None  # Lazy init: Llama instance
 
     @property
     def provider_id(self) -> str:
@@ -516,13 +516,27 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
             return
 
         logger.info(f"Loading GGUF embedding model: {model_path}")
-        self._model = Llama(
-            model_path=model_path,
-            embedding=True,
-            n_ctx=8192,
-            n_gpu_layers=0,  # CPU only for compatibility
-            verbose=False,
-        )
+
+        # Suppress llama-cpp-python stdout noise
+        # ("init: embeddings required but some input tokens were not
+        #  marked as outputs -> overriding")
+        import os
+        import sys
+
+        _devnull = open(os.devnull, "w")
+        _old_stderr = sys.stderr
+        sys.stderr = _devnull
+        try:
+            self._model = Llama(
+                model_path=model_path,
+                embedding=True,
+                n_ctx=8192,
+                n_gpu_layers=0,  # CPU only for compatibility
+                verbose=False,
+            )
+        finally:
+            sys.stderr = _old_stderr
+            _devnull.close()
 
         # Cache for reuse by other provider instances
         GGUFEmbeddingProvider._shared_models[model_path] = self._model
@@ -549,6 +563,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
         import asyncio
 
         self._ensure_model()
+        assert self._model is not None, "GGUF model not loaded"
 
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
@@ -568,6 +583,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
             return []
 
         self._ensure_model()
+        assert self._model is not None, "GGUF model not loaded"
 
         truncated = [t[:8000] for t in texts]
 
@@ -612,7 +628,7 @@ class SentenceTransformerProvider(EmbeddingProvider):
     def __init__(self, model: str = "BAAI/bge-m3"):
         self._model_name = model
         self._dimensions = self._KNOWN_DIMS.get(model, 1024)
-        self._model = None
+        self._model: Any = None  # Lazy init: SentenceTransformer instance
 
     @property
     def provider_id(self) -> str:
@@ -660,6 +676,7 @@ class SentenceTransformerProvider(EmbeddingProvider):
         import asyncio
 
         self._ensure_model()
+        assert self._model is not None, "SentenceTransformer model not loaded"
 
         loop = asyncio.get_running_loop()
         raw = await loop.run_in_executor(
@@ -678,6 +695,7 @@ class SentenceTransformerProvider(EmbeddingProvider):
             return []
 
         self._ensure_model()
+        assert self._model is not None, "SentenceTransformer model not loaded"
 
         truncated = [t[:8000] for t in texts]
 
