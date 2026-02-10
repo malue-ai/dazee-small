@@ -686,6 +686,7 @@ class Agent:
             and intent.complexity.value == "simple"
             and not intent.needs_plan
             and not plan
+            and not intent.is_follow_up  # follow-up may need prior tools
         )
         if is_simple_task:
             # Minimal tool set for simple tasks (from config/capabilities.yaml)

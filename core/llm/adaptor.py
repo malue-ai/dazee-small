@@ -370,9 +370,29 @@ class ClaudeAdaptor(BaseAdaptor):
                 )
 
         # Phase 3: 基于邻接配对集合过滤消息，同时去重
+        # Orphan tool_use blocks are converted to text summaries (max 10)
+        # so the model retains awareness of previous actions.
+        MAX_ORPHAN_SUMMARIES = 10
         added_tool_use_ids: set = set()
         added_tool_result_ids: set = set()
+        orphan_tool_use_count = 0
         cleaned_messages = []
+
+        # Pre-count orphan tool_use to decide which ones to summarize
+        # (keep the most recent ones within the cap)
+        total_orphan_tool_use = 0
+        for msg in messages:
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "tool_use"
+                        and block.get("id") not in adjacent_paired
+                    ):
+                        total_orphan_tool_use += 1
+        # Skip threshold: only summarize the last N orphans
+        skip_threshold = max(0, total_orphan_tool_use - MAX_ORPHAN_SUMMARIES)
 
         for msg in messages:
             content = msg.get("content", [])
@@ -395,6 +415,11 @@ class ClaudeAdaptor(BaseAdaptor):
                             added_tool_use_ids.add(tool_id)
                             filtered_content.append(block)
                         else:
+                            orphan_tool_use_count += 1
+                            if orphan_tool_use_count > skip_threshold:
+                                # Convert to text summary to preserve context
+                                summary = ClaudeAdaptor._summarize_orphan_tool_use(block)
+                                filtered_content.append({"type": "text", "text": summary})
                             logger.debug(f"🧹 移除未配对/非邻接的 tool_use: {tool_id}")
                     elif block_type == "tool_result":
                         tool_use_id = block.get("tool_use_id")
@@ -430,6 +455,38 @@ class ClaudeAdaptor(BaseAdaptor):
             )
 
         return cleaned_messages
+
+    @staticmethod
+    def _summarize_orphan_tool_use(block: Dict[str, Any]) -> str:
+        """
+        Convert an orphan tool_use block to a concise text summary.
+
+        Preserves the model's awareness of what it previously attempted,
+        preventing hallucination about actions that were never executed
+        or re-attempting actions without context.
+
+        Args:
+            block: tool_use block dict with name, input fields
+
+        Returns:
+            Short text summary (max ~120 chars)
+        """
+        tool_name = block.get("name", "unknown")
+        tool_input = block.get("input", {})
+
+        summary = f"[之前调用了 {tool_name}"
+        if isinstance(tool_input, dict) and tool_input:
+            # Extract up to 3 key params, each value truncated to 40 chars
+            params = []
+            for k, v in list(tool_input.items())[:3]:
+                val_str = str(v)
+                if len(val_str) > 40:
+                    val_str = val_str[:37] + "..."
+                params.append(f"{k}={val_str}")
+            if params:
+                summary += f"({', '.join(params)})"
+        summary += "，结果未记录]"
+        return summary
 
     @staticmethod
     def clean_content_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -534,7 +591,7 @@ class ClaudeAdaptor(BaseAdaptor):
         # _merge_consecutive_same_role 可能改变消息邻接关系，需要二次验证
         converted_messages = ClaudeAdaptor.ensure_tool_pairs(converted_messages)
 
-        result = {"messages": converted_messages}
+        result: Dict[str, Any] = {"messages": converted_messages}
         if system:
             result["system"] = system
         return result
@@ -714,7 +771,7 @@ class OpenAIAdaptor(BaseAdaptor):
             result = []
 
             if msg.role == "assistant":
-                assistant_msg = {"role": "assistant"}
+                assistant_msg: Dict[str, Any] = {"role": "assistant"}
 
                 # 处理 content
                 if content_parts:
@@ -1122,7 +1179,7 @@ class GeminiAdaptor(BaseAdaptor):
 
             gemini_contents.append({"role": role, "parts": parts})
 
-        result = {"contents": gemini_contents}
+        result: Dict[str, Any] = {"contents": gemini_contents}
 
         if system:
             result["system_instruction"] = {"parts": [{"text": system}]}

@@ -693,6 +693,11 @@ class ClaudeLLMService(BaseLLMService):
 
             request_params["tools"] = all_tools
 
+            # tool_choice: force specific tool usage (e.g. structured output)
+            tool_choice = kwargs.get("tool_choice")
+            if tool_choice:
+                request_params["tool_choice"] = tool_choice
+
             # 调试日志
             logger.debug(f"Tools: {[t.get('name', 'unknown') for t in all_tools]}")
 

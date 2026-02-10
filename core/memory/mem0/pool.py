@@ -122,13 +122,13 @@ class Mem0MemoryPool:
             配置好的 Memory 实例
         """
         try:
-            from mem0 import Memory
-            from mem0.configs.base import MemoryConfig as Mem0MemoryConfig
-            from mem0.embeddings.configs import EmbedderConfig
-            from mem0.llms.configs import LlmConfig
-            from mem0.memory.storage import SQLiteManager
-            from mem0.utils.factory import EmbedderFactory, LlmFactory
-            from mem0.vector_stores.configs import VectorStoreConfig
+            from mem0 import Memory  # type: ignore[attr-defined]
+            from mem0.configs.base import MemoryConfig as Mem0MemoryConfig  # type: ignore[import-untyped]
+            from mem0.embeddings.configs import EmbedderConfig  # type: ignore[import-untyped]
+            from mem0.llms.configs import LlmConfig  # type: ignore[import-untyped]
+            from mem0.memory.storage import SQLiteManager  # type: ignore[import-untyped]
+            from mem0.utils.factory import EmbedderFactory, LlmFactory  # type: ignore[import-untyped]
+            from mem0.vector_stores.configs import VectorStoreConfig  # type: ignore[import-untyped]
 
             from core.memory.mem0.sqlite_vec_store import SqliteVecVectorStore
 
@@ -525,9 +525,17 @@ class _GGUFEmbedderAdapter:
     """
 
     def __init__(self, provider):
+        import concurrent.futures
+
         self.provider = provider
         # Trigger lazy model load now so first embed() is fast
         self.provider._ensure_model()
+
+        # Reuse a single worker thread for all embed() calls.
+        # Previously each call created a new ThreadPoolExecutor, adding
+        # ~50ms overhead per call (thread creation + asyncio.run bootstrap).
+        # With 48+ embed calls per memory flush, that's 2-3s of pure waste.
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
         # Mem0 internally accesses ``embedding_model.config.embedding_dims``
         # (e.g. in telemetry capture_event).  Provide a compatible config object.
@@ -552,7 +560,6 @@ class _GGUFEmbedderAdapter:
         are handled by sqlite_vec_store with its own _write_lock.
         """
         import asyncio
-        import concurrent.futures
 
         _in_async = True
         try:
@@ -563,8 +570,7 @@ class _GGUFEmbedderAdapter:
         if _in_async:
             # Worker thread gets its own event loop via asyncio.run()
             coro = self.provider.embed(text)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                vec = pool.submit(asyncio.run, coro).result()
+            vec = self._executor.submit(asyncio.run, coro).result()
         else:
             vec = asyncio.run(self.provider.embed(text))
 

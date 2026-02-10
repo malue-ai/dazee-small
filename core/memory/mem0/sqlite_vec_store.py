@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from mem0.vector_stores.base import VectorStoreBase
+from mem0.vector_stores.base import VectorStoreBase  # type: ignore[import-untyped]
 
 from logger import get_logger
 

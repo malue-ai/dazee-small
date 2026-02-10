@@ -30,6 +30,43 @@ from utils.json_utils import extract_json
 
 logger = get_logger(__name__)
 
+# Tool definition for forced structured output via tool_choice.
+# The model MUST call this tool, guaranteeing valid structured data
+# instead of free-form text that may fail JSON parsing.
+_INTENT_TOOL_NAME = "classify_intent"
+_INTENT_TOOL = {
+    "name": _INTENT_TOOL_NAME,
+    "description": (
+        "Output the intent classification result. "
+        "Analyze the user's request and return structured classification."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "complexity": {
+                "type": "string",
+                "enum": ["simple", "medium", "complex"],
+            },
+            "skip_memory": {"type": "boolean"},
+            "is_follow_up": {"type": "boolean"},
+            "wants_to_stop": {"type": "boolean"},
+            "wants_rollback": {"type": "boolean"},
+            "relevant_skill_groups": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": [
+            "complexity",
+            "skip_memory",
+            "is_follow_up",
+            "wants_to_stop",
+            "wants_rollback",
+            "relevant_skill_groups",
+        ],
+    },
+}
+
 
 class IntentAnalyzer:
     """
@@ -274,10 +311,11 @@ class IntentAnalyzer:
 
     async def _analyze_with_llm(self, messages: List[Dict[str, Any]], tracker=None) -> IntentResult:
         """
-        Use LLM for intent analysis.
+        Use LLM for intent analysis with forced structured output.
 
-        Messages are filtered to plain text before calling the LLM,
-        ensuring compatibility with Claude, Qwen, DeepSeek, and OpenAI.
+        Uses tool_choice to force the model to call classify_intent,
+        guaranteeing structured output. Falls back to text parsing
+        if tool call is unavailable.
 
         Args:
             messages: Raw message list (may contain multimodal content).
@@ -314,9 +352,12 @@ class IntentAnalyzer:
                     preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
                     logger.info(f"  [{i+1}] {msg['role']}: {preview}")
 
-            # Call LLM
+            # Call LLM with tool_choice to force structured output
             response = await self.llm.create_message_async(
-                messages=llm_messages, system=system_blocks
+                messages=llm_messages,
+                system=system_blocks,
+                tools=[_INTENT_TOOL],
+                tool_choice={"type": "tool", "name": _INTENT_TOOL_NAME},
             )
 
             # 记录计费
@@ -325,24 +366,87 @@ class IntentAnalyzer:
                     llm_response=response, model=response.model, purpose="intent_analysis"
                 )
 
-            # ========== 打印意图识别原始输出 ==========
-            logger.info("=" * 60)
-            logger.info(f"[意图识别] LLM 原始响应: {response.content}")
-            logger.info("=" * 60)
+            # Parse from tool call (primary path: structured output)
+            if response.tool_calls:
+                parsed = response.tool_calls[0].get("input", {})
+                logger.info("=" * 60)
+                logger.info(f"[意图识别] tool_choice 结构化输出: {parsed}")
+                logger.info("=" * 60)
+                return self._parse_intent_dict(parsed)
 
-            # 解析响应
-            return self._parse_llm_response(response.content)
+            # Fallback: parse text content (should rarely happen)
+            logger.info("=" * 60)
+            logger.info(f"[意图识别] LLM 原始响应 (text fallback): {response.content}")
+            logger.info("=" * 60)
+            return self._parse_llm_response(response.content or "")
 
         except Exception as e:
             logger.warning(f"LLM 意图分析失败: {e}，使用保守默认值")
             return self._get_conservative_default()
 
-    def _parse_llm_response(self, content: str) -> IntentResult:
+    def _parse_intent_dict(self, parsed: Dict[str, Any]) -> IntentResult:
         """
-        解析 LLM 响应（只解析核心字段，不包含 agent_type）
+        Parse a dict (from tool_call input or extracted JSON) into IntentResult.
+
+        Each field is validated with safe defaults.
 
         Args:
-            content: LLM 响应内容
+            parsed: Dict with intent classification fields.
+
+        Returns:
+            IntentResult
+        """
+        complexity_str = parsed.get("complexity", "medium")
+        try:
+            complexity = Complexity(complexity_str)
+        except ValueError:
+            complexity = Complexity.MEDIUM
+
+        skip_memory = parsed.get("skip_memory", False)
+        if not isinstance(skip_memory, bool):
+            skip_memory = False
+
+        is_follow_up = parsed.get("is_follow_up", False)
+        if not isinstance(is_follow_up, bool):
+            is_follow_up = False
+
+        wants_to_stop = parsed.get("wants_to_stop", False)
+        if not isinstance(wants_to_stop, bool):
+            wants_to_stop = False
+
+        wants_rollback = parsed.get("wants_rollback", False)
+        if not isinstance(wants_rollback, bool):
+            wants_rollback = False
+
+        relevant_skill_groups = parsed.get("relevant_skill_groups", [])
+        if not isinstance(relevant_skill_groups, list):
+            relevant_skill_groups = []
+        relevant_skill_groups = [str(g) for g in relevant_skill_groups if g]
+
+        logger.debug(
+            f"解析成功: complexity={complexity.value}, "
+            f"skip_memory={skip_memory}, is_follow_up={is_follow_up}, "
+            f"wants_to_stop={wants_to_stop}, "
+            f"relevant_skill_groups={relevant_skill_groups}"
+        )
+
+        return IntentResult(
+            complexity=complexity,
+            skip_memory=skip_memory,
+            is_follow_up=is_follow_up,
+            wants_to_stop=wants_to_stop,
+            wants_rollback=wants_rollback,
+            relevant_skill_groups=relevant_skill_groups,
+        )
+
+    def _parse_llm_response(self, content: str) -> IntentResult:
+        """
+        Parse LLM text response (fallback when tool_choice is unavailable).
+
+        Extracts JSON from free-form text, then delegates to _parse_intent_dict.
+
+        Args:
+            content: LLM text response.
 
         Returns:
             IntentResult
@@ -350,57 +454,7 @@ class IntentAnalyzer:
         parsed = extract_json(content)
 
         if parsed and isinstance(parsed, dict):
-            # 解析 complexity
-            complexity_str = parsed.get("complexity", "medium")
-            try:
-                complexity = Complexity(complexity_str)
-            except ValueError:
-                complexity = Complexity.MEDIUM
-
-            # 解析 skip_memory
-            skip_memory = parsed.get("skip_memory", False)
-            if not isinstance(skip_memory, bool):
-                skip_memory = False
-
-            # 解析 is_follow_up
-            is_follow_up = parsed.get("is_follow_up", False)
-            if not isinstance(is_follow_up, bool):
-                is_follow_up = False
-
-            # 解析 wants_to_stop（用户停止/取消意图，LLM 语义推断）
-            wants_to_stop = parsed.get("wants_to_stop", False)
-            if not isinstance(wants_to_stop, bool):
-                wants_to_stop = False
-
-            # 解析 wants_rollback（用户恢复/撤销意图，LLM 语义推断）
-            wants_rollback = parsed.get("wants_rollback", False)
-            if not isinstance(wants_rollback, bool):
-                wants_rollback = False
-
-            # 解析 relevant_skill_groups（LLM 语义多选，重召回）
-            relevant_skill_groups = parsed.get("relevant_skill_groups", [])
-            if not isinstance(relevant_skill_groups, list):
-                relevant_skill_groups = []
-            # 确保每个元素是字符串
-            relevant_skill_groups = [
-                str(g) for g in relevant_skill_groups if g
-            ]
-
-            logger.debug(
-                f"解析成功: complexity={complexity.value}, "
-                f"skip_memory={skip_memory}, is_follow_up={is_follow_up}, "
-                f"wants_to_stop={wants_to_stop}, "
-                f"relevant_skill_groups={relevant_skill_groups}"
-            )
-
-            return IntentResult(
-                complexity=complexity,
-                skip_memory=skip_memory,
-                is_follow_up=is_follow_up,
-                wants_to_stop=wants_to_stop,
-                wants_rollback=wants_rollback,
-                relevant_skill_groups=relevant_skill_groups,
-            )
+            return self._parse_intent_dict(parsed)
         else:
             logger.warning(f"无法解析 JSON: {content[:100]}...")
             return self._get_conservative_default()
@@ -417,6 +471,8 @@ class IntentAnalyzer:
         descriptions (e.g. "trend-spotter" → research group's "趋势发现").
 
         This is a safety net, not a replacement for LLM judgment.
+        When relevant_skill_groups is None (full fallback), skip supplementation
+        since all skills will be injected anyway.
 
         Args:
             result: IntentResult from LLM analysis
@@ -426,6 +482,10 @@ class IntentAnalyzer:
             IntentResult with supplemented groups (if any)
         """
         if not query_text:
+            return result
+
+        # None = full fallback (all skills injected), no supplementation needed
+        if result.relevant_skill_groups is None:
             return result
 
         registry = self._get_skill_group_registry()
@@ -459,7 +519,9 @@ class IntentAnalyzer:
         """
         获取保守默认值
 
-        策略：中等复杂度，不跳过记忆，非追问
+        策略：中等复杂度，不跳过记忆，非追问，全量注入 Skills（保守）
+        relevant_skill_groups=None 表示"不确定需要什么"，触发全量 Skills 注入，
+        确保 Agent 不会因为解析失败而丧失能力。
         """
         logger.info("使用保守默认值")
         return IntentResult(
@@ -468,6 +530,7 @@ class IntentAnalyzer:
             is_follow_up=False,
             wants_to_stop=False,
             confidence=0.3,
+            relevant_skill_groups=None,  # None = 全量注入，保守策略
         )
 
 

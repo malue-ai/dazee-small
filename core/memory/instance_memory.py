@@ -275,24 +275,59 @@ class InstanceMemoryManager:
         self, memories: List[Dict[str, str]]
     ) -> None:
         """
-        Batch-write multiple memories.
+        Batch-write multiple memories with fast/slow path separation.
 
         Each item is ``{"content": str, "category": str}``.
-        Functionally equivalent to calling ``remember()`` for each item,
-        but logged as a batch for easier monitoring.
+
+        Strategy (optimized for multi-turn latency):
+        - Phase 1 (fast): Write to MEMORY.md + FTS5 for each fragment
+        - Phase 2 (slow, optional): Single Mem0 add() for all fragments combined
+          Mem0 is best-effort — failures are logged and skipped.
+
+        This reduces 16× Mem0 add() calls (each ~5s) to a single call (~5s).
         """
         if not memories:
             return
 
-        ok = 0
+        # Filter valid, non-ephemeral entries
+        valid: List[Dict[str, str]] = []
         for mem in memories:
             content = mem.get("content", "")
             category = mem.get("category", "general")
-            if content and content.strip():
-                await self.remember(content=content, category=category)
-                ok += 1
+            if content and content.strip() and not _is_ephemeral(content):
+                valid.append({"content": content.strip(), "category": category})
 
-        logger.info(f"批量记忆写入: {ok}/{len(memories)} 条成功")
+        if not valid:
+            return
+
+        # Phase 1: Fast writes (L1 file + L2 FTS5) — sequential, ~1ms each
+        ok = 0
+        for mem in valid:
+            content = mem["content"]
+            category = mem["category"]
+            section = _SECTION_MAP.get(category, "历史经验")
+            try:
+                await self._file_layer.append_to_section(section, content)
+                await self._fts5_index_entry(content, category)
+                ok += 1
+            except Exception as e:
+                logger.warning(f"L1/L2 写入失败（跳过）: {e}")
+
+        # Phase 2: Mem0 batch write (optional, best-effort)
+        # Combine all fragments into one message for a single Mem0 add() call.
+        # This turns 16× (embedding + LLM + DB) into 1× — ~5s instead of ~80s.
+        mem0_ok = False
+        if self._mem0_enabled and valid:
+            try:
+                combined = "\n".join(m["content"] for m in valid)
+                mem0_ok = await self._mem0_add(combined, "general")
+            except Exception as e:
+                logger.warning(f"Mem0 批量写入失败（非致命）: {e}")
+
+        logger.info(
+            f"批量记忆写入: {ok}/{len(memories)} 条成功"
+            f" (mem0={'ok' if mem0_ok else 'skip'})"
+        )
 
     # ==================== flush（会话结束刷新）====================
 

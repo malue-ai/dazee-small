@@ -8,9 +8,15 @@ Strategy: session-level batch extraction
 - Per-session: one LLM call extracts all 10-dimension hints from full conversation
 - Quick pre-filter: skip trivial conversations (< 50 chars or single short turn)
 
+Concurrency: global lock ensures only ONE flush runs at a time.
+If a previous flush is still running, the new one is skipped entirely.
+This prevents concurrent Mem0/SQLite writes that cause lock contention
+and mem0=FAIL cascades observed in multi-turn conversations.
+
 This is the bridge between conversations and "越用越懂你".
 """
 
+import asyncio
 from typing import TYPE_CHECKING, Dict, List
 
 from logger import get_logger
@@ -22,6 +28,11 @@ if TYPE_CHECKING:
     from ..service import BackgroundTaskService
 
 logger = get_logger("background_tasks.memory_flush")
+
+# Global lock: at most ONE memory flush runs at a time.
+# Prevents concurrent Mem0/SQLite writes that cause "database is locked"
+# and wasted embedding inference when multiple sessions flush simultaneously.
+_flush_lock = asyncio.Lock()
 
 # Quick pre-filter thresholds (format validation, not semantic judgment)
 # Chinese is ~3x denser than English: 30 Chinese chars ≈ 90 English words
@@ -116,11 +127,27 @@ async def memory_flush_task(
 
     Session-level: collects all messages, one LLM call extracts all hints.
     Fire-and-forget: runs after response is sent, does not block user.
+
+    Concurrency: skips immediately if a previous flush is still running.
     """
     if not ctx.user_id or not ctx.session_id:
         logger.debug("Skipping memory flush (no user_id or session_id)")
         return
 
+    # Non-blocking trylock: skip if previous flush is still running
+    if _flush_lock.locked():
+        logger.info(
+            "Memory flush skipped: previous flush still running "
+            f"(session={ctx.session_id[:8]}...)"
+        )
+        return
+
+    async with _flush_lock:
+        await _do_memory_flush(ctx)
+
+
+async def _do_memory_flush(ctx: "TaskContext") -> None:
+    """Actual flush logic, called under _flush_lock."""
     # Load FULL conversation history (not just last turn).
     # This is critical: if user discusses style preferences in turn 1 but turn 2
     # is just "write an article", flush from only turn 2 misses the style info.
