@@ -18,10 +18,12 @@ import type {
   SendMessageOptions,
   ContentBlock,
   PlanData,
-  HITLConfirmRequest
+  HITLConfirmRequest,
+  PlaybookSuggestion
 } from '@/types'
 import { FILE_WRITE_TOOLS, TERMINAL_TOOLS, BACKGROUND_TASKS } from '@/utils'
 import * as sessionApi from '@/api/session'
+import * as playbookApi from '@/api/playbook'
 
 /**
  * 聊天核心 Composable
@@ -475,6 +477,36 @@ export function useChat() {
   }
 
   /**
+   * Playbook: 接受策略建议
+   */
+  async function acceptPlaybookSuggestion(msg: UIMessage): Promise<void> {
+    const suggestion = msg.playbookSuggestion
+    if (!suggestion || suggestion.user_action) return
+
+    try {
+      await playbookApi.playbookAction(suggestion.playbook_id, 'approve')
+      suggestion.user_action = 'accepted'
+    } catch (e) {
+      console.error('Playbook approve 失败:', e)
+    }
+  }
+
+  /**
+   * Playbook: 忽略策略建议
+   */
+  async function dismissPlaybookSuggestion(msg: UIMessage): Promise<void> {
+    const suggestion = msg.playbookSuggestion
+    if (!suggestion || suggestion.user_action) return
+
+    try {
+      await playbookApi.playbookAction(suggestion.playbook_id, 'dismiss')
+      suggestion.user_action = 'dismissed'
+    } catch (e) {
+      console.error('Playbook dismiss 失败:', e)
+    }
+  }
+
+  /**
    * 处理流事件
    *
    * @param agentId - 发送消息时捕获的 agentId（用于离开会话后推送通知）
@@ -649,6 +681,20 @@ export function useChat() {
         message: data?.message ?? '任务已执行较多轮次，是否继续？'
       }
       showLongRunConfirmModal.value = true
+    }
+
+    // Playbook 策略建议（内联卡片，非弹窗）
+    if (type === 'playbook_suggestion') {
+      const suggestion: PlaybookSuggestion = {
+        playbook_id: data?.playbook_id ?? '',
+        name: data?.name ?? '',
+        description: data?.description ?? '',
+        strategy_summary: data?.strategy_summary ?? '',
+        user_action: null,
+      }
+      if (suggestion.playbook_id) {
+        msg.playbookSuggestion = suggestion
+      }
     }
   }
 
@@ -1042,6 +1088,10 @@ export function useChat() {
     currentTitle,
     conversations,
     isCurrentConversationLoading,
+
+    // Playbook
+    acceptPlaybookSuggestion,
+    dismissPlaybookSuggestion,
 
     // 方法
     initialize,

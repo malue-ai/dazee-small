@@ -247,6 +247,31 @@ class NodeManager:
             timeout_ms=timeout_ms,
         )
 
+    def add_to_allowlist(
+        self,
+        executables: List[str],
+        node_id: str = "local",
+    ) -> Dict[str, Any]:
+        """
+        Extend command allowlist at runtime.
+
+        Args:
+            executables: Executable names or full paths to allow.
+            node_id: Target node ID.
+
+        Returns:
+            Summary dict.
+        """
+        if node_id == "local" and self.local_node:
+            return self.local_node.add_to_allowlist(executables)
+        return {"error": f"节点不可用: {node_id}"}
+
+    def get_allowlist_info(self, node_id: str = "local") -> Dict[str, Any]:
+        """Get current allowlist state."""
+        if node_id == "local" and self.local_node:
+            return self.local_node.get_allowlist_info()
+        return {"error": f"节点不可用: {node_id}"}
+
     async def notify(
         self,
         title: str,

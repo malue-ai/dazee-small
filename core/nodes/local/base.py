@@ -143,6 +143,9 @@ class LocalNodeBase(ABC):
         "is not recognized as an internal or external command",
     )
 
+    # Pattern for allowlist rejections — needs a different hint.
+    _ALLOWLIST_PATTERN = "命令不在白名单中"
+
     async def _handle_system_run(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         处理 system.run 命令
@@ -160,19 +163,29 @@ class LocalNodeBase(ABC):
 
         payload = result.to_payload()
 
-        # Append actionable hint when a dependency is missing so the
-        # Agent calls hitl instead of silently falling back.
+        # Append actionable hint when a command is blocked or dependency is missing.
         if not result.success:
             combined = f"{result.stderr}\n{result.stdout}"
-            for pattern in self._DEPENDENCY_ERROR_PATTERNS:
-                if pattern in combined:
-                    payload["_hint"] = (
-                        "⚠️ 依赖缺失！请使用 hitl 工具告知用户缺少什么依赖，"
-                        "询问用户是否同意安装。用户同意后用 nodes 执行安装命令"
-                        "（如 pip install xxx），安装完成后重试。"
-                        "用户拒绝后再寻找替代方案。"
-                    )
-                    break
+
+            # Allowlist rejection — guide Agent to use whitelist_add
+            if self._ALLOWLIST_PATTERN in combined:
+                payload["_hint"] = (
+                    "⚠️ 命令被白名单拦截！"
+                    "请先使用 hitl 工具询问用户是否同意将该命令加入白名单，"
+                    "用户同意后调用 nodes（action=whitelist_add, "
+                    "executables=[\"命令名\"]）将其加入白名单，然后重试原命令。"
+                )
+            else:
+                # Dependency missing — guide Agent to use hitl + install
+                for pattern in self._DEPENDENCY_ERROR_PATTERNS:
+                    if pattern in combined:
+                        payload["_hint"] = (
+                            "⚠️ 依赖缺失！请使用 hitl 工具告知用户缺少什么依赖，"
+                            "询问用户是否同意安装。用户同意后用 nodes 执行安装命令"
+                            "（如 pip install xxx），安装完成后重试。"
+                            "用户拒绝后再寻找替代方案。"
+                        )
+                        break
 
         return payload
 
@@ -203,6 +216,22 @@ class LocalNodeBase(ABC):
         子类可覆盖以支持更多命令
         """
         raise ValueError(f"不支持的命令: {command}")
+
+    def add_to_allowlist(self, executables: List[str]) -> Dict[str, Any]:
+        """
+        Runtime extension of the command allowlist.
+
+        Args:
+            executables: Executable names or full paths to allow.
+
+        Returns:
+            Summary dict.
+        """
+        return self.shell_executor.add_to_allowlist(executables)
+
+    def get_allowlist_info(self) -> Dict[str, Any]:
+        """Return current allowlist state."""
+        return self.shell_executor.get_allowlist_info()
 
     async def shutdown(self) -> None:
         """关闭节点"""

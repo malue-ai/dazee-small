@@ -5,7 +5,8 @@ import type {
   AgentDetail,
   AgentCreateRequest,
   AgentCreateResponse,
-  AgentUpdateRequest
+  AgentUpdateRequest,
+  AgentUpdateResponse
 } from '@/types'
 
 /**
@@ -41,10 +42,13 @@ export async function createAgent(data: AgentCreateRequest): Promise<AgentCreate
 }
 
 /**
- * 更新 Agent
+ * 更新 Agent（异步模式）
+ *
+ * PUT 立即返回 agent_id + status: "reloading"。
+ * 前端通过 WebSocket /api/v1/agents/ws/create/{agent_id} 获取实时重载进度。
  */
-export async function updateAgent(agentId: string, data: AgentUpdateRequest): Promise<AgentDetail> {
-  const response = await api.put<AgentDetail>(`/v1/agents/${agentId}`, data)
+export async function updateAgent(agentId: string, data: AgentUpdateRequest): Promise<AgentUpdateResponse> {
+  const response = await api.put<AgentUpdateResponse>(`/v1/agents/${agentId}`, data)
   return response.data
 }
 

@@ -21,6 +21,7 @@ export type SSEEventType =
   | 'session_end'
   | 'error'
   | 'reconnect_info'
+  | 'playbook_suggestion'
 
 /**
  * SSE 基础事件结构
@@ -242,6 +243,7 @@ export interface UIMessage {
   files?: AttachedFile[]
   recommendedQuestions?: string[]
   planResult?: PlanData | null
+  playbookSuggestion?: PlaybookSuggestion | null
   timestamp: Date
 }
 
@@ -288,6 +290,20 @@ export interface HITLConfirmRequest {
  * HITL 响应类型
  */
 export type HITLResponse = string | string[] | Record<string, string | string[]>
+
+// ==================== Playbook 策略建议 ====================
+
+/**
+ * Playbook 策略建议（通过 WebSocket 推送）
+ */
+export interface PlaybookSuggestion {
+  playbook_id: string
+  name: string
+  description: string
+  strategy_summary: string
+  /** 用户是否已操作（accept / dismiss / null） */
+  user_action?: 'accepted' | 'dismissed' | null
+}
 
 // ==================== 发送消息选项 ====================
 

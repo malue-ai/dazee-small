@@ -764,6 +764,22 @@ async def activate_provider(request: ProviderActivateRequest):
     # Persist to YAML
     await ModelRegistry.save_activated_models()
 
+    # 模型激活后热重载 Agent，使 xiaodazi 等 agent:{} 实例
+    # 能通过 ModelRegistry.list_activated() fallback 获取到新激活的模型
+    #
+    # 注意：首次启动时如果没有 API Key，preload_instance 会失败，
+    # 导致 registry.is_loaded=False。所以这里不检查 is_loaded，
+    # 无论之前是否加载成功都尝试重新加载。
+    try:
+        from services.agent_registry import get_agent_registry
+        registry = get_agent_registry()
+        reload_result = await registry.reload_agent()
+        logger.info(
+            f"🔄 Provider '{provider}' 激活后热重载 Agent: {reload_result}"
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ Provider 激活后 Agent 热重载失败（不影响激活）: {e}")
+
     return {
         "success": True,
         "provider": provider,

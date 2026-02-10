@@ -200,14 +200,29 @@ export const useAgentCreationStore = defineStore('agentCreation', () => {
    * Pushes a progress notification and connects WebSocket.
    */
   function startCreation(agentId: string, agentName: string) {
+    _startTracking(agentId, agentName, '正在初始化...')
+  }
+
+  /**
+   * Start tracking an update/reload task.
+   * Same mechanism as creation — WebSocket progress + notification card.
+   */
+  function startUpdate(agentId: string, agentName: string) {
+    _startTracking(agentId, agentName, '正在重载配置...')
+  }
+
+  /**
+   * Internal: start tracking an agent task (create or update).
+   */
+  function _startTracking(agentId: string, agentName: string, initialMessage: string) {
     const notif = useNotificationStore()
 
     // Push progress notification
     const notificationId = notif.push({
-      id: `agent-create-${agentId}`,
+      id: `agent-task-${agentId}`,
       type: 'progress',
       title: agentName,
-      message: '正在初始化...',
+      message: initialMessage,
       progress: { step: 0, total: 7 },
     })
 
@@ -223,11 +238,16 @@ export const useAgentCreationStore = defineStore('agentCreation', () => {
   }
 
   /**
-   * Handle creation completion: refresh agent list.
+   * Handle creation/update completion: refresh agent list.
    */
   function onCreationComplete(agentId: string) {
     const agentStore = useAgentStore()
     agentStore.fetchList()
+
+    // Refresh current agent detail if it's the one being updated
+    if (agentStore.currentAgentId === agentId) {
+      agentStore.loadDetail(agentId)
+    }
 
     // Clean up task after a delay
     setTimeout(() => {
@@ -251,6 +271,7 @@ export const useAgentCreationStore = defineStore('agentCreation', () => {
     tasks,
     hasActiveCreation,
     startCreation,
+    startUpdate,
     cleanup,
   }
 })

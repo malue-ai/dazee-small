@@ -187,6 +187,8 @@
           @suggestion-click="handleSuggestionClick"
           @file-preview="handleFilePreview"
           @load-more="handleLoadMore"
+          @playbook-accept="handlePlaybookAccept"
+          @playbook-dismiss="handlePlaybookDismiss"
         />
 
         <!-- WebSocket 连接状态提示 -->
@@ -418,7 +420,7 @@ import HITLConfirmModal from '@/components/modals/HITLConfirmModal.vue'
 import LocalWorkspaceSidebar from '@/components/workspace/LocalWorkspaceSidebar.vue'
 
 // Types
-import type { Conversation, AttachedFile, PlanData, HITLResponse, FileItem } from '@/types'
+import type { Conversation, AttachedFile, PlanData, HITLResponse, FileItem, UIMessage } from '@/types'
 
 // ==================== Stores & Composables ====================
 
@@ -1267,6 +1269,16 @@ async function handleRunProject(project: { name: string; type: string }): Promis
     console.error('❌ 运行项目失败:', error)
     showConfirm({ title: '运行失败', message: '运行项目失败，请重试', type: 'error', showCancel: false })
   }
+}
+
+/** Playbook 策略建议：接受 */
+async function handlePlaybookAccept(msg: UIMessage): Promise<void> {
+  await chat.acceptPlaybookSuggestion(msg)
+}
+
+/** Playbook 策略建议：忽略 */
+async function handlePlaybookDismiss(msg: UIMessage): Promise<void> {
+  await chat.dismissPlaybookSuggestion(msg)
 }
 
 /** HITL 提交 */

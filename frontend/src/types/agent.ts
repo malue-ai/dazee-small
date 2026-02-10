@@ -94,7 +94,7 @@ export interface AgentUpdateRequest {
   data_dir?: string
 }
 
-// ==================== 创建响应（异步模式） ====================
+// ==================== 创建/更新响应（异步模式） ====================
 
 export interface AgentCreateResponse {
   success: boolean
@@ -103,7 +103,14 @@ export interface AgentCreateResponse {
   status: 'creating'
 }
 
-// ==================== WebSocket 创建进度事件 ====================
+export interface AgentUpdateResponse {
+  success: boolean
+  agent_id: string
+  name: string
+  status: 'reloading'
+}
+
+// ==================== WebSocket 创建/更新进度事件 ====================
 
 export interface AgentCreationProgressEvent {
   type: 'progress'

@@ -1051,13 +1051,13 @@ async function handleCreate() {
 
 // ==================== 保存项目（编辑模式） ====================
 
-/** 保存项目（调用 Agent Update API） */
+/** 保存项目（异步模式：PUT 立即返回，WS 推送重载进度到全局通知卡片） */
 async function handleSave() {
   if (!canCreate.value || isCreating.value || !editAgentId.value) return
 
   isCreating.value = true
   try {
-    await agentStore.updateAgent(editAgentId.value, {
+    const { agent_id, name } = await agentStore.updateAgent(editAgentId.value, {
       name: form.name.trim(),
       description: form.description.trim(),
       prompt: form.instructions.trim() || undefined,
@@ -1065,16 +1065,19 @@ async function handleSave() {
       ...(form.dataDir.trim() ? { data_dir: form.dataDir.trim() } : {})
     })
 
+    // Start tracking reload progress (global notification + WS)
+    agentCreationStore.startUpdate(agent_id, name)
+
     // 引导 Step 13：保存成功后完成引导
     if (guideStore.isActive && guideStore.currentStep === 13) {
       guideStore.completeGuide()
     }
 
-    // 保存成功，跳转到 Agent 对话页
-    router.replace({ name: 'agent', params: { agentId: editAgentId.value } })
+    // 立即跳转到 Agent 对话页，通知卡片会在右上角显示重载进度
+    router.replace({ name: 'agent', params: { agentId: agent_id } })
   } catch (error: any) {
     console.error('❌ 保存项目失败:', error)
-    const msg = error?.response?.data?.detail || error?.message || '未知错误'
+    const msg = error?.response?.data?.detail?.message || error?.response?.data?.detail || error?.message || '未知错误'
     showError(`保存失败：${msg}`)
   } finally {
     isCreating.value = false

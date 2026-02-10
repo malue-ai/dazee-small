@@ -75,7 +75,7 @@ async def write_settings(body: Dict[str, Any]) -> Dict[str, Any]:
     """
     updated = await update_settings(body)
 
-    # API Key 变更后热重载所有 Agent（使新 provider/model 生效）
+    # API Key 变更后的处理
     if "api_keys" in body:
         # 清除 Mem0 config 缓存，下次初始化时重新检测 embedding provider
         try:
@@ -85,11 +85,18 @@ async def write_settings(body: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
 
+        # 注意：Agent 热重载由 POST /providers/activate 触发
+        # 前端流程：PUT /settings → POST /providers/activate（含 reload）
+        # 这样确保 reload 发生在模型激活之后，agent 能获取到正确的 provider/model
+
+    # 非 API Key 变更（如 llm 配置变更）仍需触发热重载
+    if "api_keys" not in body and ("llm" in body or "app" in body):
         try:
             from services.agent_registry import get_agent_registry
             registry = get_agent_registry()
-            result = await registry.reload_agent()
-            logger.info(f"🔄 Settings 变更后热重载 Agent: {result}")
+            if registry.is_loaded:
+                result = await registry.reload_agent()
+                logger.info(f"🔄 Settings 变更后热重载 Agent: {result}")
         except Exception as e:
             logger.warning(f"⚠️ Agent 热重载失败（不影响设置保存）: {e}")
 

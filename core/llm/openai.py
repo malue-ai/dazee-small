@@ -314,7 +314,7 @@ class OpenAILLMService(BaseLLMService):
             messages: 消息列表
             system: 系统提示词
             tools: 工具列表
-            on_thinking: thinking 回调（OpenAI 不支持）
+            on_thinking: thinking 回调（推理模型通过 reasoning_content 返回）
             on_content: content 回调
             on_tool_call: tool_call 回调
             **kwargs: 其他参数
@@ -380,6 +380,7 @@ class OpenAILLMService(BaseLLMService):
 
         # 累积变量
         accumulated_content = ""
+        accumulated_thinking = ""
         tool_calls = []
         stop_reason = None
         usage = {}
@@ -395,6 +396,12 @@ class OpenAILLMService(BaseLLMService):
                             "input_tokens": chunk.usage.prompt_tokens,
                             "output_tokens": chunk.usage.completion_tokens,
                         }
+                        # 提取 reasoning tokens（如果有）
+                        if hasattr(chunk.usage, "completion_tokens_details"):
+                            details = chunk.usage.completion_tokens_details
+                            reasoning_tokens = getattr(details, "reasoning_tokens", 0) if details else 0
+                            if reasoning_tokens:
+                                usage["thinking_tokens"] = reasoning_tokens
                         logger.info(
                             f"📊 Token 使用: input={usage['input_tokens']:,}, "
                             f"output={usage['output_tokens']:,}"
@@ -403,6 +410,18 @@ class OpenAILLMService(BaseLLMService):
 
                 choice = chunk.choices[0]
                 delta = choice.delta
+
+                # 处理思考内容（OpenAI 推理模型通过 reasoning_content 返回）
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    accumulated_thinking += delta.reasoning_content
+                    if on_thinking:
+                        on_thinking(delta.reasoning_content)
+                    yield LLMResponse(
+                        content="",
+                        thinking=delta.reasoning_content,
+                        model=self.config.model,
+                        is_stream=True,
+                    )
 
                 # 处理普通内容
                 if delta.content:
@@ -491,6 +510,8 @@ class OpenAILLMService(BaseLLMService):
 
             # 构建 raw_content
             raw_content = []
+            if accumulated_thinking:
+                raw_content.append({"type": "thinking", "thinking": accumulated_thinking})
             if accumulated_content:
                 raw_content.append({"type": "text", "text": accumulated_content})
             for tc in formatted_tool_calls:
@@ -507,6 +528,7 @@ class OpenAILLMService(BaseLLMService):
             # 返回最终响应
             yield LLMResponse(
                 content=accumulated_content,
+                thinking=accumulated_thinking if accumulated_thinking else None,
                 tool_calls=formatted_tool_calls if formatted_tool_calls else None,
                 stop_reason=stop_reason or "stop",
                 usage=usage if usage else None,
@@ -547,6 +569,9 @@ class OpenAILLMService(BaseLLMService):
 
         content_text = message.content or ""
 
+        # 提取思考内容（OpenAI 推理模型通过 reasoning_content 返回）
+        thinking_text = getattr(message, "reasoning_content", None)
+
         # 提取工具调用
         tool_calls = []
         if message.tool_calls:
@@ -563,6 +588,12 @@ class OpenAILLMService(BaseLLMService):
                 "input_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.completion_tokens,
             }
+            # 提取 reasoning tokens（如果有）
+            if hasattr(response.usage, "completion_tokens_details"):
+                details = response.usage.completion_tokens_details
+                reasoning_tokens = getattr(details, "reasoning_tokens", 0) if details else 0
+                if reasoning_tokens:
+                    usage["thinking_tokens"] = reasoning_tokens
             logger.info(
                 f"📊 Token 使用: input={usage['input_tokens']:,}, "
                 f"output={usage['output_tokens']:,}"
@@ -575,6 +606,8 @@ class OpenAILLMService(BaseLLMService):
 
         # 构建 raw_content
         raw_content = []
+        if thinking_text:
+            raw_content.append({"type": "thinking", "thinking": thinking_text})
         if content_text:
             raw_content.append({"type": "text", "text": content_text})
         for tc in tool_calls:
@@ -584,7 +617,7 @@ class OpenAILLMService(BaseLLMService):
 
         return LLMResponse(
             content=content_text,
-            thinking=None,  # OpenAI 不支持 thinking
+            thinking=thinking_text,
             tool_calls=tool_calls if tool_calls else None,
             stop_reason=stop_reason,
             usage=usage,
@@ -614,6 +647,7 @@ def _register_openai():
             "streaming",
             "tool_calling",
             "function_calling",
+            "thinking",
         ],
     )
 

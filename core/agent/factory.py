@@ -480,12 +480,25 @@ class AgentFactory:
                 f"(from ModelRegistry)"
             )
         else:
-            # Fallback: 模型未在 ModelRegistry 注册，尝试 llm_profiles main_agent 配置
+            # 模型未在 ModelRegistry 注册
+            # 首次用户场景：schema.model 为空 + 没有激活模型 → 提示用户配置 API Key
+            if not schema.model:
+                raise ValueError(
+                    "尚未配置 LLM 模型。请先在设置页面填写 API Key 并激活模型。"
+                )
+
+            # 非空但未注册：尝试 llm_profiles main_agent 配置
             logger.warning(
                 f"⚠️ 模型 '{schema.model}' 未在 ModelRegistry 注册，"
                 f"回退到 llm_profiles main_agent 配置"
             )
-            main_profile = await get_llm_profile("main_agent")
+            try:
+                main_profile = await get_llm_profile("main_agent")
+            except KeyError:
+                raise ValueError(
+                    f"模型 '{schema.model}' 未注册，且 main_agent LLM Profile 未配置。"
+                    f"请先在设置页面填写 API Key 并激活模型。"
+                )
 
         main_profile.update(llm_kwargs)
         llm = create_llm_service(**main_profile)
@@ -526,6 +539,7 @@ class AgentFactory:
         )
 
         # 保存额外属性（用于克隆）
+        agent.model = schema.model
         agent.capability_registry = capability_registry
         agent.tool_selector = (
             create_tool_selector(registry=capability_registry)

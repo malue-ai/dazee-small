@@ -133,6 +133,74 @@ async def _background_preload(
         _creation_tasks.pop(agent_id, None)
 
 
+async def _background_reload(
+    agent_id: str,
+    agent_name: str,
+    registry,
+):
+    """
+    Background task: reload agent instance and push progress via WebSocket.
+
+    Used by update_agent to avoid blocking the PUT request.
+    Reuses the same CreationTask / WS progress mechanism as create.
+    """
+    task = _creation_tasks.get(agent_id)
+    if not task:
+        return
+
+    try:
+        # Clear old config/prototype before reload
+        registry._agent_prototypes.pop(agent_id, None)
+        registry._configs.pop(agent_id, None)
+
+        async def progress_callback(step: int, message: str):
+            task.step = step
+            task.message = message
+            await _notify_subscribers(task, {
+                "type": "progress",
+                "step": step,
+                "total": task.total,
+                "message": message,
+            })
+
+        await registry.preload_instance(
+            agent_id,
+            force_refresh=True,
+            progress_callback=progress_callback,
+        )
+
+        detail = registry.get_agent_detail(agent_id)
+        task.status = "complete"
+        task.step = task.total
+        task.message = "更新完成"
+        task.detail = detail
+
+        await _notify_subscribers(task, {
+            "type": "complete",
+            "agent_id": agent_id,
+            "name": agent_name,
+            "success": True,
+            **detail,
+        })
+        logger.info(f"✅ Agent '{agent_id}' 后台重载完成")
+
+    except Exception as e:
+        logger.error(f"后台重载 Agent '{agent_id}' 失败: {e}", exc_info=True)
+
+        task.status = "error"
+        task.error = str(e)
+        await _notify_subscribers(task, {
+            "type": "error",
+            "code": "RELOAD_FAILED",
+            "message": str(e),
+        })
+
+    finally:
+        # Keep task for late WS subscribers, then clean up
+        await asyncio.sleep(120)
+        _creation_tasks.pop(agent_id, None)
+
+
 # ============================================================
 # 请求/响应模型
 # ============================================================
@@ -1029,30 +1097,22 @@ async def update_agent(agent_id: str, request: AgentCreateRequest):
             },
         )
 
-    # Reload
-    try:
-        await registry.reload_agent(agent_id)
-    except AgentNotFoundError:
-        # Agent was not loaded before, load it now
-        await registry.preload_instance(agent_id, force_refresh=True)
-    except Exception as e:
-        logger.error(f"重载 Agent '{agent_id}' 失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "RELOAD_FAILED",
-                "message": f"配置已更新但重载失败: {str(e)}",
-            },
-        )
+    # Async reload: register task and fire-and-forget (same as create flow)
+    task = CreationTask(agent_id=agent_id, agent_name=request.name)
+    _creation_tasks[agent_id] = task
 
-    logger.info(f"✅ Agent '{agent_id}' 更新成功")
+    asyncio.create_task(_background_reload(
+        agent_id=agent_id,
+        agent_name=request.name,
+        registry=registry,
+    ))
 
-    detail = registry.get_agent_detail(agent_id)
+    logger.info(f"Agent '{agent_id}' 配置已更新，后台开始重载")
     return {
         "success": True,
         "agent_id": agent_id,
-        "message": f"Agent '{request.name}' 更新成功",
-        **detail,
+        "name": request.name,
+        "status": "reloading",
     }
 
 

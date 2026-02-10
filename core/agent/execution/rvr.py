@@ -351,6 +351,7 @@ class RVRExecutor(BaseExecutor):
         content_handler = create_content_handler(broadcaster, ctx.block, session_id=session_id)
 
         final_response = None
+        _got_text_content = False  # 追踪是否收到过 text 类型的流式内容
 
         try:
             # 调用 LLM Stream
@@ -367,6 +368,7 @@ class RVRExecutor(BaseExecutor):
 
                 if response.content and response.is_stream:
                     # 内容增量（流式增量）
+                    _got_text_content = True
                     await content_handler.handle_text(response.content)
                     yield {"type": "content_delta", "data": {"text": response.content}}
 
@@ -392,6 +394,13 @@ class RVRExecutor(BaseExecutor):
                     final_response = response
 
         finally:
+            # 诊断日志：确认 text block 是否被打开
+            if final_response and final_response.stop_reason not in ("tool_use", "tool_calls"):
+                logger.info(
+                    f"📊 _process_stream 结束: got_text_content={_got_text_content}, "
+                    f"last_block_type={content_handler.current_type}, "
+                    f"last_block_index={content_handler.current_index}"
+                )
             # 关闭最后一个 block
             await content_handler.stop_block(session_id)
 

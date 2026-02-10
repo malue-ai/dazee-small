@@ -88,18 +88,19 @@ class SqliteVecVectorStore(VectorStoreBase):
             import sqlite_vec
 
             conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
+            # 使用 loadable_path() 获取扩展的绝对路径，避免系统路径找不到
+            vec_path = sqlite_vec.loadable_path()
+            conn.load_extension(vec_path)
             conn.enable_load_extension(False)
         except ImportError:
-            # fallback: 尝试直接加载系统扩展
-            try:
-                conn.enable_load_extension(True)
-                conn.load_extension("vec0")
-                conn.enable_load_extension(False)
-            except Exception as e:
-                raise RuntimeError(
-                    f"sqlite-vec 扩展不可用，请安装: pip install sqlite-vec\n错误: {e}"
-                ) from e
+            raise RuntimeError(
+                "sqlite-vec 未安装，请执行: pip install sqlite-vec"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"sqlite-vec 扩展加载失败: {e}\n"
+                f"请确认 sqlite-vec 已正确安装: pip install sqlite-vec"
+            ) from e
 
         return conn
 

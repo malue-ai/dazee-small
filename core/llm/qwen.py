@@ -669,8 +669,12 @@ class QwenLLMService(BaseLLMService):
                             "thinking_tokens": 0,
                         }
 
-                        # 估算 thinking tokens
-                        if accumulated_thinking:
+                        # 从 API 提取 reasoning_tokens 明细（Qwen3 支持）
+                        _details = getattr(chunk.usage, "completion_tokens_details", None)
+                        if _details and hasattr(_details, "reasoning_tokens"):
+                            usage["thinking_tokens"] = _details.reasoning_tokens or 0
+                        elif accumulated_thinking:
+                            # 回退：本地估算（不同 tokenizer，仅供参考）
                             usage["thinking_tokens"] = self.count_tokens(accumulated_thinking)
 
                         # Token 使用量日志
@@ -678,6 +682,11 @@ class QwenLLMService(BaseLLMService):
                             f"📊 Token 使用: input={usage['input_tokens']:,}, "
                             f"output={usage['output_tokens']:,}, "
                             f"thinking={usage['thinking_tokens']:,}"
+                        )
+                        # 调试：accumulated 长度
+                        logger.info(
+                            f"📊 累积内容: thinking={len(accumulated_thinking)} chars, "
+                            f"content={len(accumulated_content)} chars"
                         )
                     continue
 

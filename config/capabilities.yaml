@@ -439,12 +439,14 @@ capabilities:
       - run: 在节点上执行 shell 命令
       - notify: 发送系统通知到节点
       - which: 检查可执行文件是否存在
+      - whitelist_add: 将命令加入白名单（需先通过 hitl 征得用户同意）
+      - whitelist_info: 查看当前白名单状态
   input_schema:
     type: object
     properties:
       action:
         type: string
-        enum: [status, describe, run, notify, which]
+        enum: [status, describe, run, notify, which, whitelist_add, whitelist_info]
       node:
         type: string
         description: 目标节点 ID（默认 local）
@@ -475,6 +477,11 @@ capabilities:
       executable:
         type: string
         description: 可执行文件名（which action）
+      executables:
+        type: array
+        items:
+          type: string
+        description: 要加入白名单的命令名或完整路径列表（whitelist_add action）
     required: [action]
 
 - name: browser

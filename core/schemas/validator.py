@@ -434,7 +434,10 @@ class AgentSchema(BaseModel):
     # 运行时参数
     # ============================================================
 
-    model: str = Field(default="", description="主 LLM 模型（必须由 config.yaml 显式配置）")
+    model: str = Field(
+        default="",
+        description="主 LLM 模型（运行时由 instance_config 注入，不由 LLM 生成）",
+    )
 
     max_turns: Optional[int] = Field(
         default=None,
@@ -615,7 +618,15 @@ class AgentSchema(BaseModel):
         1. 尝试解析所有字段
         2. 对无效字段使用默认值
         3. 记录警告但不抛出异常
+        4. 强制丢弃 model 字段（model 由运行时 instance_config 决定，不由 LLM 推断）
         """
+        # model 是运行时配置，不是 LLM 应该推断的字段
+        # 即使 LLM 返回了 model，也丢弃，避免硬编码污染
+        if "model" in raw:
+            logger.info(
+                f"   丢弃 LLM 生成的 model 字段: {raw['model']}（model 由运行时配置决定）"
+            )
+            raw = {k: v for k, v in raw.items() if k != "model"}
         return cls.from_dict(raw)
 
     class Config:

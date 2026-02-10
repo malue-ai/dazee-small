@@ -157,6 +157,15 @@
                 {{ q }}
               </button>
             </div>
+
+            <!-- Playbook 策略建议（内联卡片） -->
+            <PlaybookSuggestionCard
+              v-if="message.playbookSuggestion"
+              :suggestion="message.playbookSuggestion"
+              class="ml-1 max-w-sm"
+              @accept="emit('playbook-accept', message)"
+              @dismiss="emit('playbook-dismiss', message)"
+            />
           </div>
         </div>
       </div>
@@ -171,6 +180,7 @@ import type { UIMessage, AttachedFile, AgentSummary } from '@/types'
 import { getFileTypeLabel as getLabel } from '@/utils'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import MessageContent from './MessageContent.vue'
+import PlaybookSuggestionCard from './PlaybookSuggestionCard.vue'
 import { Sparkles, Bot, FileText, Loader2, Copy, Check } from 'lucide-vue-next'
 
 // ==================== Props ====================
@@ -213,6 +223,10 @@ const emit = defineEmits<{
   (e: 'file-preview', file: AttachedFile): void
   /** 加载更多历史消息 */
   (e: 'load-more'): void
+  /** Playbook 策略建议：接受 */
+  (e: 'playbook-accept', message: UIMessage): void
+  /** Playbook 策略建议：忽略 */
+  (e: 'playbook-dismiss', message: UIMessage): void
 }>()
 
 // ==================== State ====================

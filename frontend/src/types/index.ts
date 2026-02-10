@@ -60,6 +60,7 @@ export type {
   HITLFormQuestion,
   HITLConfirmRequest,
   HITLResponse,
+  PlaybookSuggestion,
   SendMessageOptions,
   ActiveSessionInfo,
   ActiveSessionsMap
@@ -109,6 +110,7 @@ export type {
   AgentCreateRequest,
   AgentCreateResponse,
   AgentUpdateRequest,
+  AgentUpdateResponse,
   AgentCreationProgressEvent,
   AgentCreationCompleteEvent,
   AgentCreationErrorEvent,

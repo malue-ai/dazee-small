@@ -144,6 +144,8 @@
 
 ## 输出格式
 
+**注意**：不要输出 `model` 字段，模型由运行时配置决定，不由 Schema 生成器推断。
+
 ```json
 {
   "name": "Agent 名称",
@@ -155,7 +157,6 @@
   "output_formatter": {"enabled": true, "default_format": "markdown", ...},
   "skills": [{"name": "excel-generator", "enabled": true}],
   "tools": ["web_search"],
-  "model": "claude-sonnet-4-5-20250929",
   "allow_parallel_tools": false,
   "reasoning": "配置理由"
 }

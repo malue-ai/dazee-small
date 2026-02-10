@@ -1041,12 +1041,29 @@ class ChatService:
             )
 
             # 订阅事件流
+            # ⚠️ 不能用 agent_task.done() 作为退出条件！
+            # 竞态条件：agent_task 完成时 queue 里可能还有未消费的事件
+            # （如 content_start(text), content_delta(text), message_stop），
+            # 提前 break 会导致这些事件丢失，前端收不到 text block。
+            # 正确做法：以终止事件类型判断退出。
+            saw_terminal = False
             async for event in store.subscribe_events(
                 session_id=session_id, after_id=0, timeout=1800
             ):
                 yield event
-                if agent_task.done():
+                event_type = event.get("type", "")
+                if event_type in ("message_stop", "session.stopped"):
+                    saw_terminal = True
                     break
+                # 安全网：agent 异常退出（没发 message_stop）时不要无限等
+                if agent_task.done() and not saw_terminal:
+                    exc = agent_task.exception() if not agent_task.cancelled() else None
+                    if exc:
+                        logger.warning(
+                            "Agent task 异常退出，未收到 message_stop",
+                            extra={"session_id": session_id, "error": str(exc)},
+                        )
+                        break
 
             if not agent_task.done():
                 await agent_task
@@ -1659,7 +1676,7 @@ class ChatService:
                         usage_response = UsageResponse.from_tracker(
                             tracker=agent.usage_tracker,
                             latency=duration_ms / 1000.0,
-                            model=agent.model,
+                            model=agent.model or "unknown",
                         )
 
                         token_usage = TokenUsage(
@@ -1678,7 +1695,7 @@ class ChatService:
                             conversation_id=conversation_id,
                             user_id=user_id,
                             agent_id=getattr(agent, "agent_id", None),
-                            model=agent.model,
+                            model=agent.model or "unknown",
                             duration_ms=duration_ms,
                             query_length=len(str(current_message)),
                             is_session_cumulative=True,  # 明确标记为会话累计值

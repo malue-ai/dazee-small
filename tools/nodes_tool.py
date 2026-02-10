@@ -58,12 +58,15 @@ Actions:
 - run: 在节点上执行 shell 命令
 - notify: 发送系统通知到节点
 - which: 检查可执行文件是否存在
+- whitelist_add: 将命令加入白名单（需先通过 hitl 征得用户同意）
+- whitelist_info: 查看当前白名单状态
 
 示例:
 - nodes status: 查看所有节点状态
 - nodes run --command ["ls", "-la"]: 执行命令
 - nodes notify --title "提醒" --message "任务完成"
-- nodes which --executable "python3": 检查 python3 是否存在"""
+- nodes which --executable "python3": 检查 python3 是否存在
+- nodes whitelist_add --executables ["brew", "/opt/homebrew/bin/brew"]: 将 brew 加入白名单"""
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -72,7 +75,10 @@ Actions:
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["status", "describe", "run", "notify", "which"],
+                    "enum": [
+                        "status", "describe", "run", "notify", "which",
+                        "whitelist_add", "whitelist_info",
+                    ],
                     "description": "操作类型",
                 },
                 "node": {
@@ -92,6 +98,11 @@ Actions:
                 "message": {"type": "string", "description": "通知内容（notify action）"},
                 "subtitle": {"type": "string", "description": "通知副标题（notify action）"},
                 "executable": {"type": "string", "description": "可执行文件名（which action）"},
+                "executables": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "要加入白名单的命令名或完整路径列表（whitelist_add action）",
+                },
             },
             "required": ["action"],
         }
@@ -125,11 +136,18 @@ Actions:
                 return await self._action_notify(node, params)
             elif action == "which":
                 return await self._action_which(node, params)
+            elif action == "whitelist_add":
+                return self._action_whitelist_add(node, params)
+            elif action == "whitelist_info":
+                return self._action_whitelist_info(node)
             else:
                 return {
                     "success": False,
                     "error": f"不支持的操作: {action}",
-                    "supported_actions": ["status", "describe", "run", "notify", "which"],
+                    "supported_actions": [
+                        "status", "describe", "run", "notify", "which",
+                        "whitelist_add", "whitelist_info",
+                    ],
                 }
         except Exception as e:
             logger.error(f"节点操作失败: {e}", exc_info=True)
@@ -245,6 +263,42 @@ Actions:
             return {"success": True, "action": "which", "node": node_id, **response.payload}
         else:
             return {"success": False, "action": "which", "node": node_id, "error": response.error}
+
+    def _action_whitelist_add(self, node_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """将命令加入白名单"""
+        executables = params.get("executables", [])
+        if not executables:
+            return {"success": False, "error": "缺少 executables 参数"}
+
+        if isinstance(executables, str):
+            executables = [executables]
+
+        result = self.node_manager.add_to_allowlist(executables, node_id=node_id)
+
+        if "error" in result:
+            return {"success": False, "action": "whitelist_add", "error": result["error"]}
+
+        return {
+            "success": True,
+            "action": "whitelist_add",
+            "node": node_id,
+            "added": executables,
+            **result,
+        }
+
+    def _action_whitelist_info(self, node_id: str) -> Dict[str, Any]:
+        """查看当前白名单状态"""
+        result = self.node_manager.get_allowlist_info(node_id=node_id)
+
+        if "error" in result:
+            return {"success": False, "action": "whitelist_info", "error": result["error"]}
+
+        return {
+            "success": True,
+            "action": "whitelist_info",
+            "node": node_id,
+            **result,
+        }
 
 
 # 工厂函数：创建 Nodes 工具实例

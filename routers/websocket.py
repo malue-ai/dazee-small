@@ -560,10 +560,18 @@ async def _handle_chat_send(
             extra={"conn_id": conn_id, "error": str(e)},
             exc_info=True,
         )
-        await send_response(req_id, False, error={
-            "code": "INTERNAL_ERROR",
-            "message": "对话处理失败，请稍后重试",
-        })
+        # 识别「未配置模型」场景，返回友好提示
+        err_msg = str(e)
+        if "尚未配置" in err_msg or "API Key" in err_msg:
+            await send_response(req_id, False, error={
+                "code": "MODEL_NOT_CONFIGURED",
+                "message": "尚未配置 LLM 模型，请先在设置页面填写 API Key 并激活模型。",
+            })
+        else:
+            await send_response(req_id, False, error={
+                "code": "INTERNAL_ERROR",
+                "message": "对话处理失败，请稍后重试",
+            })
     finally:
         clear_request_context()
 

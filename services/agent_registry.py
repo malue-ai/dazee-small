@@ -398,14 +398,22 @@ class AgentRegistry:
             ]
             logger.debug(f"   📡 APIs: {[a['name'] for a in apis_config]}")
 
-        # 使用缓存的 AgentSchema 和 PromptCache 创建 Agent
+        # 在创建 Agent 前，用 instance_config.model 覆盖 schema.model
+        instance_config = config.instance_config
         if (
             config.prompt_cache
             and config.prompt_cache.is_loaded
             and config.prompt_cache.agent_schema
         ):
+            schema = config.prompt_cache.agent_schema
+            if instance_config and instance_config.model and schema.model != instance_config.model:
+                logger.info(
+                    f"   model 覆盖: {schema.model or '(空)'} → {instance_config.model}"
+                )
+                schema.model = instance_config.model
+
             agent = await AgentFactory.from_schema(
-                schema=config.prompt_cache.agent_schema,
+                schema=schema,
                 system_prompt=config.full_prompt,
                 event_manager=event_manager,
                 conversation_service=conversation_service,
@@ -424,12 +432,6 @@ class AgentRegistry:
             # Fallback 模式也需要设置 apis_config
             if apis_config:
                 agent.apis_config = apis_config
-
-        # 应用配置覆盖
-        instance_config = config.instance_config
-        if instance_config:
-            if instance_config.model:
-                agent.model = instance_config.model
 
         # 设置实例级工具注册表
         await self._setup_instance_tools(agent, config)
@@ -490,21 +492,27 @@ class AgentRegistry:
             logger.warning(f"⚠️ Agent {config.name} 的 PromptCache 未加载，跳过原型创建")
             return None
 
+        # 在创建 Agent 前，用 instance_config.model 覆盖 schema.model
+        # agent_schema.yaml 中的 model 是生成时的默认值，运行时以 instance_config 为准
+        # 这样 AgentFactory 创建 LLM service 时就能直接用正确的 provider/model
+        instance_config = config.instance_config
+        schema = config.prompt_cache.agent_schema
+        if instance_config and instance_config.model:
+            if schema.model != instance_config.model:
+                logger.info(
+                    f"   model 覆盖: {schema.model or '(空)'} → {instance_config.model}"
+                )
+                schema.model = instance_config.model
+
         # AgentFactory.from_schema() 创建 RVR-B Agent
         agent = await AgentFactory.from_schema(
-            schema=config.prompt_cache.agent_schema,
+            schema=schema,
             system_prompt=config.full_prompt,
             event_manager=event_manager,
             conversation_service=None,  # 原型不绑定会话服务
             prompt_cache=config.prompt_cache,
             apis_config=apis_config,
         )
-
-        # 应用配置覆盖
-        instance_config = config.instance_config
-        if instance_config:
-            if instance_config.model:
-                agent.model = instance_config.model
 
         # 设置实例级工具
         if hasattr(agent, "_setup_instance_tools"):
@@ -986,6 +994,22 @@ class AgentRegistry:
         else:
             # 重载所有 Agent
             agent_ids = list(self._configs.keys())
+
+            # 首次启动可能因缺少模型而加载失败，_configs 为空
+            # 此时需要重新发现实例并尝试加载
+            if not agent_ids:
+                import os
+                instance_name = os.environ.get("AGENT_INSTANCE")
+                if not instance_name:
+                    instances = list_instances()
+                    if len(instances) == 1:
+                        instance_name = instances[0]
+                if instance_name:
+                    agent_ids = [instance_name]
+                    logger.info(
+                        f"🔄 _configs 为空（首次加载可能失败），重新加载实例: {instance_name}"
+                    )
+
             reloaded = []
             failed = []
 

@@ -7,7 +7,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as agentApi from '@/api/agent'
 import { storeLog } from '@/utils/logger'
-import type { AgentSummary, AgentDetail, AgentCreateRequest, AgentUpdateRequest } from '@/types'
+import type { AgentSummary, AgentDetail, AgentCreateRequest, AgentUpdateRequest, AgentUpdateResponse } from '@/types'
 
 // ==================== localStorage 常量 ====================
 
@@ -149,17 +149,15 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
-   * 更新 Agent
+   * 更新 Agent（异步模式）
+   *
+   * PUT 立即返回 { agent_id, name, status: "reloading" }。
+   * 后台异步重载，前端通过 WebSocket 追踪进度。
    */
-  async function updateAgent(agentId: string, data: AgentUpdateRequest): Promise<AgentDetail> {
+  async function updateAgent(agentId: string, data: AgentUpdateRequest): Promise<AgentUpdateResponse> {
     try {
-      const detail = await agentApi.updateAgent(agentId, data)
-      // 更新详情
-      if (currentAgentId.value === agentId) {
-        currentAgentDetail.value = detail
-      }
-      await fetchList()
-      return detail
+      const result = await agentApi.updateAgent(agentId, data)
+      return result
     } catch (error) {
       storeLog.error('更新 Agent 失败', error)
       throw error

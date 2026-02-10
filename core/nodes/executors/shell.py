@@ -101,6 +101,59 @@ class ShellExecutor(BaseExecutor):
             self._allowlist_lower = None
             self._safe_bins_lower = set()
 
+    # ==================== Allowlist Management ====================
+
+    def add_to_allowlist(self, executables: List[str]) -> Dict[str, Any]:
+        """
+        Runtime extension of the allowlist.
+
+        Accepts both full paths (/opt/homebrew/bin/brew) and bare names (brew).
+        Full paths are added to self.allowlist; bare names to self.safe_bins.
+
+        Args:
+            executables: List of executable names or full paths to allow.
+
+        Returns:
+            Summary dict with counts of added items.
+        """
+        if self.allowlist is None:
+            # No allowlist configured → all commands are already allowed.
+            return {"added_paths": 0, "added_bins": 0, "note": "allowlist disabled, no-op"}
+
+        added_paths = 0
+        added_bins = 0
+
+        for exe in executables:
+            exe = exe.strip()
+            if not exe:
+                continue
+
+            if "/" in exe or "\\" in exe:
+                # Full path
+                if exe not in self.allowlist:
+                    self.allowlist.add(exe)
+                    added_paths += 1
+                    logger.info(f"白名单新增路径: {exe}")
+            else:
+                # Bare executable name
+                if exe not in self.safe_bins:
+                    self.safe_bins.add(exe)
+                    added_bins += 1
+                    logger.info(f"白名单新增命令: {exe}")
+
+        return {"added_paths": added_paths, "added_bins": added_bins}
+
+    def get_allowlist_info(self) -> Dict[str, Any]:
+        """
+        Return current allowlist state for debugging / introspection.
+        """
+        return {
+            "enabled": self.allowlist is not None,
+            "allowlist_count": len(self.allowlist) if self.allowlist else 0,
+            "safe_bins_count": len(self.safe_bins),
+            "safe_bins": sorted(self.safe_bins) if self.safe_bins else [],
+        }
+
     # ==================== Environment Sanitization ====================
 
     def _sanitize_env(self, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -372,14 +425,15 @@ class ShellExecutor(BaseExecutor):
 
         # 白名单检查
         if not self._check_allowlist(command):
-            hint = (
-                f"可用命令: {', '.join(sorted(self.safe_bins))}"
-                if self.safe_bins
-                else ""
-            )
+            bin_name = os.path.basename(command[0])
             return ShellResult(
                 success=False,
-                stderr=f"命令不在白名单中: {command[0]}。{hint}",
+                stderr=(
+                    f"命令不在白名单中: {command[0]}。"
+                    f"请先使用 hitl 工具询问用户是否同意将 {bin_name} 加入白名单，"
+                    f"用户同意后使用 nodes whitelist_add --executables [\"{bin_name}\"] "
+                    f"将其加入白名单，然后重试。"
+                ),
                 exit_code=-1,
             )
 
