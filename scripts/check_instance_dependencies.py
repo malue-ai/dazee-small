@@ -2,7 +2,7 @@
 """
 实例依赖检查脚本 - check_instance_dependencies.py
 
-🆕 V6.1: 借鉴 clawdbot 的部署检查机制
+🆕 V6.1: 实例部署前依赖检查
 
 用途：
 - 部署前检查实例所需的所有依赖

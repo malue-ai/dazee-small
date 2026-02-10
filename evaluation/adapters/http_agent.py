@@ -93,7 +93,7 @@ class HttpAgentAdapter:
 
         await self._poll_until_done(task_id)
 
-        messages_data, tool_calls_list, token_usage = await self._fetch_and_parse_messages(
+        messages_data, tool_calls_list, token_usage, backtrack_meta = await self._fetch_and_parse_messages(
             conversation_id or self.conversation_id
         )
 
@@ -104,13 +104,29 @@ class HttpAgentAdapter:
             "metadata": {
                 "task_id": task_id,
                 "conversation_id": conversation_id,
+                "backtrack_count": backtrack_meta.get("count", 0),
+                "backtrack_exhausted": backtrack_meta.get("exhausted", False),
+                "backtrack_escalation": backtrack_meta.get("escalation"),
             },
         }
 
     async def _poll_until_done(self, task_id: str) -> None:
+        """Poll session until done, auto-confirming HITL requests.
+
+        In E2E tests, Agent may trigger HITL (human-in-the-loop) for:
+        - Installing dependencies ("pip install pandas")
+        - Confirming dangerous operations ("delete files")
+        - Asking clarification questions
+
+        Auto-confirm policy: approve all HITL with default answers.
+        This simulates a cooperative user who says "yes" to everything.
+        """
         elapsed = 0.0
+        hitl_confirmed: set[str] = set()
+
         while elapsed < self.poll_max_wait:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                # Check session status
                 resp = await client.get(
                     f"{self.base_url}/api/v1/session/{task_id}",
                 )
@@ -120,11 +136,73 @@ class HttpAgentAdapter:
             active = data.get("active", True)
             if not active:
                 return
+
+            # Check for pending HITL — auto-confirm to unblock Agent
+            await self._auto_confirm_hitl(task_id, hitl_confirmed)
+
             await asyncio.sleep(self.poll_interval)
             elapsed += self.poll_interval
+
         raise TimeoutError(
             f"Session {task_id} did not finish within {self.poll_max_wait}s"
         )
+
+    async def _auto_confirm_hitl(
+        self, session_id: str, already_confirmed: set[str]
+    ) -> None:
+        """Check for pending HITL requests and auto-confirm them.
+
+        Policy: approve everything with default answers (cooperative user).
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{self.base_url}/api/v1/human-confirmation/pending",
+                )
+                if resp.status_code != 200:
+                    return
+                body = resp.json()
+
+            pending = (body.get("data") or [])
+            for req in pending:
+                req_id = req.get("request_id") or req.get("id", "")
+                req_session = req.get("session_id", "")
+
+                # Only confirm HITL for our session, and only once
+                if req_session != session_id or req_id in already_confirmed:
+                    continue
+
+                question = req.get("question", "")
+                logger.info(
+                    f"E2E auto-confirm HITL: session={session_id[:12]}... "
+                    f"question={question[:60]}"
+                )
+
+                # Build default answers from metadata questions
+                answers = {}
+                metadata = req.get("metadata") or {}
+                for q in metadata.get("questions", []):
+                    q_id = q.get("id", "")
+                    options = q.get("options", [])
+                    # Pick the first option (usually the affirmative one)
+                    if options:
+                        answers[q_id] = options[0]
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    confirm_resp = await client.post(
+                        f"{self.base_url}/api/v1/human-confirmation/{req_session}",
+                        json={"response": "confirm", "answers": answers},
+                    )
+                    if confirm_resp.status_code == 200:
+                        logger.info(f"E2E HITL confirmed: {req_id[:12]}...")
+                        already_confirmed.add(req_id)
+                    else:
+                        logger.warning(
+                            f"E2E HITL confirm failed: {confirm_resp.status_code}"
+                        )
+        except Exception as e:
+            # HITL check is best-effort — don't break polling
+            logger.debug(f"HITL auto-confirm check failed: {e}")
 
     async def _fetch_and_parse_messages(
         self, conversation_id: str
@@ -211,8 +289,16 @@ class HttpAgentAdapter:
             cache_write_tokens=cache_write_tokens,
         )
 
+        # Extract backtrack metadata from last assistant message
+        backtrack_metadata = {}
+        for raw in reversed(raw_messages):
+            bt = (raw.get("metadata") or {}).get("backtrack")
+            if isinstance(bt, dict):
+                backtrack_metadata = bt
+                break
+
         eval_messages: List[Message] = [
             Message(role=m["role"], content=m["content"], tool_calls=m.get("tool_calls") or [])
             for m in messages_out
         ]
-        return (eval_messages, tool_calls_list, token_usage)
+        return (eval_messages, tool_calls_list, token_usage, backtrack_metadata)

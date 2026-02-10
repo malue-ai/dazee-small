@@ -29,21 +29,55 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 REPORTS_DIR = PROJECT_ROOT / "evaluation" / "reports"
-CHECKPOINT_FILE = REPORTS_DIR / "_e2e_checkpoint.json"
-SUITE_PATH = PROJECT_ROOT / "evaluation" / "suites" / "xiaodazi" / "e2e" / "phase1_core.yaml"
+SUITES_DIR = PROJECT_ROOT / "evaluation" / "suites" / "xiaodazi" / "e2e"
+
+# Suite registry — add new suites here
+SUITE_REGISTRY = {
+    "phase1_core": SUITES_DIR / "phase1_core.yaml",
+    "phase2_scenarios": SUITES_DIR / "phase2_scenarios.yaml",
+}
+DEFAULT_SUITE = "phase1_core"
 
 
-def load_checkpoint() -> dict:
-    if CHECKPOINT_FILE.exists():
-        with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
+def get_suite_path(suite_name: str | None = None) -> Path:
+    """Resolve suite name to file path."""
+    name = suite_name or DEFAULT_SUITE
+    if name in SUITE_REGISTRY:
+        return SUITE_REGISTRY[name]
+    # Allow direct path
+    p = Path(name)
+    if p.exists():
+        return p
+    p = SUITES_DIR / f"{name}.yaml"
+    if p.exists():
+        return p
+    raise FileNotFoundError(f"Suite not found: {name} (available: {list(SUITE_REGISTRY.keys())})")
+
+
+def get_checkpoint_file(suite_name: str | None = None) -> Path:
+    """Each suite has its own checkpoint file — Phase1/Phase2 don't mix."""
+    name = suite_name or DEFAULT_SUITE
+    return REPORTS_DIR / f"_e2e_checkpoint_{name}.json"
+
+
+# Legacy alias for backward compatibility
+SUITE_PATH = SUITE_REGISTRY[DEFAULT_SUITE]
+CHECKPOINT_FILE = get_checkpoint_file(DEFAULT_SUITE)
+
+
+def load_checkpoint(checkpoint_file: Optional[Path] = None) -> dict:
+    path = checkpoint_file or CHECKPOINT_FILE
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"completed_cases": [], "results": {}, "updated_at": None}
 
 
-def save_checkpoint(ckpt: dict) -> None:
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+def save_checkpoint(ckpt: dict, checkpoint_file: Optional[Path] = None) -> None:
+    path = checkpoint_file or CHECKPOINT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
     ckpt["updated_at"] = datetime.now().isoformat()
-    with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(ckpt, f, ensure_ascii=False, indent=2, default=str)
 
 
@@ -70,8 +104,13 @@ async def run_multi_turn(
     sequence: List[Dict[str, Any]],
     base_url: str,
     user_id: str,
+    files: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Run multiple turns; new_conversation=true starts a new conversation."""
+    """Run multiple turns; new_conversation=true starts a new conversation.
+
+    Args:
+        files: File refs (from resolve_files) to attach to the FIRST turn only.
+    """
     from evaluation.adapters.http_agent import HttpAgentAdapter
     from evaluation.models import Message, TokenUsage, ToolCall
 
@@ -81,6 +120,7 @@ async def run_multi_turn(
     total_cache_read, total_cache_write = 0, 0
     conversation_id: Optional[str] = None
     last_conv_id: Optional[str] = None
+    is_first_turn = True
 
     for step in sequence:
         new_conv = step.get("new_conversation", True)
@@ -95,7 +135,10 @@ async def run_multi_turn(
             poll_interval_seconds=2.0,
             poll_max_wait_seconds=600.0,  # Long tasks with thinking can take minutes per turn
         )
-        result = await adapter.chat(user_query=query, conversation_history=[])
+        # Attach files to the first turn only (subsequent turns are follow-ups)
+        turn_files = files if is_first_turn and files else None
+        result = await adapter.chat(user_query=query, conversation_history=[], files=turn_files)
+        is_first_turn = False
         conversation_id = (result.get("metadata") or {}).get("conversation_id") or conversation_id
         last_conv_id = conversation_id
 
@@ -207,17 +250,19 @@ async def run_case(
     checkpoint: dict,
     case_filter: Optional[str],
     from_case: Optional[str],
+    task_order: Optional[List[str]] = None,
+    defer_grading: bool = False,
+    checkpoint_file: Optional[Path] = None,
 ) -> Optional["TaskResult"]:
     from evaluation.adapters.http_agent import HttpAgentAdapter
 
     task_id = task.id
     if case_filter and task_id != case_filter:
         return None
-    if from_case:
-        order = ["A1", "B1", "D4", "C1", "B9", "B10"]
+    if from_case and task_order:
         try:
-            from_idx = order.index(from_case)
-            if task_id in order and order.index(task_id) < from_idx:
+            from_idx = task_order.index(from_case)
+            if task_id in task_order and task_order.index(task_id) < from_idx:
                 return None
         except ValueError:
             pass
@@ -233,25 +278,58 @@ async def run_case(
         poll_max_wait_seconds=float(task.timeout_seconds),
     )
 
+    # Resolve files (used by both single-turn and multi-turn)
+    files_refs = resolve_files(
+        PROJECT_ROOT,
+        task.input.files or [],
+        base_url=base_url,
+        user_id=user_id,
+    ) if (task.input.files) else []
+
     sequence = (task.metadata or {}).get("multi_turn_sequence")
     if sequence:
         result = await run_multi_turn(
             sequence,
             base_url=base_url,
             user_id=user_id,
+            files=files_refs if files_refs else None,
         )
     else:
-        files_refs = resolve_files(
-            PROJECT_ROOT,
-            task.input.files or [],
-            base_url=base_url,
-            user_id=user_id,
-        )
         result = await run_single_turn(
             adapter,
             user_query=task.input.user_query,
             files=files_refs if files_refs else None,
         )
+
+    if defer_grading:
+        # Save transcript only — grading happens in a separate pass
+        checkpoint.setdefault("completed_cases", []).append(task_id)
+        # Serialize result for later grading
+        from evaluation.models import TokenUsage, ToolCall, Message
+        serialized = {
+            "messages": [
+                m.model_dump() if hasattr(m, "model_dump") else m
+                for m in (result.get("messages") or [])
+            ],
+            "tool_calls": [
+                tc.model_dump() if hasattr(tc, "model_dump") else tc
+                for tc in (result.get("tool_calls") or [])
+            ],
+            "token_usage": (
+                result["token_usage"].model_dump()
+                if hasattr(result.get("token_usage"), "model_dump")
+                else result.get("token_usage")
+            ),
+            "metadata": result.get("metadata"),
+        }
+        checkpoint.setdefault("results", {})[task_id] = {
+            "task_id": task.id,
+            "transcript": serialized,
+            "graded": False,
+        }
+        save_checkpoint(checkpoint, checkpoint_file)
+        print(f"  [SAVED] {task_id} transcript (grading deferred)")
+        return None
 
     async def _create_preloaded_agent():
         return PreloadedAgent(result)
@@ -268,7 +346,7 @@ async def run_case(
         "passed": trial.passed,
         "grade_results": [gr.model_dump() if hasattr(gr, "model_dump") else {} for gr in trial.grade_results],
     }
-    save_checkpoint(checkpoint)
+    save_checkpoint(checkpoint, checkpoint_file)
     return task_result
 
 

@@ -170,7 +170,7 @@ class MarkdownMemoryLayer:
 
     # ==================== 每日日志 ====================
 
-    async def read_daily_log(self, date: Optional[str] = None) -> str:
+    async def read_daily_log(self, date: Optional[str] = None) -> str:  # UNUSED: daily logs are written but never read
         """
         读取每日日志
 
@@ -217,7 +217,7 @@ class MarkdownMemoryLayer:
 
     # ==================== 项目级记忆 ====================
 
-    async def read_project_memory(self, project_id: str) -> str:
+    async def read_project_memory(self, project_id: str) -> str:  # UNUSED: project memory system not integrated
         """
         读取项目级 MEMORY.md
 

@@ -436,6 +436,7 @@ class Agent:
                     self, "_wait_intent_clarify_async", None
                 ),
                 "state_manager": state_mgr_ref,
+                "event_manager": getattr(self, "event_manager", None),
             },
         )
 
@@ -775,16 +776,6 @@ class Agent:
             tool_input.pop("conversation_id", None)
 
         return tool_input
-
-    def _register_tools_to_llm(self) -> None:
-        """
-        工具注册到 LLM（兼容方法）
-
-        V10.0 架构中工具通过 ToolSelector 动态选择，
-        此方法保留用于兼容外部代码调用。
-        """
-        if self.tool_selector and self._tool_executor:
-            logger.debug("🔧 工具已通过 ToolSelector 管理，跳过手动注册")
 
     def get_plan(self) -> Optional[Dict]:
         """获取当前计划"""

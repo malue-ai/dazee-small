@@ -230,7 +230,7 @@ class QualityController:
 
     # ==================== 敏感信息过滤 ====================
 
-    def filter_sensitive_info(self, content: str) -> Tuple[str, List[str]]:
+    def filter_sensitive_info(self, content: str) -> Tuple[str, List[str]]:  # UNUSED: stub, never called
         """
         过滤敏感信息
 
@@ -562,7 +562,7 @@ Do not return anything except the JSON format.
 
     # ==================== 显式记忆优先级 ====================
 
-    def resolve_conflict(
+    def resolve_conflict(  # UNUSED: defined but never called, conflict detection exists but resolution is not invoked
         self, user_id: str, conflict: Dict[str, Any], priority: str = "explicit_first"
     ) -> Dict[str, Any]:
         """

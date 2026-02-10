@@ -111,7 +111,7 @@ class ProgressTransformer:
         # Generate friendly message based on progress stage
         if self._progress_style == "friendly":
             message = self._generate_friendly_message(
-                title, status, percent
+                title, status, completed, total
             )
         else:
             # technical mode: use title as-is
@@ -125,38 +125,57 @@ class ProgressTransformer:
             message=message,
             percent=percent,
             show_details=show_details,
-            metadata={"title": title, "status": status},
+            metadata={"title": title, "status": status, "completed": completed, "total": total},
         )
 
     def _generate_friendly_message(
         self,
         title: str,
         status: str,
-        percent: Optional[float],
+        completed: int,
+        total: int,
     ) -> str:
         """
-        Generate user-friendly progress message (架构 3.5.4 message_map).
+        Generate user-friendly progress message.
 
-        Strategy: LLM-First friendly messages based on progress stage,
-        not keyword matching on title.
+        Design principle (architecture 3.5.4 "internal complexity, external simplicity"):
+        - Users see natural-language progress, not technical step titles
+        - Progress fraction (e.g. "2/5") gives concrete sense of advancement
+        - Different tones for different stages: beginning → middle → almost done → done
+        - Failed steps: reassuring language, not alarming
         """
+        remaining = total - completed
+
+        # --- Completed step ---
         if status == "completed":
-            if percent and percent >= 100:
+            if total > 0 and completed >= total:
                 return self._progress_messages.get("done", "搞定！")
-            return f"✓ {title}" if title else "已完成"
+            if total > 0:
+                return f"进度 {completed}/{total}，继续处理中..."
+            return "已完成一步，继续..."
 
+        # --- Failed step ---
         if status == "failed":
-            return f"遇到问题，正在尝试其他方法..."
+            if remaining <= 1:
+                return "遇到了点问题，正在想其他办法..."
+            return f"这步没成功，换个方法试试（还剩 {remaining} 步）"
 
-        # In-progress: choose message based on percentage
-        if percent is not None:
-            if percent >= 80:
-                return self._progress_messages.get("almost_done", "快好了...")
-            if percent >= 40:
-                return self._progress_messages.get("processing", "处理中...")
+        # --- In-progress step ---
+        if total <= 0:
+            return self._progress_messages.get("analyzing", "正在分析...")
 
-        # Default: analyzing
-        return self._progress_messages.get("analyzing", "正在分析...")
+        # Stage-based messages with progress fraction
+        if completed == 0:
+            # Just started
+            if total <= 2:
+                return self._progress_messages.get("analyzing", "正在分析...")
+            return f"开始处理，共 {total} 步..."
+        elif remaining <= 1:
+            return self._progress_messages.get("almost_done", "快好了...")
+        elif completed / total >= 0.5:
+            return f"进度 {completed}/{total}，{self._progress_messages.get('almost_done', '快好了...')}"
+        else:
+            return f"进度 {completed}/{total}，{self._progress_messages.get('processing', '处理中...')}"
 
     async def transform_and_emit(
         self,

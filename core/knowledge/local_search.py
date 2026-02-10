@@ -379,7 +379,7 @@ class LocalKnowledgeManager:
         """
         混合搜索加权合并去重
 
-        借鉴 OpenClaw hybrid.ts 实现：
+        混合搜索加权合并去重策略：
         1. 以 doc_id 为 key 去重
         2. 同 doc_id 合并分数
         3. 加权排序：score = vector_weight * vec_score + text_weight * fts_score

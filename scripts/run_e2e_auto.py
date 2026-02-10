@@ -287,14 +287,24 @@ async def run_e2e(
     case_filter: str | None = None,
     from_case: str | None = None,
     clean: bool = False,
+    suite_name: str | None = None,
+    defer_grading: bool = False,
 ) -> int:
-    """Run E2E evaluation, return exit code (0=pass, 1=fail)."""
+    """Run E2E evaluation, return exit code (0=pass, 1=fail).
+
+    Args:
+        defer_grading: If True, run all agent executions first (save transcripts),
+            then grade all at once at the end. Useful for long tasks — avoids
+            losing grading results if one case times out.
+    """
     from scripts.run_e2e_eval import (
-        CHECKPOINT_FILE,
-        SUITE_PATH,
+        get_checkpoint_file,
+        get_suite_path,
         load_checkpoint,
         save_checkpoint,
         run_case,
+        PreloadedAgent,
+        resolve_files,
     )
     from evaluation.harness import EvaluationHarness
     from evaluation.models import EvaluationReport, TaskResult
@@ -303,78 +313,143 @@ async def run_e2e(
 
     REPORTS_DIR = PROJECT_ROOT / "evaluation" / "reports"
 
+    # Resolve suite and checkpoint (each suite has its own checkpoint)
+    suite_path = get_suite_path(suite_name)
+    ckpt_file = get_checkpoint_file(suite_name)
+    suite_label = suite_name or "phase1_core"
+
     # Clean checkpoint if requested
-    if clean and CHECKPOINT_FILE.exists():
-        CHECKPOINT_FILE.unlink()
-        _warn("Checkpoint cleared")
+    if clean and ckpt_file.exists():
+        ckpt_file.unlink()
+        _warn(f"Checkpoint cleared ({ckpt_file.name})")
 
     # Initialize grader LLM from evaluation/config/settings.yaml (NOT instance config).
     # The grader is our internal benchmark judge — always uses the strongest model
     # with thinking, independent of which provider the agent uses.
     grader_llm = None
-    try:
-        import yaml as _yaml
-        from core.llm import create_llm_service
-        from utils.instance_loader import load_instance_env_from_config
-
-        # Load instance .env so API keys are available
-        instance_name = os.environ.get("AGENT_INSTANCE", "xiaodazi")
-        load_instance_env_from_config(instance_name)
-
-        # Read grader config from evaluation settings
-        eval_settings_path = PROJECT_ROOT / "evaluation" / "config" / "settings.yaml"
-        with open(eval_settings_path, "r", encoding="utf-8") as f:
-            eval_settings = _yaml.safe_load(f) or {}
-        grader_cfg = (eval_settings.get("graders", {}).get("model", {}))
-
-        if grader_cfg.get("enabled") and grader_cfg.get("provider"):
-            profile = {
-                "provider": grader_cfg["provider"],
-                "model": grader_cfg["model"],
-                "api_key_env": grader_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
-                "max_tokens": grader_cfg.get("max_tokens", 4096),
-                "temperature": grader_cfg.get("temperature", 0),
-                "enable_thinking": grader_cfg.get("enable_thinking", True),
-                "thinking_budget": grader_cfg.get("thinking_budget", 10000),
-                "timeout": grader_cfg.get("timeout", 120.0),
-            }
-            grader_llm = create_llm_service(**profile)
-            _log("🧪", f"Grader LLM: {profile['model']} "
-                        f"(thinking={profile['enable_thinking']})")
-        else:
-            _warn("Grader model not enabled in evaluation/config/settings.yaml")
-    except Exception as e:
-        _warn(f"Grader LLM init failed ({e}), model graders will return mock scores")
+    if not defer_grading:
+        grader_llm = _init_grader_llm()
+    else:
+        _log("⏸", "Grading deferred — will grade after all cases complete")
 
     harness = EvaluationHarness(
         agent_factory=None,
         llm_service=grader_llm,
         suites_dir=str(PROJECT_ROOT / "evaluation" / "suites"),
     )
-    suite = harness.load_suite(str(SUITE_PATH))
-    checkpoint = load_checkpoint()
+    suite = harness.load_suite(str(suite_path))
+
+    # Use suite-specific checkpoint (pass ckpt_file to all run_case calls)
+    checkpoint = load_checkpoint(ckpt_file)
+
+    # Build dynamic task order from suite (not hardcoded)
+    task_order = [t.id for t in suite.tasks]
 
     _log("📋", f"Suite: {suite.name} ({len(suite.tasks)} cases)")
-    if checkpoint.get("completed_cases"):
-        _warn(f"Checkpoint found: {checkpoint['completed_cases']} already done")
+    _log("🔧", f"Checkpoint: {ckpt_file.name}")
+    if defer_grading:
+        _log("⏸", "Mode: execute first → grade later")
+    completed = checkpoint.get("completed_cases", [])
+    if completed:
+        _warn(f"Checkpoint: {completed} already done → resuming from next")
 
+    # --- Pass 1: Execute all cases (resilient — timeout/error won't crash the loop) ---
     task_results: list[TaskResult] = []
+    failed_cases: list[str] = []
     for task in suite.tasks:
         _log("▶", f"Case {task.id}: {task.description}")
-        tr = await run_case(
-            task,
-            base_url,
-            "eval_e2e_user",
-            harness,
-            checkpoint,
-            case_filter,
-            from_case,
-        )
-        if tr is not None:
+        try:
+            tr = await run_case(
+                task,
+                base_url,
+                "eval_e2e_user",
+                harness,
+                checkpoint,
+                case_filter,
+                from_case,
+                task_order=task_order,
+                defer_grading=defer_grading,
+                checkpoint_file=ckpt_file,
+            )
+            if tr is not None:
+                passed = tr.pass_rate >= 1.0
+                status = f"{Colors.GREEN}PASS{Colors.RESET}" if passed else f"{Colors.RED}FAIL{Colors.RESET}"
+                print(f"  [{status}] {task.id}: {task.description}")
+                task_results.append(tr)
+        except TimeoutError as e:
+            _fail(f"{task.id} TIMEOUT: {e}")
+            _warn(f"Saving partial checkpoint and continuing to next case")
+            checkpoint.setdefault("completed_cases", []).append(task.id)
+            checkpoint.setdefault("results", {})[task.id] = {
+                "task_id": task.id, "error": f"TimeoutError: {e}", "graded": False,
+            }
+            save_checkpoint(checkpoint, ckpt_file)
+            failed_cases.append(task.id)
+        except Exception as e:
+            _fail(f"{task.id} ERROR: {type(e).__name__}: {e}")
+            _warn(f"Saving checkpoint and continuing")
+            checkpoint.setdefault("completed_cases", []).append(task.id)
+            checkpoint.setdefault("results", {})[task.id] = {
+                "task_id": task.id, "error": f"{type(e).__name__}: {e}", "graded": False,
+            }
+            save_checkpoint(checkpoint, ckpt_file)
+            failed_cases.append(task.id)
+
+    if failed_cases:
+        _warn(f"Cases with errors: {failed_cases}")
+
+    # Save checkpoint with suite-specific file
+    save_checkpoint(checkpoint, ckpt_file)
+
+    # --- Pass 2: Deferred grading (if enabled) ---
+    if defer_grading:
+        print()
+        _log("🧪", "=== Grading Phase: evaluating all transcripts ===")
+        grader_llm = _init_grader_llm()
+        # Update BOTH harness and the inner model_graders instance
+        harness.llm_service = grader_llm
+        harness.model_graders.llm = grader_llm
+
+        for task in suite.tasks:
+            task_id = task.id
+            ckpt_result = checkpoint.get("results", {}).get(task_id, {})
+            if not ckpt_result.get("transcript") or ckpt_result.get("graded"):
+                continue
+
+            _log("🔍", f"Grading {task_id}: {task.description}")
+            transcript = ckpt_result["transcript"]
+
+            # Reconstruct result from saved transcript
+            from evaluation.models import TokenUsage, ToolCall, Message
+            result = {
+                "messages": [Message(**m) if isinstance(m, dict) else m for m in transcript.get("messages", [])],
+                "tool_calls": [ToolCall(**tc) if isinstance(tc, dict) else tc for tc in transcript.get("tool_calls", [])],
+                "token_usage": TokenUsage(**transcript["token_usage"]) if isinstance(transcript.get("token_usage"), dict) else transcript.get("token_usage"),
+                "metadata": transcript.get("metadata"),
+            }
+
+            async def _create_preloaded():
+                return PreloadedAgent(result)
+
+            harness.agent_factory = _create_preloaded
+            trial = await harness.run_trial(task, trial_number=1)
+
+            from evaluation.models import TaskResult as TR
+            tr = TR(task_id=task.id, task_description=task.description, trials=[trial])
+            task_results.append(tr)
+
             passed = tr.pass_rate >= 1.0
             status = f"{Colors.GREEN}PASS{Colors.RESET}" if passed else f"{Colors.RED}FAIL{Colors.RESET}"
-            print(f"  [{status}] {task.id}: {task.description}")
-            task_results.append(tr)
+            print(f"  [{status}] {task_id}: {task.description}")
+
+            # Mark as graded in checkpoint
+            ckpt_result["graded"] = True
+            ckpt_result["passed"] = trial.passed
+            ckpt_result["grade_results"] = [
+                gr.model_dump() if hasattr(gr, "model_dump") else {}
+                for gr in trial.grade_results
+            ]
+            save_checkpoint(checkpoint, ckpt_file)
 
     if not task_results:
         _warn("No cases run (filter/checkpoint may have skipped all)")
@@ -382,7 +457,7 @@ async def run_e2e(
 
     # Build report
     report = EvaluationReport(
-        report_id=f"e2e_phase1_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        report_id=f"e2e_{suite_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         suite_id=suite.id,
         suite_name=suite.name,
         task_results=task_results,
@@ -397,14 +472,14 @@ async def run_e2e(
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # JSON report
-    report_path = REPORTS_DIR / f"e2e_phase1_{ts}.json"
+    report_path = REPORTS_DIR / f"e2e_{suite_label}_{ts}.json"
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report.model_dump(), f, ensure_ascii=False, indent=2, default=str)
 
     # Markdown report
-    md_path = REPORTS_DIR / f"e2e_phase1_{ts}.md"
+    md_path = REPORTS_DIR / f"e2e_{suite_label}_{ts}.md"
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write(f"# E2E Phase1 Report\n\n")
+        f.write(f"# E2E {suite_label} Report\n\n")
         f.write(f"- Suite: {suite.name}\n")
         f.write(f"- Pass rate: {report.pass_rate:.0%}\n")
         f.write(f"- Passed: {report.passed_tasks} / {report.total_tasks}\n\n")
@@ -417,7 +492,7 @@ async def run_e2e(
         from evaluation.loop_automation import LoopAutomation
         loop = LoopAutomation()
         classified = loop.extract_and_classify(report)
-        triage_path = REPORTS_DIR / f"e2e_triage_{ts}.md"
+        triage_path = REPORTS_DIR / f"e2e_triage_{suite_label}_{ts}.md"
         with open(triage_path, "w", encoding="utf-8") as f:
             f.write(loop.generate_triage_report(classified))
         reg_path = (
@@ -441,6 +516,44 @@ async def run_e2e(
     return 0 if report.failed_tasks == 0 else 1
 
 
+def _init_grader_llm():
+    """Initialize grader LLM from evaluation/config/settings.yaml."""
+    try:
+        import yaml as _yaml
+        from core.llm import create_llm_service
+        from utils.instance_loader import load_instance_env_from_config
+
+        instance_name = os.environ.get("AGENT_INSTANCE", "xiaodazi")
+        load_instance_env_from_config(instance_name)
+
+        eval_settings_path = PROJECT_ROOT / "evaluation" / "config" / "settings.yaml"
+        with open(eval_settings_path, "r", encoding="utf-8") as f:
+            eval_settings = _yaml.safe_load(f) or {}
+        grader_cfg = (eval_settings.get("graders", {}).get("model", {}))
+
+        if grader_cfg.get("enabled") and grader_cfg.get("provider"):
+            profile = {
+                "provider": grader_cfg["provider"],
+                "model": grader_cfg["model"],
+                "api_key_env": grader_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
+                "max_tokens": grader_cfg.get("max_tokens", 4096),
+                "temperature": grader_cfg.get("temperature", 0),
+                "enable_thinking": grader_cfg.get("enable_thinking", True),
+                "thinking_budget": grader_cfg.get("thinking_budget", 10000),
+                "timeout": grader_cfg.get("timeout", 120.0),
+            }
+            llm = create_llm_service(**profile)
+            _log("🧪", f"Grader LLM: {profile['model']} "
+                        f"(thinking={profile['enable_thinking']})")
+            return llm
+        _warn("Grader model not enabled in evaluation/config/settings.yaml")
+    except Exception as e:
+        _warn(f"Grader LLM init failed ({e}), model graders will return mock scores")
+    return None
+
+
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -451,29 +564,42 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/run_e2e_auto.py                  # all cases (default provider)
-  python scripts/run_e2e_auto.py --case A1        # single case
-  python scripts/run_e2e_auto.py --from D4        # resume
-  python scripts/run_e2e_auto.py --clean          # fresh run
-  python scripts/run_e2e_auto.py --no-start       # skip server startup
-  python scripts/run_e2e_auto.py --port 9000      # custom port
-  python scripts/run_e2e_auto.py --provider qwen  # test with qwen models
-  python scripts/run_e2e_auto.py --provider claude # test with claude models
+  # Phase 1 (default)
+  python scripts/run_e2e_auto.py --clean --provider qwen
+
+  # Phase 2 (new scenarios)
+  python scripts/run_e2e_auto.py --suite phase2_scenarios --provider qwen --defer-grading
+
+  # Resume from a case (checkpoint auto-skips completed)
+  python scripts/run_e2e_auto.py --suite phase2_scenarios --provider qwen --from G4
+
+  # Single case
+  python scripts/run_e2e_auto.py --case G2 --provider qwen
+
+  # Daemon mode (recommended for long tasks)
+  PYTHONUNBUFFERED=1 nohup python scripts/run_e2e_auto.py \\
+    --suite phase2_scenarios --provider qwen --defer-grading --clean \\
+    > /tmp/e2e_qwen.log 2>&1 &
+  tail -f /tmp/e2e_qwen.log   # monitor
 """,
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
                         help=f"Server port (default: {DEFAULT_PORT})")
     parser.add_argument("--case", type=str, default=None,
-                        help="Run only this case (e.g. A1)")
+                        help="Run only this case (e.g. A1, G2)")
     parser.add_argument("--from", dest="from_case", type=str, default=None,
-                        help="Resume from this case (e.g. D4)")
+                        help="Resume from this case (e.g. D4, G4)")
     parser.add_argument("--clean", action="store_true",
                         help="Clear checkpoint and re-run all")
     parser.add_argument("--no-start", action="store_true",
                         help="Skip auto-start, assume server already running")
     parser.add_argument("--provider", type=str, default=None,
-                        choices=["qwen", "claude"],
-                        help="Override model provider (qwen/claude) for compatibility testing")
+                        choices=["qwen", "claude", "deepseek"],
+                        help="Override model provider (qwen/claude/deepseek)")
+    parser.add_argument("--suite", type=str, default=None,
+                        help="Suite name (phase1_core / phase2_scenarios) or path to YAML")
+    parser.add_argument("--defer-grading", action="store_true",
+                        help="Execute all cases first, grade all at end (recommended for long tasks)")
     return parser.parse_args()
 
 
@@ -482,9 +608,15 @@ async def async_main() -> int:
     base_url = f"http://127.0.0.1:{args.port}"
     server_proc = None
 
+    suite_label = args.suite or "phase1_core"
+    provider_label = args.provider or "default"
+
     print()
     print(f"{Colors.BOLD}{'=' * 60}{Colors.RESET}")
     print(f"{Colors.BOLD}  E2E AUTOMATED TEST{Colors.RESET}")
+    print(f"  Suite: {suite_label} | Provider: {provider_label}")
+    if args.defer_grading:
+        print(f"  Mode: execute first → grade later")
     print(f"{Colors.BOLD}{'=' * 60}{Colors.RESET}")
     print()
 
@@ -511,9 +643,15 @@ async def async_main() -> int:
                     return 1
 
         # --- Phase 0: State management verification (B9/B10 rollback) ---
-        rollback_ok = run_rollback_verification(case_filter=args.case)
-        if not rollback_ok:
-            return 1
+        # Only run when the suite actually contains B9/B10 cases
+        suite_has_rollback = (args.suite is None or args.suite == "phase1_core")
+        case_is_rollback = args.case and args.case.upper() in ("B9", "B10")
+        if suite_has_rollback or case_is_rollback:
+            rollback_ok = run_rollback_verification(case_filter=args.case)
+            if not rollback_ok:
+                return 1
+        else:
+            _log("⏭", "Phase 0 skipped (suite has no B9/B10 rollback cases)")
 
         print()  # visual separator
 
@@ -527,6 +665,8 @@ async def async_main() -> int:
             case_filter=args.case,
             from_case=args.from_case,
             clean=args.clean,
+            suite_name=args.suite,
+            defer_grading=args.defer_grading,
         )
         return exit_code
 

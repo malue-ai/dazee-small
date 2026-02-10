@@ -138,9 +138,8 @@ class InstanceConfig:
     output_json_indent: Optional[int] = None
 
     # 记忆配置
+    memory_enabled: bool = True
     mem0_enabled: bool = True
-    smart_retrieval: bool = True
-    retention_policy: str = "user"
 
     # ===== 小搭子扩展配置（V11）=====
     # 未配置时为 None，由对应模块使用默认值
@@ -551,9 +550,8 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         output_json_ensure_ascii=output_config.get("json_ensure_ascii"),
         output_json_indent=output_config.get("json_indent"),
         # 记忆配置
+        memory_enabled=memory_config.get("enabled", True),
         mem0_enabled=memory_config.get("mem0_enabled", True),
-        smart_retrieval=memory_config.get("smart_retrieval", True),
-        retention_policy=memory_config.get("retention_policy", "user"),
         # 小搭子扩展配置（V11）
         termination=raw_config.get("termination") if isinstance(raw_config.get("termination"), dict) else None,
         skills_first_config=skills_first_config,

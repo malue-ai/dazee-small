@@ -24,7 +24,7 @@ class PlanValidationError(Exception):
         super().__init__(message)
 
 
-class PlanValidator:
+class PlanValidator:  # UNUSED: no plan validation in execution path
     """
     Plan 验证器
 

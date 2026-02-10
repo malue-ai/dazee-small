@@ -17,7 +17,7 @@
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from core.agent.backtrack.error_classifier import (
     BacktrackType,
@@ -404,62 +404,8 @@ class BacktrackManager:
         if session_id in self._backtrack_history:
             del self._backtrack_history[session_id]
 
-    async def execute_backtrack(
-        self,
-        result: BacktrackResult,
-        ctx: BacktrackContext,
-        callbacks: Optional[Dict[str, Callable[..., Awaitable[Any]]]] = None,
-    ) -> Dict[str, Any]:
-        """
-        执行回溯操作
-
-        Args:
-            result: 回溯决策结果
-            ctx: 回溯上下文
-            callbacks: 回调函数字典，可包含：
-                - on_replan: 重规划回调
-                - on_tool_replace: 工具替换回调
-                - on_param_adjust: 参数调整回调
-                - on_context_enrich: 上下文补充回调
-                - on_intent_clarify: 意图澄清回调
-
-        Returns:
-            执行结果
-        """
-        callbacks = callbacks or {}
-        action = result.action
-
-        logger.info(
-            f"🔄 执行回溯操作: type={result.backtrack_type.value}, "
-            f"action={action.get('operation', 'unknown')}"
-        )
-
-        if result.backtrack_type == BacktrackType.PLAN_REPLAN:
-            if "on_replan" in callbacks:
-                return await callbacks["on_replan"](action, ctx)
-            return {"status": "replan_requested", "action": action}
-
-        if result.backtrack_type == BacktrackType.TOOL_REPLACE:
-            if "on_tool_replace" in callbacks:
-                return await callbacks["on_tool_replace"](action, ctx)
-            return {"status": "tool_replace_requested", "action": action}
-
-        if result.backtrack_type == BacktrackType.PARAM_ADJUST:
-            if "on_param_adjust" in callbacks:
-                return await callbacks["on_param_adjust"](action, ctx)
-            return {"status": "param_adjust_requested", "action": action}
-
-        if result.backtrack_type == BacktrackType.CONTEXT_ENRICH:
-            if "on_context_enrich" in callbacks:
-                return await callbacks["on_context_enrich"](action, ctx)
-            return {"status": "context_enrich_requested", "action": action}
-
-        if result.backtrack_type == BacktrackType.INTENT_CLARIFY:
-            if "on_intent_clarify" in callbacks:
-                return await callbacks["on_intent_clarify"](action, ctx)
-            return {"status": "intent_clarify_requested", "action": action}
-
-        return {"status": "no_action", "action": action}
+    # NOTE: execute_backtrack() 回调方法已删除（从未被调用）。
+    # 回溯执行逻辑内联在 RVRBExecutor._handle_tool_error_with_backtrack() 中。
 
 
 # 全局单例

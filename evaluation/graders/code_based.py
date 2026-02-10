@@ -171,6 +171,66 @@ class CodeBasedGraders:
         )
     
     # ===================
+    # RVR-B 回溯验证
+    # ===================
+
+    @staticmethod
+    def check_backtrack_occurred(
+        transcript: Transcript,
+        min_count: int = 1,
+        max_count: int = 5,
+    ) -> GradeResult:
+        """
+        Verify that RVR-B backtrack actually occurred during execution.
+
+        This is a hard gate: if the test expects backtrack (e.g., poison data),
+        passing without backtrack means the test didn't exercise the mechanism.
+
+        Args:
+            transcript: Execution transcript (must contain backtrack metadata).
+            min_count: Minimum backtrack count required (default 1).
+            max_count: Maximum acceptable (too many = infinite loop risk).
+
+        Returns:
+            GradeResult: PASS if min_count <= actual <= max_count.
+        """
+        metadata = transcript.metadata or {}
+        bt_count = metadata.get("backtrack_count", 0)
+        bt_exhausted = metadata.get("backtrack_exhausted", False)
+        bt_escalation = metadata.get("backtrack_escalation")
+
+        passed = min_count <= bt_count <= max_count
+        if bt_count == 0 and min_count > 0:
+            explanation = (
+                f"Backtrack count = 0: Agent completed without backtrack. "
+                f"This test requires at least {min_count} backtrack(s) to verify "
+                f"error recovery. Either the test data wasn't 'broken enough' or "
+                f"the Agent bypassed the expected failure path."
+            )
+        elif bt_count > max_count:
+            explanation = (
+                f"Backtrack count = {bt_count} exceeds max {max_count}: "
+                f"possible infinite retry loop. exhausted={bt_exhausted}"
+            )
+        else:
+            explanation = None
+
+        return GradeResult(
+            grader_type=GraderType.CODE,
+            grader_name="check_backtrack_occurred",
+            passed=passed,
+            score=1.0 if passed else 0.0,
+            explanation=explanation,
+            details={
+                "backtrack_count": bt_count,
+                "min_required": min_count,
+                "max_allowed": max_count,
+                "exhausted": bt_exhausted,
+                "escalation": bt_escalation,
+            },
+        )
+
+    # ===================
     # Token 相关验证
     # ===================
     

@@ -2,7 +2,7 @@
 """
 Shell 命令执行器
 
-跨平台 Shell 命令执行，借鉴 clawdbot 的实现：
+跨平台 Shell 命令执行：
 - 环境变量过滤（安全）
 - 超时控制 + 进程树终止
 - 输出捕获（Windows 编码感知）
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Windows platform flag (evaluated once at import)
 _IS_WIN32 = sys.platform == "win32"
 
-# npm-related commands that need .cmd extension on Windows (clawdbot pattern)
+# npm-related commands that need .cmd extension on Windows
 _WIN_CMD_COMMANDS: Set[str] = {"npm", "pnpm", "yarn", "npx"}
 
 
@@ -43,7 +43,7 @@ class ShellExecutor(BaseExecutor):
     - Windows: PATHEXT 解析、进程树终止、大小写无关白名单
     """
 
-    # 阻止的环境变量键（对齐 clawdbot）
+    # 阻止的环境变量键（安全过滤）
     BLOCKED_ENV_KEYS: Set[str] = {
         "NODE_OPTIONS",
         "PYTHONHOME",
@@ -151,7 +151,7 @@ class ShellExecutor(BaseExecutor):
         检查命令是否在白名单中
 
         Windows: 大小写无关 + 去掉 .exe/.cmd 扩展名后匹配
-        (对齐 clawdbot exec-approvals.ts: isSafeBinUsage)
+        安全白名单匹配逻辑
 
         Args:
             command: 命令列表
@@ -197,7 +197,7 @@ class ShellExecutor(BaseExecutor):
         Resolve Windows command: add .cmd extension for npm-related commands,
         and use shutil.which to resolve PATHEXT.
 
-        clawdbot pattern: npm/pnpm/yarn/npx need .cmd extension on Windows
+        npm/pnpm/yarn/npx need .cmd extension on Windows
         because they are installed as .cmd batch scripts.
 
         Args:
@@ -235,7 +235,7 @@ class ShellExecutor(BaseExecutor):
     def _normalize_win_path(p: str) -> str:
         """
         Normalize Windows path for matching: lowercase + forward slashes.
-        Strips UNC prefix (\\\\?\\ or \\\\.\\\\ ) — clawdbot pattern.
+        Strips UNC prefix (\\\\?\\ or \\\\.\\\\ ).
         """
         stripped = p
         if stripped.startswith("\\\\?\\") or stripped.startswith("\\\\.\\"):
@@ -297,7 +297,7 @@ class ShellExecutor(BaseExecutor):
         """
         Kill entire process tree (parent + children).
 
-        Windows: taskkill /F /T /PID (clawdbot pattern)
+        Windows: taskkill /F /T /PID
         Unix: SIGKILL to the child's own process group.
 
         IMPORTANT: The child must have been started with process_group=0
@@ -616,7 +616,7 @@ class ShellExecutor(BaseExecutor):
 
     async def which(self, executable: str) -> Optional[str]:
         """
-        检查可执行文件是否存在（对齐 clawdbot system.which）
+        检查可执行文件是否存在（system.which）
 
         Windows 使用 where 命令，macOS/Linux 使用 which 命令。
 

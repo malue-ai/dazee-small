@@ -303,7 +303,7 @@ class StateConsistencyManager:
         # 5. 磁盘持久化
         self._persist_snapshot(snapshot)
 
-        # 6. 惰性清理：创建新快照时顺带清理过期快照（静默、无额外开销）
+        # 6. 惰性清理：创建新快照时顺带清理过期快照（限批量 + 限耗时）
         self._cleanup_expired_snapshots()
 
         logger.info(
@@ -1061,17 +1061,38 @@ class StateConsistencyManager:
             except Exception as e:
                 logger.warning(f"磁盘快照删除失败 {snapshot_id}: {e}")
 
-    def _cleanup_expired_snapshots(self) -> None:
-        """清理过期快照（根据保留策略）"""
+    def _cleanup_expired_snapshots(
+        self, max_clean: int = 20, max_ms: float = 200.0
+    ) -> None:
+        """清理过期快照（根据保留策略）。
+
+        Args:
+            max_clean: 单次最多清理的快照数量，避免大量积压时阻塞。
+            max_ms: 单次清理最大耗时（毫秒），超时后剩余留给下次清理。
+        """
         if not self._storage_path.exists():
             return
 
         retention = timedelta(hours=self._config.snapshot.retention_hours)
         now = datetime.now()
+        start = time.monotonic()
         cleaned = 0
 
         try:
             for snap_dir in self._storage_path.iterdir():
+                # 批量 / 耗时保护：达到上限后提前退出，剩余下次清理
+                if cleaned >= max_clean:
+                    logger.debug(
+                        f"过期快照清理达到批量上限 {max_clean}，剩余下次清理"
+                    )
+                    break
+                elapsed_ms = (time.monotonic() - start) * 1000
+                if elapsed_ms > max_ms:
+                    logger.debug(
+                        f"过期快照清理耗时 {elapsed_ms:.1f}ms 超过 {max_ms}ms，剩余下次清理"
+                    )
+                    break
+
                 if not snap_dir.is_dir():
                     continue
 
@@ -1098,7 +1119,10 @@ class StateConsistencyManager:
                     cleaned += 1
 
             if cleaned > 0:
-                logger.info(f"已清理 {cleaned} 个过期快照")
+                elapsed_ms = (time.monotonic() - start) * 1000
+                logger.info(
+                    f"已清理 {cleaned} 个过期快照（耗时 {elapsed_ms:.1f}ms）"
+                )
         except Exception as e:
             logger.warning(f"过期快照清理失败: {e}")
 

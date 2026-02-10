@@ -1188,6 +1188,8 @@ class ChatService:
         # Always append learning tasks (fire-and-forget, never block user)
         if "memory_flush" not in background_tasks:
             background_tasks.append("memory_flush")
+        if "playbook_extraction" not in background_tasks:
+            background_tasks.append("playbook_extraction")
 
         # 跟踪执行状态，用于 finally 块的资源清理
         execution_status = "completed"
@@ -1694,9 +1696,17 @@ class ChatService:
                     )
 
                     try:
+                        # Include backtrack metadata from RuntimeContext for E2E verification
+                        msg_metadata = {"usage": usage_response.model_dump(mode="json")}
+                        if hasattr(ctx, "total_backtracks"):
+                            msg_metadata["backtrack"] = {
+                                "count": ctx.total_backtracks,
+                                "exhausted": getattr(ctx, "backtracks_exhausted", False),
+                                "escalation": getattr(ctx, "backtrack_escalation", None),
+                            }
                         await self.conversation_service.update_message(
                             message_id=assistant_message_id,
-                            metadata={"usage": usage_response.model_dump(mode="json")},
+                            metadata=msg_metadata,
                         )
                     except Exception as update_err:
                         logger.warning("更新 Usage 数据失败", extra={"error": str(update_err)})

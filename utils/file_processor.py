@@ -413,9 +413,8 @@ class FileProcessor:
                     attachment_texts.append(f"🖼️ {pf.filename} ({pf.mime_type}): {pf.file_url}")
 
             elif pf.category == FileCategory.TEXT:
-                # 纯文本：完整内容拼进消息（已通过 MAX_TEXT_SIZE 50KB 上限过滤）
+                # Text files: preview in context, full content via file path
                 if pf.text_content:
-                    # 构建元数据行（文件名 | MIME类型 | 大小）
                     meta_parts = [pf.filename]
                     if pf.mime_type:
                         meta_parts.append(pf.mime_type)
@@ -424,17 +423,28 @@ class FileProcessor:
                         meta_parts.append(size_str)
                     meta_line = " | ".join(meta_parts)
 
-                    # 截断预览
-                    content_preview = pf.text_content
-                    if len(content_preview) > self.MAX_PREVIEW_CHARS:
-                        content_preview = (
-                            content_preview[: self.MAX_PREVIEW_CHARS] + "\n... (内容过长已截断)"
+                    content_len = len(pf.text_content)
+                    if content_len <= 2000:
+                        # Small file (<=2KB): embed full content
+                        attachment_text = f"📄 {meta_line}:\n```\n{pf.text_content}\n```"
+                    else:
+                        # Large file (>2KB): preview only, Agent uses cat to read full
+                        preview = pf.text_content[:500]
+                        tail = pf.text_content[-200:] if content_len > 700 else ""
+                        attachment_text = (
+                            f"📄 {meta_line}:\n```\n{preview}\n"
+                            f"... ({content_len} 字符，已截断，完整内容见文件路径)\n"
                         )
+                        if tail:
+                            attachment_text += f"... 末尾:\n{tail}\n"
+                        attachment_text += "```"
+                        attachment_text += (
+                            f"\n   原始文件: {pf.file_url}"
+                            f"\n   提示: 使用 cat {pf.file_url} 查看完整内容"
+                        ) if pf.file_url else ""
 
-                    attachment_text = f"📄 {meta_line}:\n```\n{content_preview}\n```"
-
-                    # 保留文件路径（如果有）
-                    if pf.file_url:
+                    # Always include file path for Agent to use
+                    if pf.file_url and content_len <= 2000:
                         attachment_text += f"\n   文件路径: {pf.file_url}"
 
                     attachment_texts.append(attachment_text)

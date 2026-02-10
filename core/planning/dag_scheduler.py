@@ -102,7 +102,7 @@ OnGroupEnd = Callable[[int, List[PlanStep], List[StepResult]], None]
 # ===================
 
 
-class DAGScheduler:
+class DAGScheduler:  # UNUSED: never instantiated, execution uses RVR/RVRB executors with PlanTodoTool
     """
     DAG 调度器
 

@@ -24,7 +24,7 @@ class MacOSLocalNode(LocalNodeBase):
     """
     macOS 本地节点
 
-    对齐 clawdbot 的 MacNodeRuntime
+    macOS 本地节点运行时
     """
 
     # macOS 默认安全 bins（与 config.yaml 保持一致）

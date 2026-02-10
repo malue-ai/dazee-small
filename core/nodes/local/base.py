@@ -28,7 +28,7 @@ class LocalNodeBase(ABC):
     """
     本地节点基类
 
-    处理本地设备操作，对齐 clawdbot MacNodeRuntime
+    处理本地设备操作
     """
 
     def __init__(
@@ -147,7 +147,7 @@ class LocalNodeBase(ABC):
         """
         处理 system.run 命令
 
-        对齐 clawdbot 的 system.run
+        执行 system.run 命令
         """
         run_params = SystemRunParams.from_dict(params)
 

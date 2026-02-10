@@ -2,7 +2,7 @@
 终止策略协议 - Termination Protocol
 
 V12 更新：
-- 新增 FinishReason 枚举，统一终止原因（借鉴 LobeHub）
+- 新增 FinishReason 枚举，统一终止原因
 - 终止原因从散落的字符串统一为枚举，便于前端展示和数据分析
 
 定义执行器何时停止的接口，供自适应终止器等实现。
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 class FinishReason(str, Enum):
     """
-    终止原因枚举（V12，借鉴 LobeHub FinishReason）
+    终止原因枚举（V12）
 
     统一所有终止原因，便于前端展示和数据分析。
     """

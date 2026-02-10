@@ -24,6 +24,7 @@ _KNOWN_TASK_MODULES = [
     'mem0_update',
     'recommended_questions',
     'title_generation',
+    'playbook_extraction',
 ]
 
 

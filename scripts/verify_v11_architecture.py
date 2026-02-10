@@ -189,13 +189,10 @@ print("\n" + "=" * 60)
 print("Phase 3: Skills 二维分类验证")
 print("=" * 60)
 
-check_file_exists("core/skill/os_skill_merger.py")
+# NOTE: os_skill_merger.py was never implemented. OSCompatibilityChecker in
+# os_compatibility.py exists but is never used in production code.
+# check_file_exists("core/skill/os_skill_merger.py")  # REMOVED: file never existed
 check_file_exists("core/skill/os_compatibility.py")
-
-from core.skill.os_skill_merger import OSSkillMerger
-
-check_class_has_method(OSSkillMerger, "get_enabled_skills")
-check_class_has_method(OSSkillMerger, "get_unavailable_skills")
 
 from core.skill.os_compatibility import OSCompatibilityChecker, CompatibilityResult, CompatibilityStatus
 
@@ -209,7 +206,8 @@ check("CompatibilityStatus 有 UNAVAILABLE", hasattr(CompatibilityStatus, "UNAVA
 from core.skill.dynamic_loader import DynamicSkillLoader
 
 init_params = inspect.signature(DynamicSkillLoader.__init__).parameters
-check("DynamicSkillLoader.__init__ 接受 os_skill_merger", "os_skill_merger" in init_params)
+# NOTE: os_skill_merger param was never added to DynamicSkillLoader
+# check("DynamicSkillLoader.__init__ 接受 os_skill_merger", "os_skill_merger" in init_params)
 check_class_has_method(DynamicSkillLoader, "get_eligible_skills")
 
 # RuntimeContextBuilder.build_skill_status_prompt

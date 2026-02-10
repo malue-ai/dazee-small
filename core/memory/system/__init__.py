@@ -6,7 +6,7 @@ System Memory 模块 - 系统级记忆
 - CacheMemory: 系统缓存（预留）
 
 术语说明：
-- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
+- Skill: 本地工作流技能（skills/library/）
 """
 
 from .cache import CacheMemory, create_cache_memory

@@ -81,9 +81,39 @@ result.to_excel("/path/to/output.xlsx", index=False)
 result.to_csv("/path/to/output.csv", index=False, encoding="utf-8-sig")
 ```
 
+## 数据校验（必须执行）
+
+分析前和分析后都要做数据校验，确保结果可信：
+
+### 清洗后校验
+
+```python
+# 1. 行数校验：打印清洗前后行数，确认只去了空行/噪音行
+print(f"清洗前: {len(df_raw)} 行 → 清洗后: {len(df_clean)} 行 (去除 {len(df_raw)-len(df_clean)} 行)")
+
+# 2. 分类列去重：检查分类列（如地区、产品）是否有近似重复值
+for col in categorical_columns:
+    unique_vals = df_clean[col].unique()
+    print(f"列 '{col}' 唯一值: {unique_vals}")
+    # 检查近似重复（如 "华东" vs "华东地区"）
+    # 如有近似重复，合并为统一值
+
+# 3. 聚合一致性校验：各分组 sum 必须等于总 sum
+total = df_clean["金额"].sum()
+group_total = df_clean.groupby("地区")["金额"].sum().sum()
+assert abs(total - group_total) < 0.01, f"聚合不一致: 总额 {total} ≠ 分组合计 {group_total}"
+```
+
+### 报告校验
+
+- 报告中引用的数字必须与清洗后数据一致
+- 如有排名/占比，各项占比之和应约等于 100%
+- 明确告知用户做了哪些清洗（统一了几种日期格式、去了多少空行等）
+
 ## 输出规范
 
 - 先展示数据概览（行数、列数、列名）
+- **明确告知清洗步骤**：做了什么修复、去了多少行、统一了什么格式
 - 分析结果用表格格式展示
 - 大数据集只展示前 10 行 + 汇总统计
 - 导出文件时告知用户保存路径

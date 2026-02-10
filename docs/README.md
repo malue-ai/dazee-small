@@ -453,7 +453,7 @@ LLM 自主终止（任务完成自评）
 ### 添加新 Skill
 
 1. 在 `instances/xiaodazi/skills/` 创建目录
-2. 创建 `SKILL.md`（兼容 OpenClaw 格式）
+2. 创建 `SKILL.md`（标准 Skill 描述格式）
 3. 配置 `metadata.xiaodazi.dependency_level`（builtin / lightweight / external / cloud_api）
 4. SkillRegistry 自动发现并按 OS + 依赖复杂度分类
 

@@ -6,7 +6,7 @@ Plan Memory - 任务计划持久化记忆
 - 存储步骤完成状态
 - 生成 Session 进度摘要
 
-设计原则（借鉴 autonomous-coding）：
+设计原则：
 - 步骤只能标记 passes: true，永不删除
 - 自动生成进度摘要用于 Prompt 注入
 - 对用户透明，框架自动处理
@@ -15,7 +15,7 @@ Plan Memory - 任务计划持久化记忆
 
 参考：
 - Anthropic Blog: https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
-- autonomous-coding 示例: feature_list.json + claude-progress.txt
+- 示例格式: feature_list.json + progress.txt
 """
 
 import asyncio
@@ -65,7 +65,7 @@ class PlanMemory(BaseScopedMemory):
         "completion_rate": "1/2"
     }
 
-    核心规则（借鉴 autonomous-coding）：
+    核心规则：
     1. 步骤只能标记 passes: true，永不删除
     2. session_summaries 记录跨 session 的进度
     3. 自动生成进度摘要用于 Prompt 注入
@@ -181,7 +181,7 @@ class PlanMemory(BaseScopedMemory):
         """
         更新步骤状态（只能标记 passes: true，永不删除）（异步版本）
 
-        借鉴 autonomous-coding 的核心规则：
+        核心规则：
         - 步骤只能标记 passes: true
         - 永不删除或修改步骤描述
         - 添加 verified_at 时间戳
@@ -208,7 +208,7 @@ class PlanMemory(BaseScopedMemory):
         now = datetime.now().isoformat()
         step = steps[step_index]
 
-        # 只能标记为 true（借鉴 autonomous-coding）
+        # 只能标记为 true（核心规则：只增不删）
         if passes and not step.get("passes"):
             step["passes"] = True
             step["verified_at"] = now

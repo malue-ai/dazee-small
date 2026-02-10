@@ -20,7 +20,7 @@
 #   cloud    — 云端向量模型，需要 API Key，按量计费
 #
 semantic_search:
-  mode: disabled          # disabled | local | cloud
+  mode: local             # disabled | local | cloud — BGE-M3 Q4 GGUF (418MB, 已下载)
 
   # local 模式配置（mode 为 local 时生效）
   # 默认使用 BGE-M3 Q4 GGUF（1024 维，438MB，中英文双语，MIT 开源）
@@ -43,8 +43,8 @@ semantic_search:
 memory:
   enabled: true           # 是否启用用户记忆
   mem0_enabled: true      # 是否启用 Mem0 向量记忆
-  smart_retrieval: true   # 是否启用智能检索（语义相关性过滤）
-  retention_policy: user  # 记忆保留策略: user | session | project
+  # smart_retrieval: true   # [未实现] 智能检索（语义相关性过滤），代码未读取此配置
+  # retention_policy: user  # [未实现] 记忆保留策略，代码未读取此配置
 
 # ==================== 状态一致性（文件安全网）====================
 #

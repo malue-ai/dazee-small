@@ -182,7 +182,7 @@ class WindowsLocalNode(LocalNodeBase):
 
     async def _do_initialize(self) -> None:
         """Windows-specific initialization."""
-        # Resolve PowerShell path — clawdbot pattern: use %SystemRoot% path
+        # Resolve PowerShell path: use %SystemRoot% path
         self._powershell_path = self._resolve_powershell_path()
         logger.info(f"PowerShell 路径: {self._powershell_path}")
 
@@ -202,7 +202,7 @@ class WindowsLocalNode(LocalNodeBase):
         """
         Resolve PowerShell executable path from %SystemRoot%.
 
-        clawdbot pattern: check SystemRoot/WINDIR environment variable
+        Check SystemRoot/WINDIR environment variable
         to build the full path, falling back to bare 'powershell.exe'.
         """
         system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
@@ -381,7 +381,7 @@ class WindowsLocalNode(LocalNodeBase):
 
     async def clipboard_set(self, content: str) -> Dict[str, Any]:
         """
-        Set clipboard content with fallback chain (clawdbot pattern).
+        Set clipboard content with fallback chain.
 
         Attempts: clip.exe → PowerShell Set-Clipboard
         """

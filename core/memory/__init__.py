@@ -16,7 +16,7 @@ core/memory/
 ```
 
 术语说明：
-- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
+- Skill: 本地工作流技能（skills/library/）
 
 层级说明：
 - 会话级（Session）：WorkingMemory - 当前会话的消息和工具调用

@@ -1,8 +1,8 @@
 # 容错与弹性配置
 
 timeout:
-  # LLM 调用超时（秒）
-  llm_timeout: 60.0
+  # LLM 调用超时（秒）— Opus + Thinking 需要 3-5 分钟
+  llm_timeout: 300.0
   
   # 工具执行超时（秒）
   tool_timeout: 30.0
@@ -56,7 +56,7 @@ circuit_breaker:
 circuit_breakers:
   llm_service:
     failure_threshold: 5
-    timeout: 60.0
+    timeout: 300.0
   
   database_service:
     failure_threshold: 10

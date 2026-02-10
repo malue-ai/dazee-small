@@ -208,6 +208,47 @@ capabilities:
         description: 过滤文件类型（如 .md, .txt, .pdf）
     required: [query]
 
+- name: memory_recall
+  type: TOOL
+  subtype: NATIVE
+  provider: user
+  level: 1
+  implementation:
+    module: tools.memory_recall
+    class: MemoryRecallTool
+  capabilities:
+    - memory
+    - user_profile
+  priority: 70
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_network: false
+  metadata:
+    description: |
+      检索用户长期记忆（偏好、习惯、历史经验等）。
+      支持语义搜索和完整记忆档案读取。
+      当用户询问"你记住了什么"、"我的偏好"时使用。
+    cache_stable: false
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 搜索查询（自然语言）
+      mode:
+        type: string
+        enum: [search, full]
+        description: "search: 语义搜索；full: 读取完整记忆档案"
+        default: search
+      limit:
+        type: integer
+        description: 搜索模式下返回结果数量（默认 10）
+        default: 10
+    required: [query]
+
 - name: hitl
   type: TOOL
   subtype: CUSTOM

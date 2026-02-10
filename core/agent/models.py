@@ -80,7 +80,7 @@ class AgentSelectionResult(BaseModel):
     """
     Agent 选择结果
 
-    V7.9 新增：借鉴工具选择三级优化（V7.6）
+    V7.9 新增：工具选择三级优化（V7.6）
 
     封装 Agent 选择的完整决策过程，包括：
     - 三层候选记录（Config/Task/Capability）

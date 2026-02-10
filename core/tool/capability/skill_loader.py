@@ -1,6 +1,10 @@
 """
 Skill 内容加载器
 
+UNUSED: 此模块已从 __init__.py 导出但整个模块从未被业务代码调用。
+Skill 内容加载实际由 core/prompt/skill_prompt_builder.py 完成。
+保留代码供未来可能的渐进式加载重构参考。
+
 职责：
 1. 渐进式加载 SKILL.md 内容（Level 2）
 2. 加载资源文件（Level 3）

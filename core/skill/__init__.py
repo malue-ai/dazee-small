@@ -21,11 +21,8 @@ from core.skill.dynamic_loader import DynamicSkillLoader, SkillDependency, check
 from core.skill.group_registry import SkillGroupRegistry
 from core.skill.loader import SkillsLoader, create_skills_loader
 from core.skill.models import BackendType, DependencyLevel, SkillEntry, SkillStatus
-from core.skill.os_compatibility import (
-    CompatibilityResult,
-    CompatibilityStatus,
-    OSCompatibilityChecker,
-)
+from core.skill.os_compatibility import CompatibilityResult, CompatibilityStatus
+
 __all__ = [
     # Skills-First 核心
     "SkillsLoader",
@@ -36,7 +33,6 @@ __all__ = [
     "DependencyLevel",
     "SkillStatus",
     # OS 兼容性
-    "OSCompatibilityChecker",
     "CompatibilityResult",
     "CompatibilityStatus",
     # 动态加载

@@ -2,7 +2,7 @@
 """
 Nodes 通信协议定义
 
-对齐 clawdbot 的 Gateway 协议设计，定义节点间通信的数据结构。
+定义节点间通信的数据结构。
 """
 
 import uuid
@@ -16,7 +16,7 @@ class NodeCommand(Enum):
     """
     节点命令类型
 
-    对齐 clawdbot 的命令定义：
+    节点命令定义：
     - system.run: 执行 shell 命令
     - system.which: 检查可执行文件是否存在
     - system.notify: 发送系统通知
@@ -72,7 +72,7 @@ class NodeInvokeRequest:
     """
     节点调用请求
 
-    对齐 clawdbot 的 NodeInvokeRequestPayload
+    封装节点调用的请求参数
     """
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -103,7 +103,7 @@ class NodeInvokeResponse:
     """
     节点调用响应
 
-    对齐 clawdbot 的 NodeInvokeResultPayload
+    封装节点调用的响应结果
     """
 
     id: str
@@ -143,7 +143,7 @@ class ShellResult:
     """
     Shell 命令执行结果
 
-    对齐 clawdbot 的 ShellExecutor 返回结构
+    Shell 命令执行的标准返回结构
     """
 
     success: bool
@@ -188,7 +188,7 @@ class SystemRunParams:
     """
     system.run 命令参数
 
-    对齐 clawdbot 的 SystemRunParams
+    system.run 命令的标准参数结构
     """
 
     command: List[str]

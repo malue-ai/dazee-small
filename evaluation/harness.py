@@ -73,12 +73,22 @@ class EvaluationHarness:
             suites_dir: 评估套件目录
         """
         self.agent_factory = agent_factory
-        self.llm_service = llm_service
+        self._llm_service = llm_service
         self.suites_dir = Path(suites_dir)
         
         # 初始化评分器
         self.code_graders = CodeBasedGraders()
         self.model_graders = ModelBasedGraders(llm_service=llm_service)
+
+    @property
+    def llm_service(self):
+        return self._llm_service
+
+    @llm_service.setter
+    def llm_service(self, value):
+        """Sync LLM service to model_graders when updated (e.g. defer-grading)."""
+        self._llm_service = value
+        self.model_graders.llm = value
         
     # ===================
     # 套件加载
@@ -625,6 +635,16 @@ class EvaluationHarness:
                     transcript, optimal, max_accept
                 )
 
+        elif check.startswith("check_backtrack_occurred"):
+            import re
+            match = re.search(r"check_backtrack_occurred\((\d+)(?:,\s*(\d+))?\)", check)
+            if match:
+                min_count = int(match.group(1))
+                max_count = int(match.group(2)) if match.group(2) else 5
+                return self.code_graders.check_backtrack_occurred(
+                    transcript, min_count, max_count
+                )
+
         # 默认：未知的检查表达式
         return GradeResult(
             grader_type=GraderType.CODE,
@@ -792,21 +812,58 @@ class EvaluationHarness:
             result.grader_name = "grade_rollback_safety"
 
         else:
-            # 自定义 Rubric — 也传入上下文（避免信息丢失）
-            context_parts = [f"用例 ID: {task.id}", f"用例描述: {task.description}"]
-            if task.metadata and task.metadata.get("expected_behavior"):
-                context_parts.append(f"预期行为: {task.metadata['expected_behavior']}")
-            tool_calls = transcript.tool_calls if hasattr(transcript, 'tool_calls') else []
-            if tool_calls:
-                tool_names = [tc.name for tc in tool_calls if hasattr(tc, 'name')]
-                context_parts.append(f"工具调用链: {' → '.join(tool_names)} (共 {len(tool_names)} 次)")
-            custom_context = "\n".join(context_parts) if context_parts else None
+            # Check if rubric exists in judge_prompts.yaml (strict evaluation prompts)
+            yaml_prompt = self.model_graders._get_judge_prompt(rubric)
+            if yaml_prompt:
+                # Route through grade_response_quality with rubric_override
+                # This loads the full prompt from judge_prompts.yaml with test_cases.md context
+                task_context_parts = [
+                    f"用例 ID: {task.id}",
+                    f"用例描述: {task.description}",
+                ]
+                if task.metadata:
+                    if task.metadata.get("expected_behavior"):
+                        task_context_parts.append(f"预期行为: {task.metadata['expected_behavior']}")
+                    for k, v in task.metadata.items():
+                        if k not in ("expected_behavior", "multi_turn_sequence"):
+                            task_context_parts.append(f"{k}: {v}")
+                tool_calls = transcript.tool_calls if hasattr(transcript, 'tool_calls') else []
+                if tool_calls:
+                    tool_names = [tc.name for tc in tool_calls if hasattr(tc, 'name')]
+                    task_context_parts.append(
+                        f"工具调用链: {' → '.join(tool_names)} (共 {len(tool_names)} 次)"
+                    )
+                if hasattr(transcript, 'token_usage') and transcript.token_usage:
+                    tu = transcript.token_usage
+                    task_context_parts.append(
+                        f"Token 消耗: input={getattr(tu, 'input_tokens', 0):,}, "
+                        f"output={getattr(tu, 'output_tokens', 0):,}"
+                    )
+                task_context = "\n".join(task_context_parts)
 
-            result = await self.model_graders.grade_with_custom_rubric(
-                content=transcript.get_final_response() or "",
-                rubric=rubric,
-                context={"task_context": custom_context} if custom_context else None,
-            )
+                result = await self.model_graders.grade_response_quality(
+                    user_query=effective_user_query,
+                    agent_response=transcript.get_final_response() or "",
+                    context=task_context,
+                    rubric_override=rubric,
+                )
+                result.grader_name = rubric
+            else:
+                # Fallback: unknown rubric — use generic custom rubric
+                context_parts = [f"用例 ID: {task.id}", f"用例描述: {task.description}"]
+                if task.metadata and task.metadata.get("expected_behavior"):
+                    context_parts.append(f"预期行为: {task.metadata['expected_behavior']}")
+                tool_calls = transcript.tool_calls if hasattr(transcript, 'tool_calls') else []
+                if tool_calls:
+                    tool_names = [tc.name for tc in tool_calls if hasattr(tc, 'name')]
+                    context_parts.append(f"工具调用链: {' → '.join(tool_names)} (共 {len(tool_names)} 次)")
+                custom_context = "\n".join(context_parts) if context_parts else None
+
+                result = await self.model_graders.grade_with_custom_rubric(
+                    content=transcript.get_final_response() or "",
+                    rubric=rubric,
+                    context={"task_context": custom_context} if custom_context else None,
+                )
         
         # Model grader quality gate:
         # - task_completed=false AND score < 0.4 (2.0/5.0) → passed=False

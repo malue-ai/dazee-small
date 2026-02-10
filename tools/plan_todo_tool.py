@@ -75,6 +75,31 @@ class PlanTool(BaseTool):
             self._conversation_service = ConversationService()
         return self._conversation_service
 
+    def _ensure_progress_transformer(self, context: "ToolContext") -> None:
+        """
+        Lazy-init ProgressTransformer from ToolContext.event_manager.
+
+        Design:
+        - ToolExecutor instantiates PlanTool() with no args (generic tool loading)
+        - First time _update is called, we build ProgressTransformer from context
+        - This follows the same lazy pattern as _get_service()
+        """
+        if self._progress_transformer is not None:
+            return  # Already initialized (externally injected or previously built)
+
+        if not context or not context.event_manager:
+            return  # No event_manager available, progress notifications disabled
+
+        try:
+            from core.events.broadcaster import EventBroadcaster
+            from core.planning.progress_transformer import ProgressTransformer
+
+            broadcaster = EventBroadcaster(context.event_manager)
+            self._progress_transformer = ProgressTransformer(broadcaster=broadcaster)
+            logger.debug("ProgressTransformer lazy-initialized from ToolContext.event_manager")
+        except Exception as e:
+            logger.warning(f"ProgressTransformer 初始化失败（进度通知不可用）: {e}")
+
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         action = params.get("action")
 
@@ -160,6 +185,7 @@ class PlanTool(BaseTool):
         logger.info(f"📝 步骤更新: {todo_id} -> {status}")
 
         # V12: 触发 ProgressTransformer 发送友好进度通知（架构 3.5.4）
+        self._ensure_progress_transformer(context)
         if self._progress_transformer and context.session_id:
             try:
                 completed_count = sum(

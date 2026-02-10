@@ -672,7 +672,10 @@ class RVRExecutor(BaseExecutor):
             if context.context_strategy
             else 180000
         )
-        safe_threshold = token_budget - 10000
+        # Proactive trimming: trigger at 70% of budget (not 94%)
+        # Old: budget - 10K = 170K for 180K → too late, context explodes first
+        # New: budget * 0.7 = 126K → trim early, prevent runaway accumulation
+        safe_threshold = int(token_budget * 0.7)
 
         # 进入循环前检查并裁剪上下文
         llm_messages = self._trim_messages_if_needed(
@@ -685,15 +688,15 @@ class RVRExecutor(BaseExecutor):
             # 每轮调用 LLM 前刷新 Plan 注入（Plan 可能在上一轮工具调用中被更新）
             llm_messages = _refresh_plan_injection(llm_messages, inject_errors=(turn == 0))
 
-            # 每轮开始时检查上下文长度
-            if turn > 0:
-                llm_messages = self._trim_messages_if_needed(
-                    llm_messages,
-                    system_prompt_text,
-                    safe_threshold,
-                    context.context_strategy,
-                    turn=turn,
-                )
+            # 每轮开始时检查上下文长度（AFTER plan injection, so plan tokens are counted）
+            # Always check, not just turn > 0 — plan injection can push over budget
+            llm_messages = self._trim_messages_if_needed(
+                llm_messages,
+                system_prompt_text,
+                safe_threshold,
+                context.context_strategy,
+                turn=turn,
+            )
 
             ctx.next_turn()
             ctx.touch_activity()  # 更新活动时间（用于 idle_timeout 检测）

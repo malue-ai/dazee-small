@@ -51,7 +51,7 @@ def _current_os_key() -> str:
     return "linux"
 
 
-class OSCompatibilityChecker:
+class OSCompatibilityChecker:  # UNUSED: 已从 __init__.py 导出移除，未被业务代码实例化
     """
     OS 兼容性检查器
 

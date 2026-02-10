@@ -54,6 +54,57 @@ def _should_skip(messages: List[Dict]) -> str:
     return ""
 
 
+async def _load_full_conversation(conversation_id: str) -> List[Dict]:
+    """Load full conversation messages from DB for memory extraction.
+
+    Returns list of {"role": "user"/"assistant", "content": str} dicts.
+    Returns empty list on failure (caller falls back to single-turn).
+    """
+    if not conversation_id:
+        return []
+    try:
+        import json
+        from services.conversation_service import ConversationService
+        svc = ConversationService()
+        result = await svc.get_conversation_messages(
+            conversation_id=conversation_id, limit=100, order="asc"
+        )
+        raw_msgs = result.get("messages", [])
+        messages = []
+        for m in raw_msgs:
+            role = m.get("role", "")
+            if role not in ("user", "assistant"):
+                continue
+            # content is stored as JSON array of blocks; extract text parts
+            content_raw = m.get("content", "")
+            if isinstance(content_raw, str):
+                try:
+                    blocks = json.loads(content_raw)
+                    if isinstance(blocks, list):
+                        text_parts = [
+                            b.get("text", "") for b in blocks
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        ]
+                        content = "\n".join(text_parts)
+                    else:
+                        content = content_raw
+                except (json.JSONDecodeError, TypeError):
+                    content = content_raw
+            else:
+                content = str(content_raw)
+            if content.strip():
+                messages.append({"role": role, "content": content})
+        if messages:
+            logger.info(
+                f"Loaded {len(messages)} messages from conversation "
+                f"{conversation_id[:8]}... for memory flush"
+            )
+        return messages
+    except Exception as e:
+        logger.warning(f"Failed to load conversation history: {e}")
+        return []
+
+
 @background_task("memory_flush")
 async def memory_flush_task(
     ctx: "TaskContext", service: "BackgroundTaskService"
@@ -68,12 +119,16 @@ async def memory_flush_task(
         logger.debug("Skipping memory flush (no user_id or session_id)")
         return
 
-    # Build full conversation messages from context
-    messages = []
-    if ctx.user_message:
-        messages.append({"role": "user", "content": ctx.user_message})
-    if ctx.assistant_response:
-        messages.append({"role": "assistant", "content": ctx.assistant_response})
+    # Load FULL conversation history (not just last turn).
+    # This is critical: if user discusses style preferences in turn 1 but turn 2
+    # is just "write an article", flush from only turn 2 misses the style info.
+    messages = await _load_full_conversation(ctx.conversation_id)
+    if not messages:
+        # Fallback to single-turn context if DB load fails
+        if ctx.user_message:
+            messages.append({"role": "user", "content": ctx.user_message})
+        if ctx.assistant_response:
+            messages.append({"role": "assistant", "content": ctx.assistant_response})
 
     # Quick pre-filter: skip trivial conversations
     skip_reason = _should_skip(messages)
@@ -84,9 +139,28 @@ async def memory_flush_task(
     try:
         from core.memory.instance_memory import InstanceMemoryManager
 
+        # Read memory config from instance config (respects memory.yaml settings)
+        _memory_enabled = True
+        _mem0_enabled = True
+        try:
+            import os
+            import yaml
+            from utils.app_paths import get_instances_dir
+            _inst = os.getenv("AGENT_INSTANCE", "default")
+            _mem_cfg_path = get_instances_dir() / _inst / "config" / "memory.yaml"
+            if _mem_cfg_path.exists():
+                with open(_mem_cfg_path) as _f:
+                    _mem_cfg = yaml.safe_load(_f) or {}
+                _memory_section = _mem_cfg.get("memory", {})
+                _memory_enabled = _memory_section.get("enabled", True)
+                _mem0_enabled = _memory_section.get("mem0_enabled", True)
+        except Exception:
+            pass  # Fallback to defaults
+
         mgr = InstanceMemoryManager(
             user_id=ctx.user_id,
-            mem0_enabled=True,
+            mem0_enabled=_mem0_enabled,
+            enabled=_memory_enabled,
         )
 
         await mgr.flush(ctx.session_id, messages)

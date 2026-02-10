@@ -528,6 +528,7 @@ class RuntimeContext:
     # === 结果状态 ===
     final_result: Optional[str] = None  # 最终结果
     stop_reason: Optional[str] = None  # 停止原因
+    finish_reason: Optional[str] = None  # 结构化终止原因（FinishReason 枚举值）
     last_llm_response: Optional[Any] = None  # 最后一次 LLM 响应（用于 RVR 循环判断工具调用）
 
     # === 时间戳 ===
@@ -658,6 +659,7 @@ class RuntimeContext:
         self.total_backtrack_tokens = 0
         self.final_result = None
         self.stop_reason = None
+        self.finish_reason = None
         now = datetime.now()
         self.start_time = now
         self.last_activity_time = now
@@ -701,6 +703,7 @@ class RuntimeContext:
             "accumulated_thinking_length": len(self.accumulator.get_thinking_content()),
             "is_completed": self.is_completed(),
             "stop_reason": self.stop_reason,
+            "finish_reason": self.finish_reason,
         }
 
 

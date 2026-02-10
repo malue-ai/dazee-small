@@ -2,7 +2,7 @@
 """
 Nodes 工具 - 本地/远程节点操作
 
-借鉴 clawdbot 的 nodes 工具设计，提供统一的节点操作接口：
+提供统一的节点操作接口：
 - status: 列出所有节点状态
 - describe: 获取节点详细信息
 - run: 在节点上执行命令
@@ -24,7 +24,7 @@ class NodesTool(BaseTool):
     """
     Nodes 工具 - 发现、管理和操作本地/远程节点
 
-    对齐 clawdbot 的 nodes 工具设计
+    统一的节点操作工具
     """
 
     def __init__(self, node_manager: Optional[NodeManager] = None):

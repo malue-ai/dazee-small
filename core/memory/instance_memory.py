@@ -76,6 +76,7 @@ class InstanceMemoryManager:
         user_id: str = "default",
         mem0_enabled: bool = True,
         instance_name: Optional[str] = None,
+        enabled: bool = True,
     ):
         """
         Args:
@@ -83,10 +84,13 @@ class InstanceMemoryManager:
             user_id: 用户标识（Mem0 隔离用）
             mem0_enabled: 是否启用 Mem0 智能层
             instance_name: 实例名称（用于按实例隔离存储路径）
+            enabled: 是否启用记忆功能（False 时 recall/remember/flush 全部跳过）
         """
         import os
 
         from core.memory.markdown_layer import MarkdownMemoryLayer
+
+        self._enabled = enabled
 
         if base_dir:
             self._base_dir = Path(base_dir)
@@ -138,6 +142,9 @@ class InstanceMemoryManager:
         Returns:
             [{"content": str, "score": float, "source": str, "category": str}, ...]
         """
+        if not self._enabled:
+            return []
+
         results: List[Dict[str, Any]] = []
 
         # Layer 2: FTS5 full-text search (weight 1.0)
@@ -188,6 +195,9 @@ class InstanceMemoryManager:
             category: 分类（preference/fact/workflow/style/general）
             project_id: 项目 ID（可选）
         """
+        if not self._enabled:
+            return
+
         if not content or not content.strip():
             return
 
@@ -274,6 +284,9 @@ class InstanceMemoryManager:
             session_id: 会话 ID
             messages: 本次对话消息列表
         """
+        if not self._enabled:
+            return
+
         if not messages:
             return
 
@@ -306,10 +319,92 @@ class InstanceMemoryManager:
         """
         读取 MEMORY.md 全文（供系统提示词注入）
 
+        Side effect: triggers FTS5 sync if file has changed since last index.
+
         Returns:
             MEMORY.md 的完整 Markdown 内容
         """
-        return await self._file_layer.read_global_memory()
+        content = await self._file_layer.read_global_memory()
+
+        # Opportunistic sync: re-index if MEMORY.md changed externally
+        await self._sync_markdown_to_fts5(content)
+
+        return content
+
+    # ==================== MEMORY.md → FTS5 sync ====================
+
+    _last_md_hash: str = ""
+
+    async def _sync_markdown_to_fts5(self, md_content: str) -> None:
+        """
+        Detect if MEMORY.md was externally edited and re-index to FTS5.
+
+        Uses a simple content hash to detect changes.
+        Only re-indexes when the hash differs from last sync.
+        Uses a SINGLE session for all writes (pool_size=1 safe).
+        """
+        if not md_content or not self._enabled:
+            return
+
+        import hashlib
+        current_hash = hashlib.md5(md_content.encode()).hexdigest()
+
+        if current_hash == self._last_md_hash:
+            return  # No changes
+
+        self._last_md_hash = current_hash
+
+        # Parse entries and batch-index in a single session
+        try:
+            entries = self._file_layer._parse_memory_entries(
+                md_content, "MEMORY.md"
+            )
+            if not entries:
+                return
+
+            await self._ensure_fts()
+            if not self._fts_initialized:
+                return
+
+            import uuid
+
+            indexed = 0
+            async with await self._get_fts_session() as session:
+                for entry in entries:
+                    # Skip template placeholders
+                    if entry.content.startswith("（") and entry.content.endswith("）"):
+                        continue
+                    entry_id = f"mem_{uuid.uuid4().hex[:12]}"
+                    category = self._section_to_category(entry.section)
+                    section = _SECTION_MAP.get(category, "")
+                    await self._fts.upsert(
+                        session,
+                        self._fts_config,
+                        doc_id=entry_id,
+                        title=section,
+                        content=entry.content,
+                        category=category,
+                        source="md_sync",
+                    )
+                    indexed += 1
+                await session.commit()
+
+            if indexed > 0:
+                logger.info(
+                    f"MEMORY.md → FTS5 同步完成: {indexed} 条条目已索引"
+                )
+
+        except Exception as e:
+            logger.warning(f"MEMORY.md → FTS5 同步失败（非致命）: {e}")
+
+    @staticmethod
+    def _section_to_category(section: str) -> str:
+        """Map MEMORY.md section name back to category."""
+        section_lower = section.lower()
+        for cat, sec in _SECTION_MAP.items():
+            if sec.lower() in section_lower or section_lower in sec.lower():
+                return cat
+        return "general"
 
     # ==================== Layer 2: FTS5 内部方法 ====================
 
@@ -351,9 +446,15 @@ class InstanceMemoryManager:
             # Dedicated DB for memory FTS5 — uses instance store directory
             # self._base_dir is already instance-scoped
             # Put FTS5 in sibling "store/" directory
+            #
+            # NullPool: 避免 aiosqlite + QueuePool(size=1) 在 async
+            # 上下文切换时连接未归还导致的死锁。
+            # SQLite WAL 模式保证并发读写安全。
+            # 参考: https://www.sqlite.org/wal.html
             fts_db_dir = str(self._base_dir.parent / "store")
             engine = create_local_engine(
-                db_dir=fts_db_dir, db_name="memory_fts.db"
+                db_dir=fts_db_dir, db_name="memory_fts.db",
+                use_null_pool=True,
             )
             self._fts_engine = engine
             self._fts_session_factory = None  # lazy
@@ -378,6 +479,11 @@ class InstanceMemoryManager:
             )
         return self._fts_session_factory()
 
+    @staticmethod
+    def _strip_fts5_highlight(text: str) -> str:
+        """Strip HTML highlight tags from FTS5 snippets."""
+        return re.sub(r"</?b>", "", text) if "<b>" in text else text
+
     async def _fts5_recall(
         self, query: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
@@ -393,7 +499,9 @@ class InstanceMemoryManager:
                 )
                 return [
                     {
-                        "content": h.snippet or h.title,
+                        "content": self._strip_fts5_highlight(
+                            h.snippet or h.title
+                        ),
                         "score": abs(h.rank) if h.rank else 0.0,
                         "category": h.extra.get("category", "general"),
                     }

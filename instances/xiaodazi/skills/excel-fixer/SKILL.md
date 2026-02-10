@@ -150,9 +150,34 @@ def auto_fix(file_path):
     return df, report
 ```
 
+### 6. 分类列文本标准化（必须执行）
+
+```python
+def standardize_categories(df, columns):
+    """对分类列做文本标准化，合并近似重复值"""
+    for col in columns:
+        if col not in df.columns:
+            continue
+        # 去首尾空格
+        df[col] = df[col].astype(str).str.strip()
+        # 检测近似重复（如 "华东" vs "华东地区"）
+        unique_vals = df[col].unique()
+        for v1 in unique_vals:
+            for v2 in unique_vals:
+                if v1 != v2 and (v1 in v2 or v2 in v1):
+                    # 合并为较短的值（更通用）
+                    shorter = v1 if len(v1) <= len(v2) else v2
+                    longer = v2 if shorter == v1 else v1
+                    df[col] = df[col].replace(longer, shorter)
+                    print(f"  合并: '{longer}' → '{shorter}'")
+    return df
+```
+
 ## 输出规范
 
 - 修复前先展示检测到的问题清单
 - 重大修改（如删除行/列）需要 HITL 确认
 - 修复后保存为新文件（不覆盖原文件）
 - 展示修复报告：修了什么、修了多少
+- **必须打印清洗后行数**：让用户（和校验系统）确认没有误删数据
+- **分类列必须标准化**：合并近似重复值（如"华东"/"华东地区"）

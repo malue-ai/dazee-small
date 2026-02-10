@@ -5,7 +5,7 @@
 
 设计原则：
 1. 环境信息由框架自动检测，用户无需在 prompt.md 硬编码
-2. 借鉴 clawdbot 的 buildAgentSystemPrompt 设计
+2. 自动构建系统提示词中的环境上下文片段
 3. 支持 macOS / Linux / Windows
 
 使用方式（异步）：

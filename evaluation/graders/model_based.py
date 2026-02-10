@@ -90,19 +90,9 @@ class ModelBasedGraders:
                 self._test_cases_doc = ""
 
         prompt = self._judge_prompts.get(name)
-        if prompt and getattr(self, "_test_cases_doc", ""):
-            # Append test cases as reference context
-            prompt += f"""
-
-  ## 参考文档：完整测试用例定义
-
-  以下是测试用例的完整定义，包含每个用例的预期行为、量化指标、
-  技术验证点和对比基线。请对照评估。
-
-  <test_cases_reference>
-  {self._test_cases_doc}
-  </test_cases_reference>
-"""
+        # NOTE: test_cases.md injection disabled — the rubric prompts are self-contained
+        # and injecting 2600 lines bloats every grading call to 100K+ tokens,
+        # causing Connection errors on large payloads.
         return prompt
         
     async def _call_judge(
@@ -169,6 +159,14 @@ class ModelBasedGraders:
                     result = parsed
                 else:
                     result = json.loads(response_text)
+
+                # Ensure numeric types — Opus sometimes returns "4" instead of 4
+                for key in ("score", "overall_score", "weighted_score", "confidence"):
+                    if key in result and isinstance(result[key], str):
+                        try:
+                            result[key] = float(result[key])
+                        except (ValueError, TypeError):
+                            pass
 
                 if include_confidence and "confidence" not in result:
                     score = result.get("score", 3)

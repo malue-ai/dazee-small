@@ -39,6 +39,25 @@ async def update_mem0_memories_task(ctx: "TaskContext", service: "BackgroundTask
         logger.debug("○ 跳过 Mem0 更新（无用户 ID）")
         return
 
+    # Check mem0_enabled config before proceeding
+    try:
+        import os
+        import yaml
+        from utils.app_paths import get_instances_dir
+        _inst = os.getenv("AGENT_INSTANCE", "default")
+        _cfg_path = get_instances_dir() / _inst / "config" / "memory.yaml"
+        if _cfg_path.exists():
+            with open(_cfg_path) as _f:
+                _mem_section = (yaml.safe_load(_f) or {}).get("memory", {})
+            if not _mem_section.get("mem0_enabled", True):
+                logger.debug("○ 跳过 Mem0 更新（mem0_enabled=false）")
+                return
+            if not _mem_section.get("enabled", True):
+                logger.debug("○ 跳过 Mem0 更新（memory.enabled=false）")
+                return
+    except Exception:
+        pass  # Fallback: continue with update
+
     await update_user_memories(
         user_id=ctx.user_id,
         since_hours=24,

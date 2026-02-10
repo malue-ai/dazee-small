@@ -28,7 +28,7 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 
-class PlanStorage:
+class PlanStorage:  # UNUSED: plans stored in Conversation.metadata.plan via PlanTodoTool
     """
     Plan 存储层
 

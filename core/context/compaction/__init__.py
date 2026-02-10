@@ -323,6 +323,12 @@ _TOOL_RESULT_TRUNCATE_THRESHOLD = 300
 _TOOL_RESULT_KEEP_HEAD = 150
 _TOOL_RESULT_KEEP_TAIL = 80
 
+# Immediate compression threshold for fresh tool results (before appending to messages)
+# This prevents recent large tool_results from bloating context
+_IMMEDIATE_COMPRESS_THRESHOLD = 1500
+_IMMEDIATE_KEEP_HEAD = 500
+_IMMEDIATE_KEEP_TAIL = 200
+
 
 def _compress_tool_result_content(content: Any) -> Any:
     """
@@ -370,6 +376,35 @@ def _compress_tool_result_content(content: Any) -> Any:
         return compressed
 
     return content
+
+
+def compress_fresh_tool_result(content: str) -> str:
+    """Compress a fresh tool result BEFORE appending to messages.
+
+    Unlike _compress_old_tool_results (which only handles old messages),
+    this compresses immediately — preventing large tool outputs from
+    bloating context from the start.
+
+    Threshold: 1500 chars (vs 300 for old messages).
+    Keeps more context (head=500 + tail=200) since this is recent/relevant.
+
+    Args:
+        content: Raw tool result string.
+
+    Returns:
+        Compressed string if over threshold, original otherwise.
+    """
+    if not isinstance(content, str):
+        return content
+    if len(content) <= _IMMEDIATE_COMPRESS_THRESHOLD:
+        return content
+
+    omitted = len(content) - _IMMEDIATE_KEEP_HEAD - _IMMEDIATE_KEEP_TAIL
+    return (
+        content[:_IMMEDIATE_KEEP_HEAD]
+        + f"\n\n... (已省略 {omitted:,} 字符，完整结果已保存) ...\n\n"
+        + content[-_IMMEDIATE_KEEP_TAIL:]
+    )
 
 
 def _compress_old_tool_results(

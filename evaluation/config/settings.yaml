@@ -58,7 +58,7 @@ graders:
     temperature: 1            # Claude requires temperature=1 when thinking is enabled
     enable_thinking: true
     thinking_budget: 8192
-    timeout: 120.0
+    timeout: 300.0  # Opus 4.6 + Thinking + 50K input needs ~4-8 min per eval
     # 评估提示词：evaluation/config/judge_prompts.yaml
     # 评分结果仅供参考，不作为自动化闸门
   

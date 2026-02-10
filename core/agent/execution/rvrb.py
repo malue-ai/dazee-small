@@ -325,7 +325,7 @@ class RVRBExecutor(RVRExecutor):
         state.record_failed_approach(
             tool_name=tool_name,
             approach=approach_desc,
-            reason=classified_error.message[:100] if classified_error.message else str(error)[:100],
+            reason=classified_error.suggested_action[:100] if classified_error.suggested_action else str(error)[:100],
         )
 
         # 基础设施层错误不需要回溯
@@ -428,12 +428,19 @@ class RVRBExecutor(RVRExecutor):
                     tool_name, tool_input, state, tool_executor, tool_selector
                 )
                 if alt_result:
-                    state.record_execution(f"backtrack:tool_replace", True, alt_result)
+                    state.record_execution("backtrack:tool_replace", True, alt_result)
                     return alt_result, False, backtrack_event
+                # 替代工具查找失败（或未配置 tool_selector），
+                # fall through 让 LLM 自行决策替代方案
 
-            # 其他回溯类型：返回错误信息，让 LLM 决定下一步
+            # 回溯信息返回给 LLM，引导其自行调整策略
+            backtrack_info = backtrack_result.to_dict()
+            if backtrack_result.backtrack_type == BacktrackType.TOOL_REPLACE:
+                backtrack_info["hint"] = (
+                    f"工具 {tool_name} 执行失败，请选择其他工具或方法完成当前任务。"
+                )
             result_content = stable_json_dumps(
-                {"error": str(error), "backtrack": backtrack_result.to_dict()}
+                {"error": str(error), "backtrack": backtrack_info}
             )
             return result_content, True, backtrack_event
 
@@ -520,6 +527,10 @@ class RVRBExecutor(RVRExecutor):
             return None
 
         if not tool_selector or not hasattr(tool_selector, "get_alternative_tools"):
+            logger.info(
+                f"⚠️ TOOL_REPLACE 降级: tool_selector 未配置，"
+                f"跳过替代工具查找，将错误信息返回给 LLM 自行决策"
+            )
             return None
 
         alternatives = tool_selector.get_alternative_tools(failed_tool)
@@ -1030,6 +1041,22 @@ class RVRBExecutor(RVRExecutor):
 
                     if decision.should_stop:
                         ctx.stop_reason = decision.reason or "terminator"
+                        # 记录结构化终止原因到 RuntimeContext（供后续分析和前端展示）
+                        if decision.finish_reason:
+                            ctx.finish_reason = decision.finish_reason.value
+
+                        # --- FinishReason 处理路由 ---
+                        # COMPLETED / AGENT_DECISION / USER_STOP / USER_ABORT:
+                        #   正常停止，直接 break
+                        # MAX_TURNS / MAX_DURATION / IDLE_TIMEOUT:
+                        #   安全兜底，直接 break
+                        # HITL_CONFIRM:
+                        #   已在工具执行前拦截处理（line 693-751），此处不需要额外分支
+                        # CONSECUTIVE_FAILURES:
+                        #   推送 ROLLBACK_OPTIONS（下方处理）
+                        # BACKTRACK_EXHAUSTED / INTENT_CLARIFY / COST_LIMIT / LONG_RUNNING_CONFIRM:
+                        #   ASK_USER 类型，在 should_stop=False 分支处理（下方）
+
                         # V11.1: 连续失败 → 推送回滚选项（事件类型对齐前端）
                         if decision.action == TerminationAction.ROLLBACK_OPTIONS:
                             _state_mgr = (context.extra or {}).get("state_manager")
@@ -1323,11 +1350,17 @@ class RVRBExecutor(RVRExecutor):
                 content={"tool_use_id": tool_id, "content": result_content, "is_error": is_error},
             )
 
+            # Immediate compression: prevent large tool outputs from bloating context
+            from core.context.compaction import compress_fresh_tool_result
+            compressed_content = (
+                compress_fresh_tool_result(result_content)
+                if isinstance(result_content, str) else result_content
+            )
             tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
-                    "content": result_content,
+                    "content": compressed_content,
                     "is_error": is_error,
                 }
             )
@@ -1456,17 +1489,25 @@ class RVRBExecutor(RVRExecutor):
                     runtime_ctx=ctx,
                 )
 
+            # Immediate compression (non-stream path, same as stream)
+            from core.context.compaction import compress_fresh_tool_result
+            compressed_content = (
+                compress_fresh_tool_result(result_content)
+                if isinstance(result_content, str) else result_content
+            )
             tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
-                    "content": result_content,
+                    "content": compressed_content,
                     "is_error": is_error,
                 }
             )
 
         if tool_results:
-            append_user_message(llm_messages, tool_results)
+            # Context Pollution 清理（与 stream 版本对齐）
+            cleaned_results = self._clean_backtrack_results(tool_results, state)
+            append_user_message(llm_messages, cleaned_results)
 
         # HITL pending 检测（non-stream 版本，逻辑与 stream 版本一致）
         for _tr in tool_results:
