@@ -8,6 +8,20 @@ Build: 2026-01-16 v2
 import os
 import sys
 import asyncio
+
+# ==================== Windows 编码修复 ====================
+# PyInstaller 打包后在中文 Windows 上，stdout/stderr 默认用 GBK 编码，
+# 无法输出 emoji 字符（如 🔌🚀✅），会导致 UnicodeEncodeError 崩溃。
+# 必须在任何 logging/print 之前执行。
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    try:
+        if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
