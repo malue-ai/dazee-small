@@ -23,14 +23,14 @@
         <!-- 内容区 -->
         <div class="p-8 space-y-6 overflow-y-auto flex-1">
           <!-- 问题内容 -->
-          <div class="text-lg text-foreground font-medium leading-relaxed whitespace-pre-wrap">
+          <div class="text-lg text-foreground font-medium leading-relaxed whitespace-pre-wrap break-words">
             {{ request?.question }}
           </div>
           
           <!-- 描述 -->
           <div 
             v-if="request?.description" 
-            class="text-sm text-muted-foreground bg-accent p-4 rounded-xl border border-primary/30 leading-relaxed"
+            class="text-sm text-muted-foreground bg-accent p-4 rounded-xl border border-primary/30 leading-relaxed break-all"
           >
             {{ request.description }}
           </div>
