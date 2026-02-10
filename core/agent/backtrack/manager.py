@@ -248,27 +248,28 @@ class BacktrackManager:
             return self._rule_based_decide(ctx)
 
     def _rule_based_decide(self, ctx: BacktrackContext) -> BacktrackResult:
-        """基于规则的决策（当 LLM 不可用时）"""
-        error = ctx.error
+        """
+        Conservative fallback when LLM is unavailable.
 
-        # 根据错误建议的回溯类型决策
-        backtrack_type = error.backtrack_type
+        Uses PARAM_ADJUST as the safest default (least disruptive).
+        If PARAM_ADJUST was already tried for this step, escalates
+        via the deterministic escalation path.
+        """
+        backtrack_type = BacktrackType.PARAM_ADJUST
 
-        # 检查是否已经尝试过相同的策略
+        # Escalate if this strategy already failed for the current step
         strategy_key = f"{backtrack_type.value}_{ctx.current_step_index}"
         if strategy_key in ctx.failed_strategies:
-            # 升级到更重的回溯策略
             backtrack_type = self._escalate_backtrack_type(backtrack_type)
 
-        # 构建具体操作
         action = self._build_action(backtrack_type, ctx)
 
         return BacktrackResult(
             decision=BacktrackDecision.BACKTRACK,
             backtrack_type=backtrack_type,
             action=action,
-            reason=error.suggested_action,
-            confidence=error.confidence,
+            reason="LLM 不可用，使用保守回溯策略",
+            confidence=0.4,
         )
 
     def _escalate_backtrack_type(self, current_type: BacktrackType) -> BacktrackType:

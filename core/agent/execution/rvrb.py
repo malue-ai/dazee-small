@@ -21,6 +21,8 @@ RVRBExecutor - RVR-B 执行策略
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
+import yaml
+
 from core.agent.backtrack import (
     BacktrackContext,
     BacktrackDecision,
@@ -229,13 +231,38 @@ class RVRBExecutor(RVRExecutor):
             del self._rvrb_states[session_id]
 
     # ==================== 断路器：重复工具调用检测 ====================
+    # Thresholds loaded from config/resilience.yaml → agent_circuit_breaker
+    # Fallback defaults if config unavailable
 
-    # 复杂度 → 软轮次限制（超过后注入 wrap-up 指令并移除工具，强制文本回复）
-    _SOFT_TURN_LIMITS = {"simple": 5, "medium": 15, "complex": 30}
-    # 同一工具连续调用 N 次触发断路
-    _CONSECUTIVE_SAME_TOOL_LIMIT = 3
-    # 强制文本回复后仍调用工具 → 硬停止
-    _FORCE_TEXT_HARD_STOP = 2
+    @staticmethod
+    def _load_agent_circuit_breaker_config() -> dict:
+        """Load agent circuit breaker config from resilience.yaml (sync, cached)."""
+        if not hasattr(RVRBExecutor, "_cb_config_cache"):
+            from utils.app_paths import get_bundle_dir
+
+            path = get_bundle_dir() / "config" / "resilience.yaml"
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                RVRBExecutor._cb_config_cache = cfg.get("agent_circuit_breaker", {})
+            except Exception:
+                RVRBExecutor._cb_config_cache = {}
+        return RVRBExecutor._cb_config_cache
+
+    @property
+    def _SOFT_TURN_LIMITS(self) -> dict:
+        cb = self._load_agent_circuit_breaker_config()
+        return cb.get("soft_turn_limits", {"simple": 5, "medium": 15, "complex": 30})
+
+    @property
+    def _CONSECUTIVE_SAME_TOOL_LIMIT(self) -> int:
+        cb = self._load_agent_circuit_breaker_config()
+        return cb.get("consecutive_same_tool_limit", 3)
+
+    @property
+    def _FORCE_TEXT_HARD_STOP(self) -> int:
+        cb = self._load_agent_circuit_breaker_config()
+        return cb.get("force_text_hard_stop", 2)
 
     def _check_circuit_breaker(
         self,

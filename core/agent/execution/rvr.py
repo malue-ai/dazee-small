@@ -39,6 +39,16 @@ from utils.message_utils import (
     messages_to_dict_list,
 )
 
+# ── Plan enforcement constants ─────────────────────────────
+# Single source of truth for plan tool name and enforcement prompt.
+# If the tool is renamed, change only here.
+PLAN_TOOL_NAME = "plan"
+PLAN_CREATE_ACTION = "create"
+PLAN_ENFORCEMENT_REMINDER = (
+    "[SYSTEM] 你必须先创建执行计划，再执行其他工具。"
+    "请立即调用 plan(action=\"create\") 创建 Plan。"
+)
+
 if TYPE_CHECKING:
     from core.context.runtime import RuntimeContext
     from core.events.broadcaster import EventBroadcaster
@@ -771,12 +781,7 @@ class RVRExecutor(BaseExecutor):
                                         {
                                             "type": "tool_result",
                                             "tool_use_id": tc["id"],
-                                            "content": (
-                                                "[SYSTEM] 强制要求：你必须先调用 "
-                                                'plan(action="create") '
-                                                "创建执行计划，再执行其他工具。"
-                                                "请立即创建 Plan。"
-                                            ),
+                                            "content": PLAN_ENFORCEMENT_REMINDER,
                                             "is_error": True,
                                         }
                                     )
@@ -939,12 +944,7 @@ class RVRExecutor(BaseExecutor):
                                     {
                                         "type": "tool_result",
                                         "tool_use_id": tc["id"],
-                                        "content": (
-                                            "[SYSTEM] 强制要求：你必须先调用 "
-                                            'plan(action="create") '
-                                            "创建执行计划，再执行其他工具。"
-                                            "请立即创建 Plan。"
-                                        ),
+                                        "content": PLAN_ENFORCEMENT_REMINDER,
                                         "is_error": True,
                                     }
                                 )
@@ -1122,16 +1122,16 @@ class RVRExecutor(BaseExecutor):
             True if the first tool call is plan(action="create"), False otherwise.
         """
         first_tool_name = tool_calls[0].get("name", "")
-        if first_tool_name == "plan":
+        if first_tool_name == PLAN_TOOL_NAME:
             first_action = tool_calls[0].get("input", {}).get("action", "")
-            if first_action == "create":
-                logger.info("✅ 阶段 5 验证通过: 复杂任务第一个工具调用是 plan(action='create')")
+            if first_action == PLAN_CREATE_ACTION:
+                logger.info("✅ Plan enforcement 通过: 第一个工具调用是 plan(action='create')")
                 return True
             else:
-                logger.warning(f"⚠️ 阶段 5 异常: plan action 不是 create，实际: {first_action}")
+                logger.warning(f"⚠️ Plan enforcement: plan action 不是 create，实际: {first_action}")
                 return False
         else:
-            logger.warning(f"⚠️ 阶段 5 异常: 复杂任务未创建 Plan！第一个工具: {first_tool_name}")
+            logger.warning(f"⚠️ Plan enforcement: 复杂任务未创建 Plan！第一个工具: {first_tool_name}")
             if tracer:
                 tracer.add_warning(f"Plan Creation 跳过: 第一个工具是 {first_tool_name}")
             return False

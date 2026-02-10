@@ -64,8 +64,14 @@ class AgentState(Enum):
     ERROR = "error"
 
 
-# 需要注入上下文的工具
-CONTEXT_INJECTION_TOOLS = {"api_calling"}
+# Tool metadata from config/capabilities.yaml (loaded once at import time)
+from core.tool.registry_config import (
+    get_context_injection_tools,
+    get_serial_only_tools,
+    get_simple_task_tools,
+)
+
+CONTEXT_INJECTION_TOOLS = get_context_injection_tools()
 
 
 class Agent:
@@ -154,8 +160,8 @@ class Agent:
             if schema and hasattr(schema, "tool_selector")
             else 5
         )
-        # plan 工具会写入 Conversation.metadata.plan，必须串行执行
-        self._serial_only_tools = {"plan", "hitl"}
+        # Tools that must execute serially (from config/capabilities.yaml)
+        self._serial_only_tools = get_serial_only_tools()
 
         # 兼容属性（外部代码可能直接设置）
         self.model: Optional[str] = None
@@ -680,11 +686,10 @@ class Agent:
             and not plan
         )
         if is_simple_task:
-            # 简单任务只需 3 个工具：nodes（执行）+ knowledge_search（知识）+ hitl（确认）
-            # 不需要 plan/observe_screen/scheduled_task/api_calling
-            schema_tools = ["nodes", "knowledge_search", "hitl"]
+            # Minimal tool set for simple tasks (from config/capabilities.yaml)
+            schema_tools = get_simple_task_tools()
             logger.info(
-                "工具裁剪: complexity=simple, 精简为 3 个核心工具"
+                f"工具裁剪: complexity=simple, 精简为 {len(schema_tools)} 个核心工具"
             )
 
         required_capabilities, selection_source, overridden_sources, allowed_tools = (

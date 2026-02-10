@@ -146,10 +146,58 @@ async def get_tool_categories() -> Dict[str, List[str]]:
     return (config.get("tool_categories") or {}).copy()
 
 
+# ── Sync accessors for init-time use ──────────────────────
+# These read the YAML file synchronously for use at module load
+# or __init__ time where async is not available.
+
+_sync_tool_classification: Dict = None
+
+
+def _load_tool_classification_sync() -> Dict:
+    """Load tool_classification from capabilities.yaml (sync, cached)."""
+    global _sync_tool_classification
+    if _sync_tool_classification is not None:
+        return _sync_tool_classification
+
+    if _CAPABILITIES_PATH.exists():
+        try:
+            with open(_CAPABILITIES_PATH, "r", encoding="utf-8") as f:
+                caps_config = yaml.safe_load(f) or {}
+            _sync_tool_classification = caps_config.get("tool_classification", {})
+        except Exception as e:
+            logger.warning(f"sync 加载 capabilities.yaml 失败: {e}")
+            _sync_tool_classification = {}
+    else:
+        _sync_tool_classification = {}
+
+    return _sync_tool_classification
+
+
+def get_context_injection_tools() -> Set[str]:
+    """Get tools that need runtime context injection (sync)."""
+    tc = _load_tool_classification_sync()
+    return set(tc.get("context_injection_tools") or [])
+
+
+def get_serial_only_tools() -> Set[str]:
+    """Get tools that must execute serially (sync)."""
+    tc = _load_tool_classification_sync()
+    return set(tc.get("serial_only_tools") or [])
+
+
+def get_simple_task_tools() -> List[str]:
+    """Get minimal tool set for simple tasks (sync)."""
+    tc = _load_tool_classification_sync()
+    return list(tc.get("simple_task_tools") or [])
+
+
 # 导出列表
 __all__ = [
     "get_core_tools",
     "get_frequent_tools",
     "get_tool_categories",
+    "get_context_injection_tools",
+    "get_serial_only_tools",
+    "get_simple_task_tools",
     "reload_config",
 ]

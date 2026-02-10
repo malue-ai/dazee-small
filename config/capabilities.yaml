@@ -7,6 +7,21 @@ tool_classification:
   frequent_tools:
     - plan
 
+  # 需要注入运行时上下文的工具（如 session_id, user_id 等）
+  context_injection_tools:
+    - api_calling
+
+  # 必须串行执行的工具（写入共享状态，不能并行）
+  serial_only_tools:
+    - plan
+    - hitl
+
+  # 简单任务的精简工具集（complexity=simple 时使用，省 token）
+  simple_task_tools:
+    - nodes
+    - knowledge_search
+    - hitl
+
   # 工具类别（简写展开）
   categories:
     # 文档生成能力由 xiaodazi Skills 提供，不使用 Pre-built Skills

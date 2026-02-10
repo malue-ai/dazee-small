@@ -3,17 +3,19 @@
 
 职责：
 - 区分基础设施层错误（Layer 1）与业务逻辑层错误（Layer 2）
-- 为不同层级的错误提供不同的处理建议
-- 支持 BacktrackManager 的回溯决策
+- Layer 1 使用确定性规则分类（异常类型 + HTTP 协议模式）
+- Layer 2 不做语义分类，返回保守默认值，由 BacktrackManager 调 LLM 决策
 
 错误分层模型：
 - Layer 1（基础设施层）：API 超时、Rate Limit、服务不可用
   - 处理策略：重试、降级、主备切换
   - 由 ZenFlux 现有的 resilience 机制处理
+  - 分类方式：Python 异常类型 + HTTP/网络协议模式匹配（确定性）
 
 - Layer 2（业务逻辑层）：Plan 不合理、工具选错、结果不满足需求
   - 处理策略：状态重评估、策略调整、部分重规划
-  - 由 BacktrackManager 处理
+  - 分类方式：由 BacktrackManager 通过 LLM 语义推断（LLM-First）
+  - 本分类器仅标记为 BUSINESS_LOGIC + 保守默认值
 """
 
 import re
@@ -45,14 +47,14 @@ class ErrorCategory(Enum):
     AUTHENTICATION_ERROR = "auth_error"  # 认证错误
     QUOTA_EXCEEDED = "quota_exceeded"  # 配额超限
 
-    # Layer 2: 业务逻辑层错误
-    PLAN_INVALID = "plan_invalid"  # Plan 不合理
-    TOOL_MISMATCH = "tool_mismatch"  # 工具选错
-    RESULT_UNSATISFACTORY = "result_unsatisfactory"  # 结果不满足需求
-    INTENT_UNCLEAR = "intent_unclear"  # 用户意图不明确
-    PARAMETER_ERROR = "parameter_error"  # 参数错误（业务层面）
-    CONTEXT_INSUFFICIENT = "context_insufficient"  # 上下文不足
-    EXECUTION_LOGIC_ERROR = "execution_logic_error"  # 执行逻辑错误
+    # Layer 2: 业务逻辑层错误（具体类别由 LLM 判断，此处仅作枚举定义）
+    PLAN_INVALID = "plan_invalid"
+    TOOL_MISMATCH = "tool_mismatch"
+    RESULT_UNSATISFACTORY = "result_unsatisfactory"
+    INTENT_UNCLEAR = "intent_unclear"
+    PARAMETER_ERROR = "parameter_error"
+    CONTEXT_INSUFFICIENT = "context_insufficient"
+    EXECUTION_LOGIC_ERROR = "execution_logic_error"
 
     # 未知
     UNKNOWN = "unknown"
@@ -113,11 +115,19 @@ class ErrorClassifier:
     """
     错误层级分类器
 
-    区分基础设施层错误与业务逻辑层错误，
-    为不同层级的错误提供不同的处理建议。
+    Layer 1（基础设施）：确定性规则分类
+    - Python 异常类型映射（TimeoutError → INFRASTRUCTURE）
+    - HTTP/网络协议模式匹配（"429" → RATE_LIMIT）
+    - 这些是技术协议层面的确定性检查，非语义判断
+
+    Layer 2（业务逻辑）：保守默认值
+    - 不做正则/关键词语义分类（违反 LLM-First）
+    - 返回 PARAM_ADJUST 保守默认，由 BacktrackManager 调 LLM 决策
     """
 
-    # Layer 1 错误关键词模式
+    # ── Layer 1: 基础设施层协议模式 ──────────────────────────
+    # 匹配对象：HTTP 状态码、网络库异常消息（确定性技术字符串）
+    # 不涉及自然语言语义判断，符合 LLM-First 规范
     INFRASTRUCTURE_PATTERNS = {
         ErrorCategory.API_TIMEOUT: [
             r"timeout",
@@ -130,14 +140,12 @@ class ErrorClassifier:
             r"too\s*many\s*requests",
             r"429",
             r"throttl",
-            r"quota\s*exceeded",
         ],
         ErrorCategory.SERVICE_UNAVAILABLE: [
             r"service\s*unavailable",
             r"503",
             r"502",
             r"bad\s*gateway",
-            r"server\s*error",
             r"internal\s*server",
             r"500",
         ],
@@ -150,7 +158,6 @@ class ErrorClassifier:
             r"certificate\s*(error|verify)",
         ],
         ErrorCategory.AUTHENTICATION_ERROR: [
-            r"authentication\s*(failed|error)",
             r"unauthorized",
             r"401",
             r"403",
@@ -167,54 +174,9 @@ class ErrorClassifier:
         ],
     }
 
-    # Layer 2 错误关键词模式
-    BUSINESS_LOGIC_PATTERNS = {
-        ErrorCategory.PLAN_INVALID: [
-            r"plan\s*(invalid|failed|error)",
-            r"cannot\s*execute\s*plan",
-            r"step\s*failed",
-            r"task\s*decomposition\s*error",
-        ],
-        ErrorCategory.TOOL_MISMATCH: [
-            r"tool\s*(not\s*found|mismatch|unavailable)",
-            r"wrong\s*tool",
-            r"unsupported\s*tool",
-            r"tool\s*selection\s*error",
-        ],
-        ErrorCategory.RESULT_UNSATISFACTORY: [
-            r"result\s*(unsatisfactory|incomplete|invalid)",
-            r"output\s*(error|invalid)",
-            r"unexpected\s*result",
-            r"quality\s*(check|validation)\s*failed",
-        ],
-        ErrorCategory.INTENT_UNCLEAR: [
-            r"intent\s*(unclear|ambiguous)",
-            r"clarification\s*needed",
-            r"ambiguous\s*request",
-            r"cannot\s*understand",
-        ],
-        ErrorCategory.PARAMETER_ERROR: [
-            r"(invalid|missing|wrong)\s*parameter",
-            r"parameter\s*(error|validation)",
-            r"argument\s*(error|invalid)",
-            r"input\s*validation\s*failed",
-        ],
-        ErrorCategory.CONTEXT_INSUFFICIENT: [
-            r"context\s*(insufficient|missing)",
-            r"need\s*more\s*(context|information)",
-            r"incomplete\s*context",
-        ],
-        ErrorCategory.EXECUTION_LOGIC_ERROR: [
-            r"execution\s*(error|failed)",
-            r"logic\s*error",
-            r"assertion\s*failed",
-            r"unexpected\s*state",
-        ],
-    }
-
-    # 异常类型到层级的映射
+    # ── 异常类型到层级的映射（确定性） ────────────────────────
     EXCEPTION_TYPE_MAPPING: Dict[str, ErrorLayer] = {
-        # Layer 1 异常类型
+        # Layer 1: 基础设施层异常类型
         "TimeoutError": ErrorLayer.INFRASTRUCTURE,
         "ConnectionError": ErrorLayer.INFRASTRUCTURE,
         "ConnectionRefusedError": ErrorLayer.INFRASTRUCTURE,
@@ -226,7 +188,7 @@ class ErrorClassifier:
         "RateLimitError": ErrorLayer.INFRASTRUCTURE,
         "AuthenticationError": ErrorLayer.INFRASTRUCTURE,
         "ServiceUnavailableError": ErrorLayer.INFRASTRUCTURE,
-        # Layer 2 异常类型
+        # Layer 2: 业务逻辑层异常类型
         "PlanExecutionError": ErrorLayer.BUSINESS_LOGIC,
         "ToolExecutionError": ErrorLayer.BUSINESS_LOGIC,
         "ValidationError": ErrorLayer.BUSINESS_LOGIC,
@@ -235,73 +197,67 @@ class ErrorClassifier:
     }
 
     def __init__(self):
-        """初始化分类器"""
-        # 编译正则表达式
+        """Initialize classifier (compile infra patterns only)."""
         self._compiled_infra_patterns = {
             category: [re.compile(p, re.IGNORECASE) for p in patterns]
             for category, patterns in self.INFRASTRUCTURE_PATTERNS.items()
-        }
-        self._compiled_business_patterns = {
-            category: [re.compile(p, re.IGNORECASE) for p in patterns]
-            for category, patterns in self.BUSINESS_LOGIC_PATTERNS.items()
         }
 
     def classify(
         self, error: Exception, context: Optional[Dict[str, Any]] = None
     ) -> ClassifiedError:
         """
-        分类错误
+        Classify an error into infrastructure vs business-logic layer.
+
+        Flow:
+        1. Exception type mapping (deterministic)
+        2. Infrastructure pattern matching (HTTP/network protocol strings)
+        3. If neither matches → BUSINESS_LOGIC with conservative defaults
+
+        Layer 2 errors get PARAM_ADJUST as a safe default; the actual
+        backtrack strategy is determined by BacktrackManager via LLM.
 
         Args:
-            error: 异常对象
-            context: 额外上下文信息，可包含：
-                - tool_name: 工具名称
-                - tool_input: 工具输入
-                - step_index: 当前步骤索引
-                - plan_id: 计划 ID
-                - turn: 当前轮次
+            error: The exception
+            context: Extra context (tool_name, step_index, etc.)
 
         Returns:
-            ClassifiedError: 分类结果
+            ClassifiedError with classification result
         """
         context = context or {}
         error_message = str(error).lower()
         error_type = type(error).__name__
 
-        # 步骤 1：通过异常类型判断
+        # Step 1: Exception type (deterministic)
         layer = self._classify_by_exception_type(error_type)
         category = ErrorCategory.UNKNOWN
         confidence = 0.5
 
-        if layer != ErrorLayer.UNKNOWN:
+        if layer == ErrorLayer.INFRASTRUCTURE:
             confidence = 0.8
-            category = self._get_category_from_patterns(
-                error_message, layer == ErrorLayer.INFRASTRUCTURE
-            )
+            category = self._match_infra_category(error_message)
+        elif layer == ErrorLayer.BUSINESS_LOGIC:
+            confidence = 0.8
+            # Layer 2: no regex semantic classification, keep UNKNOWN category
+            # BacktrackManager._llm_decide will determine the actual strategy
 
-        # 步骤 2：通过错误消息模式匹配
-        if layer == ErrorLayer.UNKNOWN or category == ErrorCategory.UNKNOWN:
-            matched_layer, matched_category, pattern_confidence = self._classify_by_patterns(
-                error_message
-            )
-
-            if pattern_confidence > confidence:
-                layer = matched_layer
+        # Step 2: Infrastructure pattern matching (only if not yet classified)
+        if layer == ErrorLayer.UNKNOWN:
+            matched_category = self._match_infra_category(error_message)
+            if matched_category != ErrorCategory.UNKNOWN:
+                layer = ErrorLayer.INFRASTRUCTURE
                 category = matched_category
-                confidence = pattern_confidence
+                confidence = 0.7
 
-        # 步骤 3：通过上下文信息辅助判断
-        if context:
-            layer, category, confidence = self._refine_by_context(
-                layer, category, confidence, context, error_message
-            )
+        # Step 3: If still unknown → treat as business logic (conservative)
+        # Most tool execution errors that don't match infra patterns are
+        # business logic issues that the LLM should analyze.
+        if layer == ErrorLayer.UNKNOWN:
+            layer = ErrorLayer.BUSINESS_LOGIC
+            confidence = 0.4
 
-        # 步骤 4：确定回溯类型和处理建议
-        backtrack_type, suggested_action = self._determine_backtrack_strategy(
-            layer, category, context
-        )
-
-        # 步骤 5：确定是否可重试
+        # Step 4: Determine backtrack strategy
+        backtrack_type, suggested_action = self._determine_backtrack_strategy(layer)
         is_retryable = self._is_retryable(layer, category)
 
         classified = ClassifiedError(
@@ -323,126 +279,39 @@ class ErrorClassifier:
         return classified
 
     def _classify_by_exception_type(self, error_type: str) -> ErrorLayer:
-        """通过异常类型分类"""
+        """Classify by Python exception type (deterministic)."""
         return self.EXCEPTION_TYPE_MAPPING.get(error_type, ErrorLayer.UNKNOWN)
 
-    def _get_category_from_patterns(
-        self, error_message: str, is_infrastructure: bool
-    ) -> ErrorCategory:
-        """从模式匹配获取类别"""
-        patterns = (
-            self._compiled_infra_patterns if is_infrastructure else self._compiled_business_patterns
-        )
-
-        for category, compiled_patterns in patterns.items():
-            for pattern in compiled_patterns:
-                if pattern.search(error_message):
-                    return category
-
-        return ErrorCategory.UNKNOWN
-
-    def _classify_by_patterns(self, error_message: str) -> tuple[ErrorLayer, ErrorCategory, float]:
-        """通过模式匹配分类"""
-        # 先检查基础设施层
+    def _match_infra_category(self, error_message: str) -> ErrorCategory:
+        """Match infrastructure category from protocol-level error patterns."""
         for category, compiled_patterns in self._compiled_infra_patterns.items():
             for pattern in compiled_patterns:
                 if pattern.search(error_message):
-                    return ErrorLayer.INFRASTRUCTURE, category, 0.7
-
-        # 再检查业务逻辑层
-        for category, compiled_patterns in self._compiled_business_patterns.items():
-            for pattern in compiled_patterns:
-                if pattern.search(error_message):
-                    return ErrorLayer.BUSINESS_LOGIC, category, 0.7
-
-        return ErrorLayer.UNKNOWN, ErrorCategory.UNKNOWN, 0.3
-
-    def _refine_by_context(
-        self,
-        layer: ErrorLayer,
-        category: ErrorCategory,
-        confidence: float,
-        context: Dict[str, Any],
-        error_message: str,
-    ) -> tuple[ErrorLayer, ErrorCategory, float]:
-        """通过上下文信息细化分类"""
-        # 如果有工具名称，更可能是业务逻辑错误
-        if context.get("tool_name"):
-            tool_name = context["tool_name"]
-
-            # 检查是否是工具执行相关的错误
-            if any(
-                keyword in error_message
-                for keyword in ["tool", tool_name.lower(), "execution", "result"]
-            ):
-                if layer == ErrorLayer.UNKNOWN:
-                    layer = ErrorLayer.BUSINESS_LOGIC
-                    category = ErrorCategory.TOOL_MISMATCH
-                    confidence = max(confidence, 0.6)
-
-        # 如果有 plan_id，更可能是业务逻辑错误
-        if context.get("plan_id"):
-            if any(keyword in error_message for keyword in ["plan", "step", "task"]):
-                if layer == ErrorLayer.UNKNOWN:
-                    layer = ErrorLayer.BUSINESS_LOGIC
-                    category = ErrorCategory.PLAN_INVALID
-                    confidence = max(confidence, 0.6)
-
-        # 如果是最后几轮，可能是上下文不足
-        if context.get("turn", 0) >= context.get("max_turns", 10) - 2:
-            if layer == ErrorLayer.BUSINESS_LOGIC:
-                if category == ErrorCategory.UNKNOWN:
-                    category = ErrorCategory.CONTEXT_INSUFFICIENT
-                    confidence = max(confidence, 0.5)
-
-        return layer, category, confidence
+                    return category
+        return ErrorCategory.UNKNOWN
 
     def _determine_backtrack_strategy(
-        self, layer: ErrorLayer, category: ErrorCategory, context: Dict[str, Any]
+        self, layer: ErrorLayer
     ) -> tuple[BacktrackType, str]:
-        """确定回溯策略"""
-        # Layer 1 错误不需要回溯，使用 resilience 机制
+        """
+        Determine backtrack strategy.
+
+        - Layer 1 (infrastructure): NO_BACKTRACK, handled by resilience
+        - Layer 2 (business logic): conservative PARAM_ADJUST default
+          Actual strategy decided by BacktrackManager via LLM
+        """
         if layer == ErrorLayer.INFRASTRUCTURE:
             return BacktrackType.NO_BACKTRACK, "使用基础设施层重试/降级机制"
 
-        # Layer 2 错误需要回溯
-        if category == ErrorCategory.PLAN_INVALID:
-            return BacktrackType.PLAN_REPLAN, "重新评估任务分解，生成新的执行计划"
-
-        if category == ErrorCategory.TOOL_MISMATCH:
-            return BacktrackType.TOOL_REPLACE, "当前工具不适合，尝试替代工具"
-
-        if category == ErrorCategory.INTENT_UNCLEAR:
-            return BacktrackType.INTENT_CLARIFY, "用户意图不明确，请求澄清"
-
-        if category == ErrorCategory.PARAMETER_ERROR:
-            return BacktrackType.PARAM_ADJUST, "调整参数后重试"
-
-        if category == ErrorCategory.CONTEXT_INSUFFICIENT:
-            return BacktrackType.CONTEXT_ENRICH, "补充上下文信息后重试"
-
-        if category == ErrorCategory.RESULT_UNSATISFACTORY:
-            # 根据上下文决定是重规划还是工具替换
-            if context.get("step_index", 0) <= 1:
-                return BacktrackType.PLAN_REPLAN, "早期步骤失败，建议重规划"
-            else:
-                return BacktrackType.TOOL_REPLACE, "尝试替代方法完成当前步骤"
-
-        if category == ErrorCategory.EXECUTION_LOGIC_ERROR:
-            return BacktrackType.PARAM_ADJUST, "检查执行逻辑，调整参数重试"
-
-        # 默认：未知错误使用参数调整
-        if layer == ErrorLayer.BUSINESS_LOGIC:
-            return BacktrackType.PARAM_ADJUST, "尝试调整参数重试"
-
-        return BacktrackType.NO_BACKTRACK, "无法确定回溯策略"
+        # Layer 2: conservative default — BacktrackManager._llm_decide
+        # will override with a proper strategy
+        return BacktrackType.PARAM_ADJUST, "业务逻辑错误，由回溯管理器决策具体策略"
 
     def _is_retryable(self, layer: ErrorLayer, category: ErrorCategory) -> bool:
-        """判断是否可重试（基础设施层重试）"""
+        """Check if error is retryable (infrastructure layer only)."""
         if layer != ErrorLayer.INFRASTRUCTURE:
             return False
 
-        # 可重试的基础设施错误
         retryable_categories = {
             ErrorCategory.API_TIMEOUT,
             ErrorCategory.RATE_LIMIT,
@@ -452,6 +321,8 @@ class ErrorClassifier:
 
         return category in retryable_categories
 
+    # ── Convenience methods (public API unchanged) ─────────────
+
     def classify_tool_error(
         self,
         error: Exception,
@@ -459,82 +330,46 @@ class ErrorClassifier:
         tool_input: Dict[str, Any],
         tool_output: Optional[Dict[str, Any]] = None,
     ) -> ClassifiedError:
-        """
-        分类工具执行错误
-
-        Args:
-            error: 异常对象
-            tool_name: 工具名称
-            tool_input: 工具输入
-            tool_output: 工具输出（如果有）
-
-        Returns:
-            ClassifiedError: 分类结果
-        """
+        """Classify a tool execution error."""
         context = {
             "tool_name": tool_name,
             "tool_input": tool_input,
             "tool_output": tool_output,
             "source": "tool_execution",
         }
-
         return self.classify(error, context)
 
     def classify_plan_error(
         self, error: Exception, plan_id: str, step_index: int, step_content: Optional[str] = None
     ) -> ClassifiedError:
-        """
-        分类计划执行错误
-
-        Args:
-            error: 异常对象
-            plan_id: 计划 ID
-            step_index: 步骤索引
-            step_content: 步骤内容
-
-        Returns:
-            ClassifiedError: 分类结果
-        """
+        """Classify a plan execution error."""
         context = {
             "plan_id": plan_id,
             "step_index": step_index,
             "step_content": step_content,
             "source": "plan_execution",
         }
-
         return self.classify(error, context)
 
     def classify_llm_error(
         self, error: Exception, model_name: str, turn: int, max_turns: int
     ) -> ClassifiedError:
-        """
-        分类 LLM 调用错误
-
-        Args:
-            error: 异常对象
-            model_name: 模型名称
-            turn: 当前轮次
-            max_turns: 最大轮次
-
-        Returns:
-            ClassifiedError: 分类结果
-        """
+        """Classify an LLM call error."""
         context = {
             "model_name": model_name,
             "turn": turn,
             "max_turns": max_turns,
             "source": "llm_call",
         }
-
         return self.classify(error, context)
 
 
-# 全局单例
+# Global singleton
 _error_classifier: Optional[ErrorClassifier] = None
 
 
 def get_error_classifier() -> ErrorClassifier:
-    """获取全局错误分类器实例"""
+    """Get the global error classifier instance."""
     global _error_classifier
     if _error_classifier is None:
         _error_classifier = ErrorClassifier()

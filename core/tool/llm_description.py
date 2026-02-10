@@ -334,15 +334,20 @@ class ToolDescriptionEnhancer:
         self, query: str, task_type: str = None, available_tools: List[str] = None
     ) -> List[tuple[str, float, str]]:
         """
-        根据查询建议工具
+        Pre-filter: keyword-based tool suggestion (fast, < 1ms).
+
+        WARNING: This is a coarse pre-filter using keyword overlap, NOT
+        semantic inference. Per LLM-First principle, callers MUST NOT
+        use the output as final tool selection. Use this only as a
+        candidate shortlist for subsequent LLM-based selection.
 
         Args:
-            query: 用户查询
-            task_type: 任务类型
-            available_tools: 可用工具列表
+            query: User query
+            task_type: Task type
+            available_tools: Available tools to consider
 
         Returns:
-            [(工具名, 匹配分数, 匹配原因), ...]
+            [(tool_name, score, match_reason), ...]
         """
         suggestions = []
         query_lower = query.lower()
