@@ -197,7 +197,8 @@ class LLMProvider(Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
     GEMINI = "gemini"
-    QWEN = "qwen"  # 🆕 通义千问（阿里云）
+    QWEN = "qwen"  # 通义千问（阿里云）
+    DEEPSEEK = "deepseek"  # DeepSeek（深度求索）
 
 
 class ToolType(Enum):

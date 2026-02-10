@@ -1012,6 +1012,79 @@ class OpenAIAdaptor(BaseAdaptor):
 
 
 # ============================================================
+# DeepSeek 适配器
+# ============================================================
+
+
+class DeepSeekAdaptor(OpenAIAdaptor):
+    """
+    DeepSeek adaptor
+
+    Extends OpenAI adaptor with thinking/reasoning_content support.
+
+    Key difference from plain OpenAI:
+    - Converts Claude-format thinking blocks to the ``reasoning_content``
+      field on assistant messages.
+    - DeepSeek thinking mode with tools requires ``reasoning_content``
+      to be passed back within the same tool-call loop (400 error otherwise).
+    - For previous user turns the API silently ignores the field, so it is
+      safe to always include it.
+    """
+
+    def _convert_message(self, msg: Message) -> Union[Dict, List[Dict]]:
+        """
+        Override to convert thinking blocks → reasoning_content.
+
+        For assistant messages that contain ``{"type": "thinking", ...}``
+        blocks, extract the thinking text and attach it as
+        ``reasoning_content`` on the resulting OpenAI-format assistant
+        message.  All other conversion logic is inherited from
+        ``OpenAIAdaptor``.
+        """
+        content = msg.content
+
+        # Only special handling for assistant messages with list content
+        if not (isinstance(content, list) and msg.role == "assistant"):
+            return super()._convert_message(msg)
+
+        # Separate thinking blocks from the rest
+        thinking_text = ""
+        non_thinking_blocks = []
+
+        for block in content:
+            if isinstance(block, dict) and block.get("type") in (
+                "thinking",
+                "redacted_thinking",
+            ):
+                thinking_text += block.get("thinking", "")
+            else:
+                non_thinking_blocks.append(block)
+
+        if not thinking_text:
+            # No thinking blocks – delegate entirely to parent
+            return super()._convert_message(msg)
+
+        # Build a Message without thinking blocks so the parent logic
+        # handles text / tool_use / tool_result normally.
+        modified_msg = Message(
+            role=msg.role,
+            content=non_thinking_blocks if non_thinking_blocks else [{"type": "text", "text": ""}],
+        )
+        result = super()._convert_message(modified_msg)
+
+        # Inject reasoning_content into the assistant message dict(s)
+        if isinstance(result, list):
+            for r in result:
+                if isinstance(r, dict) and r.get("role") == "assistant":
+                    r["reasoning_content"] = thinking_text
+                    break
+        elif isinstance(result, dict) and result.get("role") == "assistant":
+            result["reasoning_content"] = thinking_text
+
+        return result
+
+
+# ============================================================
 # Gemini 适配器
 # ============================================================
 
@@ -1275,7 +1348,8 @@ def get_adaptor(provider: str) -> BaseAdaptor:
         "claude": ClaudeAdaptor,
         "openai": OpenAIAdaptor,
         "gemini": GeminiAdaptor,
-        "qwen": OpenAIAdaptor,  # 🆕 千问使用 OpenAI 兼容接口
+        "qwen": OpenAIAdaptor,  # 千问使用 OpenAI 兼容接口
+        "deepseek": DeepSeekAdaptor,  # DeepSeek 需要 reasoning_content 支持
     }
 
     adaptor_class = adaptors.get(provider.lower())

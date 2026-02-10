@@ -7,19 +7,18 @@
 #
 # 模型分配：
 #
-#   ┌──────────┬───────────────────────────┬──────────────────────────┐
-#   │ 角色     │ qwen                      │ claude                   │
-#   ├──────────┼───────────────────────────┼──────────────────────────┤
-#   │ 主 Agent │ qwen3-max                 │ claude-opus-4-6          │
-#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │
-#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │
-#   └──────────┴───────────────────────────┴──────────────────────────┘
+#   ┌──────────┬───────────────────────────┬──────────────────────────┬──────────────────────────┐
+#   │ 角色     │ qwen                      │ claude                   │ deepseek                 │
+#   ├──────────┼───────────────────────────┼──────────────────────────┼──────────────────────────┤
+#   │ 主 Agent │ qwen3-max                 │ claude-opus-4-6          │ deepseek-reasoner        │
+#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │ deepseek-reasoner        │
+#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │ deepseek-chat            │
+#   └──────────┴───────────────────────────┴──────────────────────────┴──────────────────────────┘
 #
 
 # ==================== Provider 模板 ====================
 #
 # 一键切换的核心。agent.provider 决定使用哪套模板。
-# 未来可扩展 deepseek / openai 等。
 #
 
 provider_templates:
@@ -59,6 +58,23 @@ provider_templates:
       provider: "claude"
       model: "claude-haiku-4-5-20251001"
       api_key_env: "ANTHROPIC_API_KEY"
+
+  deepseek:
+    agent_model: "deepseek-reasoner"            # 主 Agent：思考模式（V3.2），对标 Sonnet/Qwen3-max
+    agent_llm:
+      max_tokens: 32768                         # reasoner 默认 32K，最大 64K（含 CoT）
+      enable_thinking: true
+      thinking_budget: 10000                    # API 忽略此参数，保留以兼容框架
+      enable_caching: false                     # DeepSeek 不支持 prompt cache
+      # temperature: reasoner 模式下被忽略
+    heavy:
+      provider: "deepseek"
+      model: "deepseek-reasoner"
+      api_key_env: "DEEPSEEK_API_KEY"
+    light:
+      provider: "deepseek"
+      model: "deepseek-chat"
+      api_key_env: "DEEPSEEK_API_KEY"
 
 # ==================== 各调用点配置 ====================
 #

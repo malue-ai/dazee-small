@@ -180,10 +180,11 @@ Examples:
   python scripts/switch_provider.py --status
   python scripts/switch_provider.py --to claude
   python scripts/switch_provider.py --to qwen --dry-run
+  python scripts/switch_provider.py --to deepseek
   python scripts/switch_provider.py --to claude --instance xiaodazi
 """,
     )
-    parser.add_argument("--to", type=str, help="Target provider (qwen / claude)")
+    parser.add_argument("--to", type=str, help="Target provider (qwen / claude / deepseek)")
     parser.add_argument("--status", action="store_true", help="Show current status")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes")
     parser.add_argument("--instance", type=str, default="", help="Instance name")

@@ -9,13 +9,14 @@ LLM 服务模块
 
 模块结构：
 - registry.py: Provider 注册中心
-- model_registry.py: Model 注册中心（新增）
+- model_registry.py: Model 注册中心
 - base.py: 基础类和数据模型
 - adaptor.py: 格式适配器
 - claude.py: Claude 实现
 - openai.py: OpenAI 实现
 - gemini.py: Gemini 实现
 - qwen.py: 千问实现
+- deepseek.py: DeepSeek 实现
 
 使用示例：
 ```python
@@ -57,6 +58,7 @@ from typing import Optional, Union
 from .adaptor import (
     BaseAdaptor,
     ClaudeAdaptor,
+    DeepSeekAdaptor,
     GeminiAdaptor,
     OpenAIAdaptor,
     get_adaptor,
@@ -106,7 +108,13 @@ from .model_registry import (
 # OpenAI 实现（占位）
 from .openai import OpenAILLMService
 
-# 🆕 千问实现
+# DeepSeek 实现
+from .deepseek import (
+    DeepSeekLLMService,
+    create_deepseek_service,
+)
+
+# 千问实现
 from .qwen import (
     QwenConfig,
     QwenLLMService,
@@ -199,6 +207,7 @@ def create_llm_service(
         LLMProvider.OPENAI: "gpt-4o",
         LLMProvider.GEMINI: "gemini-pro",
         LLMProvider.QWEN: "qwen3-max",
+        LLMProvider.DEEPSEEK: "deepseek-reasoner",
     }
 
     if model is None:
@@ -220,6 +229,7 @@ def create_llm_service(
                 LLMProvider.OPENAI: "OPENAI_API_KEY",
                 LLMProvider.GEMINI: "GOOGLE_API_KEY",
                 LLMProvider.QWEN: "DASHSCOPE_API_KEY",
+                LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 
@@ -267,11 +277,13 @@ __all__ = [
     "GeminiLLMService",
     "QwenLLMService",
     "QwenConfig",
+    "DeepSeekLLMService",
     # ========== 适配器 ==========
     "BaseAdaptor",
     "ClaudeAdaptor",
     "OpenAIAdaptor",
     "GeminiAdaptor",
+    "DeepSeekAdaptor",
     "get_adaptor",
     # ========== 路由器（容灾）==========
     "ModelRouter",
@@ -287,4 +299,5 @@ __all__ = [
     "create_llm_service",
     "create_claude_service",
     "create_qwen_service",
+    "create_deepseek_service",
 ]
