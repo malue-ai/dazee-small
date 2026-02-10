@@ -130,9 +130,9 @@ class RVRBState:
         return self.backtrack_count < self.max_backtracks
 
     def to_backtrack_context(
-        self, error: ClassifiedError, max_turns: int = 30
+        self, error: ClassifiedError, max_turns: int = 200
     ) -> BacktrackContext:
-        """转换为 BacktrackContext（V12: max_turns 从外部传入）"""
+        """Convert to BacktrackContext (max_turns = infrastructure safety limit, not semantic)."""
         return BacktrackContext(
             session_id=self.session_id,
             turn=self.turn,
