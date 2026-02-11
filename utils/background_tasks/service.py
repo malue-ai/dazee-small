@@ -143,7 +143,9 @@ class BackgroundTaskService:
 
     # Tasks that MUST complete before SSE stream closes
     # (they send SSE events that the frontend needs)
-    _SSE_DEPENDENT_TASKS = {"title_generation", "recommended_questions"}
+    # NOTE: recommended_questions now pushes via WebSocket ConnectionManager
+    # (bypasses closed event stream), so it no longer needs to block here.
+    _SSE_DEPENDENT_TASKS = {"title_generation"}
 
     async def dispatch_tasks(
         self, task_names: List[str], context: TaskContext, wait: bool = True

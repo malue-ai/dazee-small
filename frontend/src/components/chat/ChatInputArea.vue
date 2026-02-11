@@ -52,11 +52,11 @@
           <!-- 停止按钮：加载中且无输入 -->
           <button 
             v-if="loading && !hasInput" 
-            class="p-3 rounded-xl bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-all shadow-sm" 
+            class="p-3 rounded-xl bg-foreground text-white hover:bg-foreground/80 transition-all shadow-sm" 
             @click="emit('stop')"
             :disabled="stopping"
           >
-            <Square class="w-5 h-5" />
+            <SquareIcon class="w-4 h-4 fill-current" />
           </button>
           <!-- 发送按钮 -->
           <button 
@@ -82,7 +82,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import type { AttachedFile } from '@/types'
-import { Loader2, Plus, Square, ArrowUp } from 'lucide-vue-next'
+import { Loader2, Plus, Square as SquareIcon, ArrowUp } from 'lucide-vue-next'
 import { useLocalWorkspaceStore } from '@/stores/localWorkspace'
 
 // ==================== Props ====================

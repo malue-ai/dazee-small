@@ -281,9 +281,7 @@ async def delete_conversation(conversation_id: str):
       "code": 200,
       "message": "success",
       "data": {
-        "conversation_id": "conv_abc123",
-        "deleted": true,
-        "deleted_messages": 10
+        "deleted": true
       }
     }
     ```
@@ -294,11 +292,14 @@ async def delete_conversation(conversation_id: str):
     try:
         logger.info(f"📨 删除对话: conversation_id={conversation_id}")
 
-        result = await conversation_service.delete_conversation(conversation_id)
+        success = await conversation_service.delete_conversation(conversation_id)
 
-        logger.info(f"✅ 对话删除成功，同时删除了 {result['deleted_messages']} 条消息")
+        if not success:
+            raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
 
-        return APIResponse(code=200, message="success", data=result)
+        logger.info(f"✅ 对话删除成功: conversation_id={conversation_id}")
+
+        return APIResponse(code=200, message="success", data={"deleted": True})
 
     except ConversationNotFoundError as e:
         logger.warning(f"⚠️ 对话不存在: {str(e)}")

@@ -166,6 +166,9 @@ class HITLTool(BaseTool):
 
     name = "hitl"
 
+    # 人工确认需要较长等待时间，设置 5 分钟 executor 安全上限
+    execution_timeout = 300
+
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行用户输入请求（表单模式）
@@ -201,10 +204,7 @@ class HITLTool(BaseTool):
             return {"success": False, "error": "缺少必需参数: questions"}
 
         description = params.get("description", "")
-        # 🆕 AI 可以传 timeout 参数，但代码暂不启用超时逻辑
-        # timeout = params.get("timeout", FORM_TIMEOUT)
-        timeout = 0  # 暂时禁用超时，无限等待用户响应 (0 = 无限)
-        # 🆕 超时时是否使用默认值（默认 True）- 暂不使用
+        timeout = params.get("timeout", FORM_TIMEOUT)
         use_default_on_timeout = params.get("use_default_on_timeout", True)
 
         # 从 context 获取 session_id
@@ -243,13 +243,43 @@ class HITLTool(BaseTool):
         # 阻塞模式：等待用户通过前端提交表单响应
         # SSE 流保持打开，broadcaster 在 tool_use content_stop 时
         # 已发送 hitl_data 事件通知前端渲染表单
-        logger.info(f"HITL 阻塞等待用户响应: session_id={session_id}")
-        result = await manager.wait_for_response(request.request_id, timeout=None)
+        logger.info(f"HITL 阻塞等待用户响应: session_id={session_id}, timeout={timeout}s")
+        effective_timeout = timeout if timeout and timeout > 0 else None
+        result = await manager.wait_for_response(request.request_id, timeout=effective_timeout)
+
+        # 超时时通知前端关闭弹窗
+        if result.get("timed_out"):
+            await self._emit_hitl_dismiss(context, timeout)
 
         # 处理用户响应
         return self._process_response(result, timeout, filtered_questions, use_default_on_timeout)
 
     # ==================== 私有方法 ====================
+
+    async def _emit_hitl_dismiss(self, context: ToolContext, timeout: int) -> None:
+        """
+        Emit HITL dismiss event to notify frontend to close the popup.
+
+        Called when the HITL tool times out waiting for user response.
+        """
+        if not context.event_manager or not context.session_id:
+            return
+        try:
+            await context.event_manager.message.emit_message_delta(
+                session_id=context.session_id,
+                conversation_id=context.conversation_id or "",
+                delta={
+                    "type": "hitl",
+                    "content": {
+                        "status": "timed_out",
+                        "timed_out": True,
+                        "message": f"用户未在 {timeout} 秒内响应",
+                    },
+                },
+            )
+            logger.info(f"🎯 [HITL] 已发送超时关闭事件: session_id={context.session_id}")
+        except Exception as e:
+            logger.warning(f"发送 HITL 超时事件失败: {e}")
 
     def _process_response(
         self,

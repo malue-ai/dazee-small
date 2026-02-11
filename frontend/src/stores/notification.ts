@@ -48,6 +48,10 @@ export interface NotificationItem {
   progress?: NotificationProgress
   /** 操作按钮 */
   action?: NotificationAction
+  /** 可展开的完整内容（如 AI 回复文本） */
+  fullContent?: string
+  /** 是否已展开完整内容 */
+  expanded?: boolean
   /** 自动消失延迟（ms），0 或 undefined = 不自动消失 */
   autoDismissMs?: number
   /** 是否可见 */
@@ -183,6 +187,20 @@ export const useNotificationStore = defineStore('notification', () => {
     items.value = []
   }
 
+  /**
+   * 切换展开/收起完整内容
+   */
+  function toggleExpand(id: string): void {
+    const item = items.value.find(n => n.id === id)
+    if (item && item.fullContent) {
+      item.expanded = !item.expanded
+      // 展开时暂停自动消失
+      if (item.expanded) {
+        _clearTimer(id)
+      }
+    }
+  }
+
   // ==================== 便捷方法 ====================
 
   /** 推送成功通知 */
@@ -258,6 +276,7 @@ export const useNotificationStore = defineStore('notification', () => {
     update,
     dismiss,
     clear,
+    toggleExpand,
 
     // 便捷方法
     success,

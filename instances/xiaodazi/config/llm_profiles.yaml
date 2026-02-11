@@ -170,6 +170,22 @@ llm_profiles:
     timeout: 60.0
     max_retries: 2
 
+  aggregator:
+    tier: "light"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  reranker:
+    tier: "light"
+    max_tokens: 1024
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
   # ---------- 启动时（提示词生成，仅首次或缓存失效时） ----------
 
   llm_analyzer:

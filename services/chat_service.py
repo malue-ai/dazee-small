@@ -1962,7 +1962,11 @@ class ChatService:
                 },
             )
 
-            logger.info(f"✅ 定时 Agent 任务完成: task_id={task_id}")
+            logger.info(
+                f"✅ 定时 Agent 任务完成: task_id={task_id}, "
+                f"response_text_len={len(response_text)}, "
+                f"response_preview={response_text[:100]!r}"
+            )
 
             return {
                 "success": True,

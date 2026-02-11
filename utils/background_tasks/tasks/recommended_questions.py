@@ -8,7 +8,7 @@
 实现：
 - 使用 LLM 生成问题
 - JSON 解析和回退方案
-- 通过 SSE 推送给前端
+- 通过 WebSocket ConnectionManager 广播到前端
 """
 
 import json
@@ -43,33 +43,29 @@ async def generate_recommended_questions_task(
         return
 
     await _generate_recommended_questions(
-        session_id=ctx.session_id,
         conversation_id=ctx.conversation_id,
         message_id=ctx.message_id,
         user_message=ctx.user_message,
         assistant_response=ctx.assistant_response,
-        event_manager=ctx.event_manager,
         service=service,
     )
 
 
 async def _generate_recommended_questions(
-    session_id: str,
     conversation_id: str,
     message_id: str,
     user_message: str,
     assistant_response: str,
-    event_manager,
     service: "BackgroundTaskService",
 ) -> Optional[List[str]]:
     """
     生成推荐问题（后台任务）
 
     根据对话内容生成用户可能感兴趣的后续问题，
-    通过 SSE 推送到前端显示在消息底部
+    通过 WebSocket 长连接推送到前端显示在消息底部
     """
     try:
-        logger.info(f"💡 开始生成推荐问题: session_id={session_id}, message_id={message_id}")
+        logger.info(f"💡 开始生成推荐问题: message_id={message_id}")
 
         # 1. 截取内容（避免过长）
         user_preview = user_message[:300] if len(user_message) > 300 else user_message
@@ -86,18 +82,24 @@ async def _generate_recommended_questions(
 
         logger.info(f"✅ 推荐问题已生成: {len(questions)} 个")
 
-        # 3. 通过 SSE 推送给前端
-        if session_id and event_manager:
-            # 🆕 使用 event_manager 已配置的 output_format 和 adapter
-            await event_manager.message.emit_message_delta(
-                session_id=session_id,
-                conversation_id=conversation_id,
-                delta={"type": "recommended", "content": {"questions": questions}},
-                message_id=message_id,
-                output_format=getattr(event_manager, "output_format", "zenflux"),
-                adapter=getattr(event_manager, "adapter", None),
-            )
-            logger.info(f"📤 推荐问题已推送到前端")
+        # 3. 通过 WebSocket 长连接推送给前端
+        # 背景任务在 message_stop 之后执行，chat event stream 已关闭，
+        # 直接通过 WebSocket ConnectionManager 广播到前端
+        pushed = await _push_via_websocket(
+            event_name="recommended_questions",
+            payload={
+                "type": "message_delta",
+                "data": {
+                    "delta": {"type": "recommended", "content": {"questions": questions}},
+                },
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            },
+        )
+        if pushed:
+            logger.info("📤 推荐问题已通过 WebSocket 推送到前端")
+        else:
+            logger.warning("⚠️ WebSocket 推送失败（无活跃连接？）")
 
         return questions
 
@@ -239,3 +241,24 @@ def _parse_questions_fallback(raw_text: str) -> List[str]:
             questions.append(line)
 
     return questions[:3]
+
+
+async def _push_via_websocket(event_name: str, payload: dict) -> bool:
+    """Push event to all active WebSocket connections.
+
+    Background tasks run after message_stop, so the chat event stream
+    is already closed. This helper broadcasts via the persistent
+    WebSocket ConnectionManager instead.
+
+    Lazy imports to avoid circular dependencies
+    (utils.background_tasks → routers → services → utils.background_tasks).
+    """
+    try:
+        from routers.websocket import get_connection_manager
+
+        mgr = get_connection_manager()
+        await mgr.broadcast_notification(event_name, payload)
+        return mgr.active_count > 0
+    except Exception as e:
+        logger.warning(f"WebSocket push failed: {e}")
+        return False

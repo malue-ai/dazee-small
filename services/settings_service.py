@@ -631,6 +631,14 @@ async def _background_download_and_apply(mode: str) -> None:
     try:
         result = await download_embedding_model()
         if result["success"]:
+            # Re-write config: initial write may have failed if AGENT_INSTANCE
+            # was not yet set at setup time (startup timing issue)
+            written = await _write_instance_memory_config(mode)
+            if not written:
+                logger.warning(
+                    "Config write failed after download, semantic search may not persist"
+                )
+
             # Auto-apply: reload runtime singletons
             await _reload_semantic_components()
             _download_state.update({
@@ -712,7 +720,7 @@ def reset_download_state() -> None:
     _download_task = None
 
 
-async def _write_instance_memory_config(mode: str) -> None:
+async def _write_instance_memory_config(mode: str) -> bool:
     """
     Write semantic search mode to the active instance's config/memory.yaml.
 
@@ -721,11 +729,28 @@ async def _write_instance_memory_config(mode: str) -> None:
 
     Args:
         mode: "disabled" | "local" | "cloud"
+
+    Returns:
+        True if config was written successfully, False otherwise.
     """
     instance_name = os.getenv("AGENT_INSTANCE", "")
+
+    # Fallback: resolve from AgentRegistry when env var not yet set (startup timing)
     if not instance_name:
-        logger.warning("AGENT_INSTANCE not set, cannot write instance config")
-        return
+        try:
+            from services.agent_registry import get_agent_registry
+            agents = get_agent_registry().list_agents()
+            if agents:
+                instance_name = agents[0]["agent_id"]
+                logger.info(
+                    f"AGENT_INSTANCE not set, resolved from AgentRegistry: {instance_name}"
+                )
+        except Exception:
+            pass
+
+    if not instance_name:
+        logger.warning("AGENT_INSTANCE not set and no instance found, cannot write config")
+        return False
 
     from utils.app_paths import get_instances_dir
     config_path = get_instances_dir() / instance_name / "config" / "memory.yaml"
@@ -754,6 +779,7 @@ async def _write_instance_memory_config(mode: str) -> None:
         await f.write(content)
 
     logger.info(f"Instance memory config updated: {config_path} (mode={mode})")
+    return True
 
 
 async def _reload_semantic_components() -> None:

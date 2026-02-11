@@ -266,8 +266,9 @@ class PlaybookManager:
             logger.warning(f"⚠️ 保存索引失败: {e}")
 
     def _generate_id(self, name: str, session_id: str = None) -> str:
-        """生成策略 ID"""
-        content = f"{name}:{session_id or datetime.now().isoformat()}"
+        """生成策略 ID（包含时间戳避免同 session 碰撞）"""
+        ts = datetime.now().isoformat()
+        content = f"{name}:{session_id or ts}:{ts}"
         return hashlib.md5(content.encode()).hexdigest()[:12]
 
     # ==================== Mem0 同步 ====================
@@ -353,7 +354,7 @@ class PlaybookManager:
         """获取策略"""
         return self._entries.get(entry_id)
 
-    def list_all(self, status: PlaybookStatus = None, source: str = None) -> List[PlaybookEntry]:
+    def list_all(self, status: Optional[PlaybookStatus] = None, source: Optional[str] = None) -> List[PlaybookEntry]:
         """
         列出所有策略
 
@@ -420,7 +421,7 @@ class PlaybookManager:
         logger.info(f"📤 策略提交审核: {entry.name}")
         return True
 
-    async def approve(self, entry_id: str, reviewer: str, notes: str = None) -> bool:
+    async def approve(self, entry_id: str, reviewer: str, notes: Optional[str] = None) -> bool:
         """审核通过（仅 PENDING_REVIEW → APPROVED）"""
         entry = self._entries.get(entry_id)
         if not entry or entry.status != PlaybookStatus.PENDING_REVIEW:
@@ -479,6 +480,16 @@ class PlaybookManager:
         Returns:
             提取的策略条目，或 None
         """
+        # Dedup: skip if a playbook already exists for this session
+        sid = session_reward.session_id
+        for existing in self._entries.values():
+            if existing.source_session_id == sid:
+                logger.debug(
+                    f"Playbook already exists for session {sid[:8]}..., "
+                    f"skipping extraction (id={existing.id})"
+                )
+                return None
+
         # 检查奖励阈值
         if session_reward.total_reward < self.min_reward_threshold:
             logger.debug(

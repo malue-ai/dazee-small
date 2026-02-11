@@ -103,7 +103,16 @@ async def list_playbooks(
     """
     manager = await _get_manager()
 
-    filter_status = PlaybookStatus(status) if status else None
+    filter_status = None
+    if status:
+        try:
+            filter_status = PlaybookStatus(status)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的状态值: {status}，"
+                f"支持: {', '.join(s.value for s in PlaybookStatus)}",
+            )
     entries = manager.list_all(status=filter_status, source=source)
 
     return PlaybookListResponse(

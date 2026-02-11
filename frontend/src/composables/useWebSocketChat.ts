@@ -309,21 +309,48 @@ export function useWebSocketChat() {
     const title = payload.title || '系统通知'
     const message = payload.message || ''
     const conversationId = payload.conversation_id
+    const fullContent = payload.full_content || ''
 
-    wsLog.info(`收到通知: type=${ntype}, title=${title}`)
+    wsLog.info(`收到通知: type=${ntype}, title=${title}, fullContent=${fullContent ? fullContent.length + ' chars' : 'empty'}`)
 
-    if (ntype === 'message' && conversationId) {
-      // 聊天消息类通知（带跳转按钮）
-      notificationStore.chatMessage(
-        title,
-        message,
-        { name: 'conversation', params: { conversationId } }
-      )
+    if (ntype === 'message') {
+      if (fullContent) {
+        // 带完整内容的提醒通知：点击"查看"展开内容
+        notificationStore.push({
+          type: 'message',
+          title,
+          message: message.length > 80 ? message.slice(0, 80) + '...' : message,
+          fullContent,
+          action: { label: '查看' },
+          autoDismissMs: 0,
+        })
+      } else if (conversationId) {
+        // 聊天消息类通知（带跳转按钮）
+        notificationStore.chatMessage(
+          title,
+          message,
+          { name: 'conversation', params: { conversationId } }
+        )
+      } else {
+        notificationStore.info(title, message)
+      }
     } else if (ntype === 'success') {
-      const action = conversationId
-        ? { label: '查看', route: { name: 'conversation', params: { conversationId } } as any }
-        : undefined
-      notificationStore.success(title, message, action)
+      if (fullContent) {
+        // 带完整内容的通知（如定时任务 AI 回复）：点击"查看"展开内容
+        notificationStore.push({
+          type: 'success',
+          title,
+          message,
+          fullContent,
+          action: { label: '查看' },
+          autoDismissMs: 0, // 有内容时不自动消失
+        })
+      } else {
+        const action = conversationId
+          ? { label: '查看', route: { name: 'conversation', params: { conversationId } } as any }
+          : undefined
+        notificationStore.success(title, message, action)
+      }
     } else if (ntype === 'error') {
       notificationStore.error(title, message)
     } else {

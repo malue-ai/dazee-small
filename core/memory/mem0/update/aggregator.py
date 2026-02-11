@@ -27,6 +27,22 @@ from logger import get_logger
 
 logger = get_logger("memory.mem0.aggregator")
 
+# ==================== LLM 懒加载 ====================
+
+_aggregator_llm = None
+
+
+async def _get_aggregator_llm():
+    """Get aggregator LLM service (lazy-loaded singleton via profile)."""
+    global _aggregator_llm
+    if _aggregator_llm is None:
+        from config.llm_config import get_llm_profile
+
+        profile = await get_llm_profile("aggregator")
+        _aggregator_llm = create_llm_service(**profile)
+        logger.info(f"[Aggregator] LLM 初始化: model={profile.get('model')}")
+    return _aggregator_llm
+
 
 # ==================== 工具函数 ====================
 
@@ -165,8 +181,8 @@ async def aggregate_user_emotion(
             time_window=time_window["display"], memories="\n".join(memory_texts)
         )
 
-        # 调用 LLM
-        llm = create_llm_service(model="claude-haiku-4-5-20251001")
+        # 调用 LLM（Profile 驱动，懒加载单例）
+        llm = await _get_aggregator_llm()
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
             system="你是情绪分析专家，只输出 JSON 格式结果。",
@@ -199,7 +215,7 @@ async def aggregate_user_emotion(
             "dominant": "unknown",
         }
     except Exception as e:
-        logger.error(f"[Aggregator] 情绪聚合失败: {e}")
+        logger.error(f"[Aggregator] 情绪聚合失败: {e}", exc_info=True)
         return {
             "time_window": time_window,
             "trajectory": [],
@@ -289,8 +305,8 @@ async def aggregate_work_summary(
             time_window=time_window["display"], memories="\n".join(memory_texts)
         )
 
-        # 调用 LLM
-        llm = create_llm_service(model="claude-haiku-4-5-20251001")
+        # 调用 LLM（Profile 驱动，懒加载单例）
+        llm = await _get_aggregator_llm()
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
             system="你是工作总结专家，只输出 JSON 格式结果。",

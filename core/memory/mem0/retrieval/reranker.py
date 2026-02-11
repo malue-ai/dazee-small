@@ -70,17 +70,18 @@ class LLMReranker:
         """
         self._llm = llm_service
 
-    def _get_llm(self) -> Any:
-        """获取 LLM 服务（懒加载）"""
+    async def _get_llm(self) -> Any:
+        """Get LLM service (lazy-loaded via profile)."""
         if self._llm is None:
             try:
+                from config.llm_config import get_llm_profile
                 from core.llm import create_llm_service
 
-                # 使用 Haiku 模型，快速且成本低
-                self._llm = create_llm_service(model="claude-haiku-4-5-20251001")
-                logger.info("[Reranker] 使用 Claude Haiku 进行重排序")
+                profile = await get_llm_profile("reranker")
+                self._llm = create_llm_service(**profile)
+                logger.info(f"[Reranker] LLM 初始化: model={profile.get('model')}")
             except Exception as e:
-                logger.error(f"[Reranker] LLM 初始化失败: {e}")
+                logger.error(f"[Reranker] LLM 初始化失败: {e}", exc_info=True)
                 raise
         return self._llm
 
@@ -120,8 +121,8 @@ class LLMReranker:
             # 构建 Prompt
             prompt = RERANK_PROMPT.format(query=query, memories="\n".join(memory_texts))
 
-            # 调用 LLM
-            llm = self._get_llm()
+            # 调用 LLM（Profile 驱动，懒加载）
+            llm = await self._get_llm()
             from core.llm import Message
 
             response = await llm.create_message_async(

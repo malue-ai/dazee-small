@@ -14,7 +14,7 @@ B9 / B10 文件修改回滚 — 端到端验证脚本
   B10.3 — 用户中止 → 保留已完成（不回滚，清理快照）
 
 Usage:
-    source /Users/liuyi/Documents/langchain/liuy/bin/activate
+    conda activate zeno  # or activate your project venv
     python scripts/verify_rollback_e2e.py           # 运行全部
     python scripts/verify_rollback_e2e.py --case B9  # 仅 B9
     python scripts/verify_rollback_e2e.py --case B10 # 仅 B10

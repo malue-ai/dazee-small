@@ -45,6 +45,8 @@ _CATEGORY_MAP = {
     "fact": "fact",
     "workflow": "preference",  # 工作习惯归入偏好
     "style": "preference",  # 风格归入偏好
+    "tool": "preference",  # 工具偏好归入偏好
+    "success": "fact",  # 成功案例归入事实
     "general": "other",
 }
 
@@ -782,11 +784,48 @@ class InstanceMemoryManager:
             # Convert FragmentMemory hints → flat (content, category)
             extracted: List[Dict[str, Any]] = []
 
+            # --- identity_hint: 用户身份信息 → 关于你 ---
+            if fragment.identity_hint:
+                ih = fragment.identity_hint
+                if ih.name:
+                    extracted.append({
+                        "content": f"用户称呼: {ih.name}",
+                        "category": "fact",
+                    })
+                if ih.role:
+                    extracted.append({
+                        "content": f"职业角色: {ih.role}",
+                        "category": "fact",
+                    })
+                if ih.company:
+                    extracted.append({
+                        "content": f"所在公司/团队: {ih.company}",
+                        "category": "fact",
+                    })
+                if ih.location:
+                    extracted.append({
+                        "content": f"所在地: {ih.location}",
+                        "category": "fact",
+                    })
+                if ih.expertise_level:
+                    extracted.append({
+                        "content": f"专业水平: {ih.expertise_level}",
+                        "category": "fact",
+                    })
+                for trait in ih.other_traits or []:
+                    extracted.append({
+                        "content": f"身份特征: {trait}",
+                        "category": "fact",
+                    })
+
+            # --- task_hint: 任务信息 → 关于你 ---
             if fragment.task_hint and fragment.task_hint.content:
                 extracted.append({
                     "content": fragment.task_hint.content,
                     "category": "fact",
                 })
+
+            # --- preference_hint: 偏好 → 偏好/写作风格 ---
             if fragment.preference_hint:
                 ph = fragment.preference_hint
                 if ph.response_format:
@@ -810,28 +849,102 @@ class InstanceMemoryManager:
                         "content": vp,
                         "category": "preference",
                     })
-            if fragment.tool_hint and fragment.tool_hint.tools_mentioned:
-                for tool in fragment.tool_hint.tools_mentioned:
+
+            # --- tool_hint: 工具 → 常用工具 ---
+            if fragment.tool_hint:
+                for tool in fragment.tool_hint.tools_mentioned or []:
                     extracted.append({
                         "content": f"使用工具: {tool}",
                         "category": "tool",
                     })
+                for platform in fragment.tool_hint.platforms_mentioned or []:
+                    extracted.append({
+                        "content": f"使用平台: {platform}",
+                        "category": "tool",
+                    })
+
+            # --- emotion_hint: 情绪 → 历史经验 ---
             if fragment.emotion_hint and fragment.emotion_hint.signal != "neutral":
                 extracted.append({
                     "content": f"情绪状态: {fragment.emotion_hint.signal}",
                     "category": "general",
                 })
+
+            # --- relation_hint: 关系 → 关于你 ---
             if fragment.relation_hint and fragment.relation_hint.mentioned:
                 for person in fragment.relation_hint.mentioned:
+                    rtype = fragment.relation_hint.relationship_type
+                    label = f"提到人物: {person}"
+                    if rtype:
+                        label += f" ({rtype})"
                     extracted.append({
-                        "content": f"提到人物: {person}",
+                        "content": label,
                         "category": "fact",
                     })
-            if fragment.goal_hint and fragment.goal_hint.goals:
-                for goal in fragment.goal_hint.goals:
+
+            # --- time_hint: 时间规律 → 偏好/工作习惯 ---
+            if fragment.time_hint and fragment.time_hint.pattern:
+                label = f"时间模式: {fragment.time_hint.pattern}"
+                if fragment.time_hint.inferred_schedule:
+                    label += f" ({fragment.time_hint.inferred_schedule})"
+                extracted.append({
+                    "content": label,
+                    "category": "workflow",
+                })
+
+            # --- todo_hint: 待办 → 历史经验 ---
+            if fragment.todo_hint and fragment.todo_hint.content:
+                label = f"待办: {fragment.todo_hint.content}"
+                if fragment.todo_hint.priority in ("high", "urgent"):
+                    label += f" [优先级: {fragment.todo_hint.priority}]"
+                extracted.append({
+                    "content": label,
+                    "category": "general",
+                })
+
+            # --- topic_hint: 主题/项目 → 关于你 ---
+            if fragment.topic_hint:
+                for project in fragment.topic_hint.projects or []:
+                    extracted.append({
+                        "content": f"涉及项目: {project}",
+                        "category": "fact",
+                    })
+                # Only record significant topics (skip if only keywords)
+                for topic in fragment.topic_hint.topics or []:
+                    extracted.append({
+                        "content": f"讨论主题: {topic}",
+                        "category": "fact",
+                    })
+
+            # --- constraint_hint: 约束/禁忌 → 偏好 ---
+            if fragment.constraint_hint:
+                for c in fragment.constraint_hint.constraints or []:
+                    extracted.append({
+                        "content": f"约束: {c}",
+                        "category": "preference",
+                    })
+                for t in fragment.constraint_hint.taboos or []:
+                    extracted.append({
+                        "content": f"禁忌: {t}",
+                        "category": "preference",
+                    })
+
+            # --- goal_hint: 目标/成就/风险 ---
+            if fragment.goal_hint:
+                for goal in fragment.goal_hint.goals or []:
                     extracted.append({
                         "content": f"目标: {goal}",
                         "category": "fact",
+                    })
+                for achievement in fragment.goal_hint.achievements or []:
+                    extracted.append({
+                        "content": f"成果: {achievement}",
+                        "category": "success",
+                    })
+                for risk in fragment.goal_hint.risks or []:
+                    extracted.append({
+                        "content": f"风险: {risk}",
+                        "category": "general",
                     })
 
             logger.info(

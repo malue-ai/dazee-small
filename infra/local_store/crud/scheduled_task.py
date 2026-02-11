@@ -83,6 +83,16 @@ async def create_scheduled_task(
 
     session.add(task)
     await session.commit()
+
+    # 强制 WAL checkpoint，确保数据对后续新 session/连接立即可见
+    # SQLite WAL 模式下，已提交的数据可能仍在 WAL 文件中，
+    # 新连接在特定时序下可能看不到（pool_size=1 场景下的边界条件）
+    try:
+        from sqlalchemy import text
+        await session.execute(text("PRAGMA wal_checkpoint(PASSIVE)"))
+    except Exception as e:
+        logger.warning(f"⚠️ WAL checkpoint 失败（非致命）: {e}")
+
     await session.refresh(task)
 
     logger.info(f"✅ 创建定时任务: id={task_id}, title={title}, trigger={trigger_type}")

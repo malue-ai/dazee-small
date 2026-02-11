@@ -300,6 +300,9 @@ class ToolExecutor:
         except asyncio.TimeoutError:
             from core.tool.types import ToolError, ToolErrorType
             logger.error(f"工具 {tool_name} 执行超时")
+            # HITL 工具超时时通知前端关闭弹窗
+            if tool_name == "hitl":
+                await self._emit_hitl_timeout(ctx)
             return ToolError(
                 error_type=ToolErrorType.TIMEOUT,
                 message=f"工具 {tool_name} 执行超时",
@@ -335,6 +338,32 @@ class ToolExecutor:
                 message=error_str,
                 recovery_hint=recovery,
             ).to_dict()
+
+    async def _emit_hitl_timeout(self, ctx: ToolContext) -> None:
+        """
+        Emit HITL timeout event to notify frontend to close the popup.
+
+        Safety net for when the executor-level timeout kills the HITL tool
+        before its internal timeout fires.
+        """
+        if not ctx.event_manager or not ctx.session_id:
+            return
+        try:
+            await ctx.event_manager.message.emit_message_delta(
+                session_id=ctx.session_id,
+                conversation_id=ctx.conversation_id or "",
+                delta={
+                    "type": "hitl",
+                    "content": {
+                        "status": "timed_out",
+                        "timed_out": True,
+                        "message": "工具执行超时",
+                    },
+                },
+            )
+            logger.info(f"🎯 [HITL] 已发送 executor 超时关闭事件: session_id={ctx.session_id}")
+        except Exception as e:
+            logger.warning(f"发送 HITL executor 超时事件失败: {e}")
 
     @staticmethod
     def _record_usage(tool_name: str, result: Any) -> None:

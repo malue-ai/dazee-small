@@ -9,7 +9,7 @@ Lifecycle:
   5. Kill server process on exit (always, even on failure)
 
 Usage:
-    source /Users/liuyi/Documents/langchain/liuy/bin/activate
+    conda activate zeno  # or activate your project venv
 
     # Run all E2E cases
     python scripts/run_e2e_auto.py
@@ -93,7 +93,25 @@ def is_port_in_use(port: int) -> bool:
 # Server lifecycle
 # ---------------------------------------------------------------------------
 
-VENV_PYTHON = Path("/Users/liuyi/Documents/langchain/liuy/bin/python3")
+def _detect_python() -> Path:
+    """Detect project Python: conda zeno > .venv > current interpreter."""
+    # 1. conda env "zeno"
+    conda_zeno = Path.home() / "miniconda3" / "envs" / "zeno" / "bin" / "python3"
+    if conda_zeno.exists():
+        return conda_zeno
+    # Also check anaconda3
+    conda_zeno_alt = Path.home() / "anaconda3" / "envs" / "zeno" / "bin" / "python3"
+    if conda_zeno_alt.exists():
+        return conda_zeno_alt
+    # 2. Project local .venv
+    local_venv = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python3"
+    if local_venv.exists():
+        return local_venv
+    # 3. Current interpreter
+    return Path(sys.executable)
+
+
+VENV_PYTHON = _detect_python()
 
 
 def start_server(port: int, provider: str = None) -> subprocess.Popen:

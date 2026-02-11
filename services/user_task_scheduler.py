@@ -14,6 +14,7 @@ User Task Scheduler - 用户定时任务调度器
 - UserTaskScheduler: 用户通过 AI 创建的定时任务，数据来自 SQLite
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -247,7 +248,7 @@ class UserTaskScheduler:
 
     async def register_task(self, task) -> bool:
         """
-        动态注册新任务
+        动态注册新任务（传入 ORM 对象）
 
         在 scheduled_task_tool 创建任务后调用，
         使新任务立即加入调度（无需等待轮询）。
@@ -263,6 +264,43 @@ class UserTaskScheduler:
         if result:
             self._log_scheduler_status()
         return result
+
+    async def register_task_by_id(self, task_id: str) -> bool:
+        """
+        通过 task_id 从数据库读取任务并注册到调度器。
+
+        比 register_task(orm_obj) 更可靠：
+        - 使用独立 session 从 DB 读取，确保数据已持久化
+        - 避免依赖跨 session 的 ORM 对象属性
+        """
+        if not self._running:
+            logger.warning(
+                f"⚠️ [Scheduler] 调度器未运行，无法注册任务: id={task_id}"
+            )
+            return False
+
+        if not self._workspace or not self._workspace.is_running:
+            logger.error(
+                f"❌ [Scheduler] Workspace 不可用: task_id={task_id}"
+            )
+            return False
+
+        from infra.local_store.crud.scheduled_task import get_scheduled_task
+
+        assert self._workspace._session_factory is not None
+        async with self._workspace._session_factory() as session:
+            task = await get_scheduled_task(session, task_id)
+            if not task:
+                logger.error(
+                    f"❌ [Scheduler] register_task_by_id 查不到任务: "
+                    f"task_id={task_id}"
+                )
+                return False
+
+            result = self._register_job(task)
+            if result:
+                self._log_scheduler_status()
+            return result
 
     async def unregister_task(self, task_id: str) -> bool:
         """
@@ -317,44 +355,64 @@ class UserTaskScheduler:
             mark_task_executed,
         )
 
-        # ---- Phase 1: 加载任务（短暂持有 session，立即释放） ----
-        task_snapshot = None
+        # ---- Phase 1: 加载任务（带重试，防止 SQLite WAL 可见性延迟） ----
         assert self._workspace._session_factory is not None, "Workspace not started"
-        async with self._workspace._session_factory() as session:
-            task = await get_scheduled_task(session, task_id)
 
-            if not task:
-                logger.warning(f"⚠️ [Scheduler] 任务不存在: task_id={task_id}")
-                return
+        max_retries = 3
+        retry_delay = 1.0  # seconds
+        task_snapshot = None
 
-            if task.status != "active":
-                logger.info(f"⏭️ [Scheduler] 任务非活跃状态，跳过: task_id={task_id}, status={task.status}")
-                return
+        for attempt in range(1, max_retries + 1):
+            async with self._workspace._session_factory() as session:
+                task = await get_scheduled_task(session, task_id)
 
-            # 提取执行所需数据（脱离 session 后 lazy-load 不可用）
-            task_snapshot = {
-                "id": task.id,
-                "title": task.title,
-                "trigger_type": task.trigger_type,
-                "user_id": task.user_id,
-                "conversation_id": task.conversation_id,
-                "action": task.action,  # property，JSON 反序列化
-            }
-        # ---- session 已释放 ----
+                if task:
+                    if task.status != "active":
+                        logger.info(
+                            f"⏭️ [Scheduler] 任务非活跃状态，跳过: "
+                            f"task_id={task_id}, status={task.status}"
+                        )
+                        return
+
+                    # 提取执行所需数据（在 session 内完成，避免 lazy-load 问题）
+                    task_snapshot = {
+                        "id": task.id,
+                        "title": task.title,
+                        "trigger_type": task.trigger_type,
+                        "user_id": task.user_id,
+                        "conversation_id": task.conversation_id,
+                        "action": task.action,  # property，JSON 反序列化
+                    }
+                    break
+            # ---- session 已释放 ----
+
+            if attempt < max_retries:
+                logger.warning(
+                    f"⚠️ [Scheduler] 任务未找到，重试 {attempt}/{max_retries}: "
+                    f"task_id={task_id}, 等待 {retry_delay}s"
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # exponential backoff
 
         if not task_snapshot:
+            logger.error(
+                f"❌ [Scheduler] 任务在 {max_retries} 次重试后仍未找到: "
+                f"task_id={task_id}, workspace_instance={self._workspace.instance_id}, "
+                f"workspace_running={self._workspace.is_running}"
+            )
             return
 
         # ---- Phase 2: 执行任务（无 session 持有，可自由操作数据库） ----
         execution_success = True
         execution_error = None
+        response_text = None
         try:
             logger.info(
                 f"🚀 [Scheduler] 开始执行任务: id={task_snapshot['id']}, "
                 f"title={task_snapshot['title']}, trigger={task_snapshot['trigger_type']}"
             )
 
-            await self._execute_task(task_snapshot)
+            response_text = await self._execute_task(task_snapshot)
 
         except Exception as e:
             execution_success = False
@@ -366,7 +424,9 @@ class UserTaskScheduler:
             # 执行失败也要标记（避免死循环重试）
 
         # ---- Phase 2.5: 广播通知到前端（通过 WebSocket ConnectionManager） ----
-        await self._broadcast_task_notification(task_snapshot, execution_success, execution_error)
+        await self._broadcast_task_notification(
+            task_snapshot, execution_success, execution_error, response_text
+        )
 
         # ---- Phase 3: 标记执行完成（短暂持有 session） ----
         try:
@@ -391,12 +451,15 @@ class UserTaskScheduler:
                 exc_info=True,
             )
 
-    async def _execute_task(self, task_data: Dict[str, Any]):
+    async def _execute_task(self, task_data: Dict[str, Any]) -> Optional[str]:
         """
-        执行单个任务。
+        Execute a single task.
 
         Args:
-            task_data: 任务快照 dict（已脱离 session，无连接池竞争风险）
+            task_data: Task snapshot dict (detached from session)
+
+        Returns:
+            AI response text (for agent_task type), or None.
         """
         action = task_data["action"]
         action_type = action.get("type", "send_message")
@@ -407,91 +470,45 @@ class UserTaskScheduler:
 
         if action_type == "send_message":
             await self._action_send_message(task_data, action)
+            return action.get("content", "")
         elif action_type == "agent_task":
-            await self._action_agent_task(task_data, action)
+            return await self._action_agent_task(task_data, action)
         else:
             logger.warning(f"未知的动作类型: {action_type}")
+            return None
 
     async def _action_send_message(self, task_data: Dict[str, Any], action: Dict[str, Any]):
-        """发送消息动作：将提醒消息存储到数据库"""
-        content = action.get("content", "定时提醒")
-        user_id = task_data["user_id"]
-        conversation_id = task_data["conversation_id"]
+        """Send-message action: notification only, no conversation persistence.
+
+        Scheduled reminders are displayed purely via the notification card;
+        they should NOT pollute any existing conversation.
+        """
         task_id = task_data["id"]
         title = task_data["title"]
 
-        try:
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            message_content = [
-                {
-                    "type": "text",
-                    "text": (
-                        f"⏰ **定时提醒** ({now_str})\n\n"
-                        f"**{title}**\n\n"
-                        f"{content}"
-                    ),
-                }
-            ]
-            message_metadata = {
-                "type": "scheduled_reminder",
-                "task_id": task_id,
-                "task_title": title,
-                "triggered_at": now_str,
-            }
+        logger.info(
+            f"✅ [Scheduler] 提醒消息已准备（仅通知，不写会话）: "
+            f"task_id={task_id}, title={title}"
+        )
 
-            if conversation_id and self._workspace:
-                # 此时没有外层 session 持有连接，可以安全调用 workspace 方法
-                await self._workspace.create_message(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=message_content,
-                    metadata=message_metadata,
-                )
-                logger.info(
-                    f"✅ [Scheduler] 提醒消息已存储: "
-                    f"task_id={task_id}, conv_id={conversation_id}"
-                )
-            elif self._workspace:
-                # 没有关联会话，创建新会话
-                conv = await self._workspace.create_conversation(
-                    user_id=user_id,
-                    title=f"定时提醒: {title}",
-                    metadata={"source": "scheduled_task", "task_id": task_id},
-                )
-                await self._workspace.create_message(
-                    conversation_id=conv.id,
-                    role="assistant",
-                    content=message_content,
-                    metadata=message_metadata,
-                )
-                logger.info(
-                    f"✅ [Scheduler] 提醒消息已存储到新会话: "
-                    f"task_id={task_id}, conv_id={conv.id}"
-                )
-            else:
-                logger.error(
-                    f"❌ [Scheduler] Workspace 不可用，无法存储提醒消息: "
-                    f"task_id={task_id}"
-                )
+    async def _action_agent_task(self, task_data: Dict[str, Any], action: Dict[str, Any]) -> Optional[str]:
+        """Execute Agent task in an isolated conversation and return response text.
 
-        except Exception as e:
-            logger.error(
-                f"❌ [Scheduler] 存储提醒消息失败: task_id={task_id}, error={e}",
-                exc_info=True,
-            )
-            raise
-
-    async def _action_agent_task(self, task_data: Dict[str, Any], action: Dict[str, Any]):
-        """执行 Agent 任务动作"""
+        Each execution creates a dedicated hidden conversation so that the
+        original conversation where the task was created is never polluted.
+        Uses chat_service.conversation_service to create the conversation,
+        ensuring the same session factory is used for both conversation and
+        message creation (avoids FOREIGN KEY constraint failures from
+        cross-engine session mismatch).
+        """
         prompt = action.get("prompt", "")
         user_id = task_data["user_id"]
-        conversation_id = task_data["conversation_id"]
         task_id = task_data["id"]
         title = task_data["title"]
 
         if not prompt:
             logger.warning(f"Agent 任务缺少 prompt: task_id={task_id}")
-            return
+            return None
 
         logger.info(f"执行 Agent 任务: task_id={task_id}, prompt={prompt[:50]}...")
 
@@ -500,22 +517,33 @@ class UserTaskScheduler:
 
             chat_service = get_chat_service()
 
-            if not conversation_id and self._workspace:
-                conv = await self._workspace.create_conversation(
-                    user_id=user_id,
-                    title=f"定时任务: {title}",
-                    metadata={"source": "scheduled_task", "task_id": task_id},
-                )
-                conversation_id = conv.id
-
-            await chat_service.process_scheduled_task(
+            # Create an isolated conversation via conversation_service
+            # (same session factory as create_message in process_scheduled_task)
+            exec_conv = await chat_service.conversation_service.create_conversation(
                 user_id=user_id,
-                conversation_id=conversation_id,
+                title=f"定时任务: {title}",
+                metadata={
+                    "source": "scheduled_task",
+                    "task_id": task_id,
+                    "hidden": True,
+                },
+            )
+            exec_conversation_id = exec_conv.id
+
+            result = await chat_service.process_scheduled_task(
+                user_id=user_id,
+                conversation_id=exec_conversation_id,
                 prompt=prompt,
                 task_id=task_id,
             )
 
-            logger.info(f"Agent 任务执行完成: task_id={task_id}")
+            _resp = result.get("response", "") if result else None
+            logger.info(
+                f"Agent 任务执行完成: task_id={task_id}, "
+                f"response_len={len(_resp) if _resp else 0}, "
+                f"response_preview={(_resp or '')[:100]!r}"
+            )
+            return _resp
 
         except Exception as e:
             logger.error(
@@ -529,14 +557,16 @@ class UserTaskScheduler:
         task_data: Dict[str, Any],
         success: bool,
         error: Optional[str] = None,
+        response_text: Optional[str] = None,
     ):
         """
-        通过 WebSocket 向前端广播定时任务执行通知。
+        Broadcast task execution notification to frontend via WebSocket.
 
         Args:
-            task_data: 任务快照
-            success: 是否执行成功
-            error: 失败时的错误信息
+            task_data: Task snapshot
+            success: Whether execution succeeded
+            error: Error message on failure
+            response_text: AI response text (for expandable preview)
         """
         try:
             from routers.websocket import get_connection_manager
@@ -560,14 +590,23 @@ class UserTaskScheduler:
                 message = error or "未知错误"
                 ntype = "error"
 
-            payload = {
+            payload: Dict[str, Any] = {
                 "notification_type": ntype,
                 "title": title,
                 "message": message[:200],
                 "task_id": task_data["id"],
-                "conversation_id": task_data.get("conversation_id"),
                 "triggered_at": now_str,
             }
+
+            # Include AI response for expandable preview in notification card
+            if response_text:
+                payload["full_content"] = response_text[:2000]
+
+            logger.info(
+                f"📤 [Scheduler] 广播 payload keys={list(payload.keys())}, "
+                f"has_full_content={'full_content' in payload}, "
+                f"full_content_len={len(payload.get('full_content', ''))}"
+            )
 
             await manager.broadcast_notification("notification", payload)
 

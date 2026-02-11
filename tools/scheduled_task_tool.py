@@ -197,10 +197,16 @@ class ScheduledTaskTool(BaseTool):
         # 创建任务
         try:
             from infra.local_store import get_workspace
-            from infra.local_store.crud.scheduled_task import create_scheduled_task
+            from infra.local_store.crud.scheduled_task import (
+                create_scheduled_task,
+                get_scheduled_task,
+            )
 
             workspace = await get_workspace(_get_instance_name())
 
+            # Phase 1: 创建任务并提取数据（session 最小化，避免 close 时的隐式 ROLLBACK
+            # 影响 SQLite WAL 可见性）
+            task_snapshot = None
             async with workspace._session_factory() as session:
                 task = await create_scheduled_task(
                     session=session,
@@ -214,52 +220,83 @@ class ScheduledTaskTool(BaseTool):
                     conversation_id=conversation_id,
                 )
 
-                # 动态注册到调度器（立即生效，无需等待轮询）
-                from services.user_task_scheduler import get_user_task_scheduler
+                # 提取 task 数据（脱离 session 后 ORM 对象不可靠）
+                task_snapshot = {
+                    "id": task.id,
+                    "title": task.title,
+                    "trigger_type": task.trigger_type,
+                    "next_run_at": task.next_run_at,
+                }
+            # ---- session 已关闭，commit 已持久化 ----
 
-                scheduler = get_user_task_scheduler()
-                scheduler_registered = False
-
-                if scheduler.is_running():
-                    scheduler_registered = await scheduler.register_task(task)
-                    if not scheduler_registered:
-                        logger.warning(
-                            f"⚠️ 任务已创建到数据库但注册到调度器失败: "
-                            f"task_id={task.id}"
-                        )
-                else:
-                    logger.warning(
-                        f"⚠️ 用户任务调度器未运行！任务仅保存到数据库: "
-                        f"task_id={task.id}, scheduler_running={scheduler.is_running()}"
+            # Phase 2: 验证任务确实写入了数据库
+            async with workspace._session_factory() as verify_session:
+                verified_task = await get_scheduled_task(
+                    verify_session, task_snapshot["id"]
+                )
+                if not verified_task:
+                    logger.error(
+                        f"❌ 任务创建后验证失败，数据库中找不到任务: "
+                        f"task_id={task_snapshot['id']}"
                     )
-
-                # 格式化下次执行时间
-                next_run_str = (
-                    task.next_run_at.strftime("%Y-%m-%d %H:%M:%S")
-                    if task.next_run_at
-                    else "未知"
+                    return {
+                        "success": False,
+                        "error": "任务创建后验证失败，请重试",
+                    }
+                logger.info(
+                    f"✅ 任务创建验证通过: task_id={task_snapshot['id']}, "
+                    f"status={verified_task.status}"
                 )
 
-                result = {
-                    "success": True,
-                    "task_id": task.id,
-                    "message": f"✅ 定时任务已创建: {title}",
-                    "next_run_at": next_run_str,
-                    "trigger_type": trigger_type,
-                    "trigger_config": trigger_config,
-                    "scheduler_registered": scheduler_registered,
-                }
+            # Phase 3: 注册到调度器（session 已关闭，无连接池竞争）
+            from services.user_task_scheduler import get_user_task_scheduler
 
-                # 如果调度器未运行，添加警告信息
-                if not scheduler.is_running():
-                    result["warning"] = (
-                        "调度器未运行，任务可能不会按时触发。"
-                        "请检查服务日志。"
+            scheduler = get_user_task_scheduler()
+            scheduler_registered = False
+
+            if scheduler.is_running():
+                scheduler_registered = await scheduler.register_task_by_id(
+                    task_snapshot["id"]
+                )
+                if not scheduler_registered:
+                    logger.warning(
+                        f"⚠️ 任务已创建到数据库但注册到调度器失败: "
+                        f"task_id={task_snapshot['id']}"
                     )
-                elif not scheduler_registered:
-                    result["warning"] = "任务已保存但注册到调度器失败，请检查服务日志。"
+            else:
+                logger.warning(
+                    f"⚠️ 用户任务调度器未运行！任务仅保存到数据库: "
+                    f"task_id={task_snapshot['id']}, "
+                    f"scheduler_running={scheduler.is_running()}"
+                )
 
-                return result
+            # 格式化下次执行时间
+            next_run_str = (
+                task_snapshot["next_run_at"].strftime("%Y-%m-%d %H:%M:%S")
+                if task_snapshot["next_run_at"]
+                else "未知"
+            )
+
+            result = {
+                "success": True,
+                "task_id": task_snapshot["id"],
+                "message": f"✅ 定时任务已创建: {title}",
+                "next_run_at": next_run_str,
+                "trigger_type": trigger_type,
+                "trigger_config": trigger_config,
+                "scheduler_registered": scheduler_registered,
+            }
+
+            # 如果调度器未运行，添加警告信息
+            if not scheduler.is_running():
+                result["warning"] = (
+                    "调度器未运行，任务可能不会按时触发。"
+                    "请检查服务日志。"
+                )
+            elif not scheduler_registered:
+                result["warning"] = "任务已保存但注册到调度器失败，请检查服务日志。"
+
+            return result
 
         except Exception as e:
             logger.error(f"❌ 创建定时任务失败: {e}", exc_info=True)

@@ -26,8 +26,10 @@ import DebugPanel from '@/components/common/DebugPanel.vue'
 import SplashScreen from '@/components/common/SplashScreen.vue'
 import GuideOverlay from '@/components/common/GuideOverlay.vue'
 import NotificationCenter from '@/components/common/NotificationCenter.vue'
+import { useConnectionStore } from '@/stores/connection'
 
 const route = useRoute()
+const connectionStore = useConnectionStore()
 
 const isDev = import.meta.env.DEV
 
@@ -44,6 +46,8 @@ const layout = computed(() => {
 function onSplashDone() {
   showSplash.value = false
   appReady.value = true
-  // 旧引导页已弃用，改为 ChatView 中的交互式引导
+
+  // 建立全局 WebSocket 连接，用于接收定时任务等广播通知
+  connectionStore.initNotificationChannel()
 }
 </script>

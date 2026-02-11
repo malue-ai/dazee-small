@@ -149,12 +149,25 @@ class ToolHint:
 
 @dataclass
 class GoalHint:
-    """目标与风险信号线索（新增）"""
+    """目标与风险信号线索"""
 
     goals: List[str] = field(default_factory=list)  # 提到的目标
     risks: List[str] = field(default_factory=list)  # 风险信号
     blockers: List[str] = field(default_factory=list)  # 阻碍因素
     achievements: List[str] = field(default_factory=list)  # 成就/成果
+    confidence: float = 0.0
+
+
+@dataclass
+class IdentityHint:
+    """用户身份与个人信息线索"""
+
+    name: Optional[str] = None  # 姓名/称呼
+    role: Optional[str] = None  # 职业角色（如：产品经理、前端开发）
+    company: Optional[str] = None  # 公司/团队/组织
+    location: Optional[str] = None  # 所在地/时区
+    expertise_level: Optional[str] = None  # 专业水平：beginner/intermediate/expert
+    other_traits: List[str] = field(default_factory=list)  # 其他身份特征
     confidence: float = 0.0
 
 
@@ -183,12 +196,13 @@ class FragmentMemory:
     relation_hint: Optional[RelationHint] = None
     todo_hint: Optional[TodoHint] = None
 
-    # 新增线索维度
+    # 扩展线索维度
     preference_hint: Optional[PreferenceHint] = None
     topic_hint: Optional[TopicHint] = None
     constraint_hint: Optional[ConstraintHint] = None
     tool_hint: Optional[ToolHint] = None
     goal_hint: Optional[GoalHint] = None
+    identity_hint: Optional[IdentityHint] = None
 
     # 记忆元数据（新增）
     memory_type: MemoryType = MemoryType.IMPLICIT  # 记忆类型
@@ -320,6 +334,19 @@ class FragmentMemory:
                     "confidence": self.goal_hint.confidence,
                 }
                 if self.goal_hint
+                else None
+            ),
+            "identity_hint": (
+                {
+                    "name": self.identity_hint.name,
+                    "role": self.identity_hint.role,
+                    "company": self.identity_hint.company,
+                    "location": self.identity_hint.location,
+                    "expertise_level": self.identity_hint.expertise_level,
+                    "other_traits": self.identity_hint.other_traits,
+                    "confidence": self.identity_hint.confidence,
+                }
+                if self.identity_hint
                 else None
             ),
             # 记忆元数据

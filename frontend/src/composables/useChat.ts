@@ -511,7 +511,12 @@ export function useChat() {
    *
    * @param agentId - 发送消息时捕获的 agentId（用于离开会话后推送通知）
    */
-  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage, convId?: string, agentId?: string): void {
+  function handleStreamEvent(event: { type: string; data: any; [key: string]: any }, msg: UIMessage, convId?: string, agentId?: string): void {
+    // Skip broadcast events targeting a different conversation
+    // (WebSocket ConnectionManager broadcasts to ALL connections)
+    const eventConvId = event.conversation_id
+    if (eventConvId && convId && eventConvId !== convId) return
+
     const { type, data } = event
 
     // 处理 session 开始事件
@@ -592,6 +597,9 @@ export function useChat() {
             if (request && !hitl.showModal.value) {
               hitl.show(request)
             }
+          } else if (hitlData && (hitlData.timed_out || hitlData.status === 'timed_out')) {
+            console.log('⏱️ HITL 超时，关闭弹窗')
+            hitl.hide()
           } else if (hitlData && hitlData.status === 'completed' && hitlData.success) {
             console.log('✅ HITL 已完成:', hitlData.response)
           }
@@ -616,6 +624,12 @@ export function useChat() {
     // 处理流结束/消息结束
     if ((type === 'message_stop' || type === 'session_stopped' || type === 'error') && convId) {
        sessionStore.markCompleted(convId)
+
+       // Safety net: 消息结束时如果 HITL 弹窗仍在显示则关闭
+       if (hitl.showModal.value) {
+         console.log('🔒 消息结束，关闭残留 HITL 弹窗')
+         hitl.hide()
+       }
 
        // 用户不在当前会话时，推送全局通知
        if (convId !== conversationStore.currentId && type !== 'error') {
@@ -731,6 +745,19 @@ export function useChat() {
         }
       } catch (e) {
         console.warn('解析 HITL 请求失败:', e)
+      }
+    }
+
+    // HITL 超时/关闭事件：后端 HITL 工具超时后发送，前端关闭弹窗
+    if (delta.type === 'hitl') {
+      try {
+        const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
+        if (hitlData && (hitlData.timed_out || hitlData.status === 'timed_out')) {
+          console.log('⏱️ HITL 超时，关闭弹窗')
+          hitl.hide()
+        }
+      } catch {
+        // 忽略解析错误
       }
     }
   }
@@ -871,6 +898,13 @@ export function useChat() {
   function handleContentStart(data: { index: number; content_block: ContentBlock }, msg: UIMessage): void {
     if (!data || typeof data.index !== 'number' || !data.content_block) return
     let { index, content_block } = data
+
+    // Safety net: Agent 生成新内容块时，如果 HITL 弹窗仍在显示则关闭
+    // 说明 HITL 工具已返回（超时或其他原因），Agent 继续执行
+    if (hitl.showModal.value) {
+      console.log('🔄 Agent 继续执行，关闭残留 HITL 弹窗')
+      hitl.hide()
+    }
 
     if (index === -1) {
       index = msg.contentBlocks.length

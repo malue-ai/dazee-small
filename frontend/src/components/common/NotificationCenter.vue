@@ -19,8 +19,11 @@
         <div
           v-for="item in visibleItems"
           :key="item.id"
-          class="pointer-events-auto w-80 rounded-2xl border border-border bg-white/90 backdrop-blur-xl shadow-lg overflow-hidden select-none"
-          :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'"
+          class="pointer-events-auto rounded-2xl border border-border bg-white/90 backdrop-blur-xl shadow-lg overflow-hidden select-none transition-all duration-300 ease-out"
+          :class="[
+            isDragging ? 'cursor-grabbing' : 'cursor-grab',
+            item.expanded ? 'w-96' : 'w-80',
+          ]"
           @mousedown="onDragStart"
         >
           <!-- Header -->
@@ -41,14 +44,25 @@
             <!-- Text -->
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-foreground truncate">{{ item.title }}</p>
-              <p v-if="item.message" class="text-xs text-muted-foreground truncate">{{ item.message }}</p>
+              <p v-if="item.message && !item.expanded" class="text-xs text-muted-foreground truncate">{{ item.message }}</p>
             </div>
 
             <!-- Actions -->
             <div class="flex items-center gap-1 flex-shrink-0">
-              <!-- Action button -->
+              <!-- Expandable: toggle button -->
               <button
-                v-if="item.action"
+                v-if="item.fullContent"
+                @click="handleToggleExpand(item)"
+                class="px-2.5 py-1 text-xs font-medium rounded-lg transition-colors"
+                :class="item.expanded
+                  ? 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  : 'bg-primary text-white hover:bg-primary-hover shadow-sm shadow-primary/20'"
+              >
+                {{ item.expanded ? '收起' : '查看' }}
+              </button>
+              <!-- Regular action button (no fullContent) -->
+              <button
+                v-else-if="item.action"
                 @click="handleAction(item)"
                 class="px-2.5 py-1 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors shadow-sm shadow-primary/20"
               >
@@ -63,6 +77,23 @@
               </button>
             </div>
           </div>
+
+          <!-- Expanded content (AI response preview) -->
+          <Transition
+            enter-active-class="transition-all duration-300 ease-out"
+            enter-from-class="opacity-0 max-h-0"
+            enter-to-class="opacity-100 max-h-80"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 max-h-80"
+            leave-to-class="opacity-0 max-h-0"
+          >
+            <div v-if="item.expanded && item.fullContent" class="overflow-hidden">
+              <div class="mx-4 mb-3 border-t border-border" />
+              <div class="px-4 pb-4 max-h-64 overflow-y-auto scrollbar-thin">
+                <div class="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{{ item.fullContent }}</div>
+              </div>
+            </div>
+          </Transition>
 
           <!-- Progress bar (type=progress only) -->
           <div v-if="item.type === 'progress' && item.progress" class="px-4 pb-3.5">
@@ -80,8 +111,8 @@
             </div>
           </div>
 
-          <!-- Bottom padding for non-progress types with no message -->
-          <div v-else-if="!item.message" class="pb-1.5" />
+          <!-- Bottom padding for non-progress types with no message (and not expanded) -->
+          <div v-else-if="!item.message && !item.expanded" class="pb-1.5" />
         </div>
       </TransitionGroup>
     </div>
@@ -205,6 +236,10 @@ function iconBgClass(type: NotificationType): string {
 function progressPercent(progress: NotificationProgress): string {
   if (progress.total === 0) return '0%'
   return `${Math.round((progress.step / progress.total) * 100)}%`
+}
+
+function handleToggleExpand(item: NotificationItem): void {
+  store.toggleExpand(item.id)
 }
 
 function handleAction(item: NotificationItem): void {
