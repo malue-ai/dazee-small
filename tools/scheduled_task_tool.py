@@ -47,6 +47,14 @@ class ScheduledTaskTool(BaseTool):
     name = "scheduled_task"
     description = """定时任务管理（设置提醒、定期执行任务等）
 
+操作流程：
+- 创建任务: operation="create"
+- 查看任务: operation="list"（返回所有活跃任务及其 task_id）
+- 取消任务: operation="cancel"（需要 task_id，如果不知道 task_id 请先用 list 获取）
+- 更新任务: operation="update"（需要 task_id，如果不知道 task_id 请先用 list 获取）
+
+重要：cancel 和 update 操作必须提供 task_id。如果用户要取消或更新任务但你不知道具体 task_id，请先调用 list 获取任务列表。
+
 支持的触发类型：
 - once: 单次执行（指定具体时间）
 - cron: Cron 表达式（如 "0 9 * * *" 表示每天 9 点）
@@ -140,6 +148,12 @@ class ScheduledTaskTool(BaseTool):
 
         operation = params.get("operation")
 
+        logger.info(
+            f"📅 scheduled_task 调用: operation={operation}, "
+            f"params_keys={list(params.keys())}, "
+            f"task_id={params.get('task_id')!r}, user_id={user_id}"
+        )
+
         if operation == "create":
             return await self._create_task(params, user_id, conversation_id)
         elif operation == "list":
@@ -161,6 +175,35 @@ class ScheduledTaskTool(BaseTool):
         action = params.get("action", {"type": "send_message", "content": "定时提醒"})
 
         logger.info(f"🕐 创建定时任务: user_id={user_id}, title={title}, trigger={trigger_type}")
+
+        # 去重检查：同用户下相同标题 + 相同触发类型的活跃任务视为重复
+        try:
+            from infra.local_store import get_workspace
+            from infra.local_store.crud.scheduled_task import list_user_tasks
+
+            workspace = await get_workspace(_get_instance_name())
+            async with workspace.session() as session:
+                existing_tasks = await list_user_tasks(session, user_id, status="active")
+                for t in existing_tasks:
+                    if t.title == title and t.trigger_type == trigger_type:
+                        logger.warning(
+                            f"⚠️ 跳过重复创建: 已存在同名活跃任务 "
+                            f"id={t.id}, title={title}, trigger={trigger_type}"
+                        )
+                        next_run_str = (
+                            t.next_run_at.strftime("%Y-%m-%d %H:%M:%S")
+                            if t.next_run_at else "未知"
+                        )
+                        return {
+                            "success": True,
+                            "task_id": t.id,
+                            "message": f"✅ 任务已存在: {title}（跳过重复创建）",
+                            "next_run_at": next_run_str,
+                            "trigger_type": t.trigger_type,
+                            "deduplicated": True,
+                        }
+        except Exception as e:
+            logger.warning(f"⚠️ 去重检查失败（继续创建）: {e}")
 
         # 解析触发配置
         run_at = None
@@ -207,7 +250,7 @@ class ScheduledTaskTool(BaseTool):
             # Phase 1: 创建任务并提取数据（session 最小化，避免 close 时的隐式 ROLLBACK
             # 影响 SQLite WAL 可见性）
             task_snapshot = None
-            async with workspace._session_factory() as session:
+            async with workspace.session() as session:
                 task = await create_scheduled_task(
                     session=session,
                     user_id=user_id,
@@ -230,7 +273,7 @@ class ScheduledTaskTool(BaseTool):
             # ---- session 已关闭，commit 已持久化 ----
 
             # Phase 2: 验证任务确实写入了数据库
-            async with workspace._session_factory() as verify_session:
+            async with workspace.session() as verify_session:
                 verified_task = await get_scheduled_task(
                     verify_session, task_snapshot["id"]
                 )
@@ -312,7 +355,7 @@ class ScheduledTaskTool(BaseTool):
 
             workspace = await get_workspace(_get_instance_name())
 
-            async with workspace._session_factory() as session:
+            async with workspace.session() as session:
                 tasks = await list_user_tasks(session, user_id, status="active")
 
                 task_list = []
@@ -354,10 +397,24 @@ class ScheduledTaskTool(BaseTool):
             logger.error(f"❌ 查询定时任务失败: {e}", exc_info=True)
             return {"success": False, "error": f"查询任务失败: {str(e)}"}
 
-    async def _cancel_task(self, task_id: str, user_id: str) -> Dict[str, Any]:
+    async def _cancel_task(self, task_id: Optional[str], user_id: str) -> Dict[str, Any]:
         """取消定时任务"""
         if not task_id:
-            return {"success": False, "error": "缺少 task_id"}
+            logger.warning(
+                f"⚠️ cancel 操作缺少 task_id，自动列出任务列表: user_id={user_id}"
+            )
+            # 自动列出任务，帮助 LLM 选择正确的 task_id
+            task_list = await self._list_tasks(user_id)
+            if task_list.get("success") and task_list.get("count", 0) > 0:
+                return {
+                    "success": False,
+                    "error": "缺少 task_id，请从以下任务列表中选择要取消的任务，然后重新调用 cancel 并提供 task_id",
+                    "active_tasks": task_list["tasks"],
+                }
+            return {
+                "success": False,
+                "error": "缺少 task_id，且当前没有活跃的定时任务",
+            }
 
         logger.info(f"🛑 取消定时任务: task_id={task_id}, user_id={user_id}")
 
@@ -367,7 +424,7 @@ class ScheduledTaskTool(BaseTool):
 
             workspace = await get_workspace(_get_instance_name())
 
-            async with workspace._session_factory() as session:
+            async with workspace.session() as session:
                 # 先获取任务信息
                 task = await get_scheduled_task(session, task_id)
                 if not task:
@@ -402,7 +459,20 @@ class ScheduledTaskTool(BaseTool):
         """更新定时任务"""
         task_id = params.get("task_id")
         if not task_id:
-            return {"success": False, "error": "缺少 task_id"}
+            logger.warning(
+                f"⚠️ update 操作缺少 task_id，自动列出任务列表: user_id={user_id}"
+            )
+            task_list = await self._list_tasks(user_id)
+            if task_list.get("success") and task_list.get("count", 0) > 0:
+                return {
+                    "success": False,
+                    "error": "缺少 task_id，请从以下任务列表中选择要更新的任务，然后重新调用 update 并提供 task_id",
+                    "active_tasks": task_list["tasks"],
+                }
+            return {
+                "success": False,
+                "error": "缺少 task_id，且当前没有活跃的定时任务",
+            }
 
         logger.info(f"🔄 更新定时任务: task_id={task_id}, user_id={user_id}")
 
@@ -412,7 +482,7 @@ class ScheduledTaskTool(BaseTool):
 
             workspace = await get_workspace(_get_instance_name())
 
-            async with workspace._session_factory() as session:
+            async with workspace.session() as session:
                 # 先获取任务信息
                 task = await get_scheduled_task(session, task_id)
                 if not task:

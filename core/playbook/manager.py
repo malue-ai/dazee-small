@@ -533,9 +533,10 @@ class PlaybookManager:
             "avg_turns": len(session_reward.step_rewards),
         }
 
-        # 生成名称和描述
-        name = f"Auto-{session_reward.session_id[:8]}"
-        description = f"从会话 {session_reward.session_id} 自动提取的策略"
+        # 生成名称和描述（默认值不暴露 session_id）
+        tools_brief = ", ".join([t["tool"] for t in tool_sequence[:3]])
+        name = f"Auto-{tools_brief}" if tool_sequence else "Auto-strategy"
+        description = "自动提取的策略"
 
         if use_llm and self.llm:
             try:

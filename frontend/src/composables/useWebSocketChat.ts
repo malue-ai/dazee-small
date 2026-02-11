@@ -61,6 +61,17 @@ const REQUEST_TIMEOUT_MS = 30000
 
 // ==================== Composable ====================
 
+/** useWebSocketChat 配置选项 */
+export interface UseWebSocketChatOptions {
+  /**
+   * 是否处理广播通知事件（定时任务完成等）。
+   * 只有全局通知频道应设为 true，会话连接设为 false，
+   * 避免同一通知被多个连接重复处理。
+   * 默认 false。
+   */
+  handleNotifications?: boolean
+}
+
 /**
  * WebSocket 聊天 Composable
  *
@@ -69,7 +80,7 @@ const REQUEST_TIMEOUT_MS = 30000
  * - disconnect() → 中断当前流（不关闭连接）
  * - reset() → 完全关闭连接并重置状态
  */
-export function useWebSocketChat() {
+export function useWebSocketChat(wsOptions?: UseWebSocketChatOptions) {
   const sessionStore = useSessionStore()
   const notificationStore = useNotificationStore()
 
@@ -253,8 +264,12 @@ export function useWebSocketChat() {
     }
 
     // 全局通知事件（定时任务完成等，不依赖 chat session）
+    // 只有启用了 handleNotifications 的实例（全局通知频道）才处理，
+    // 避免多个 WebSocket 连接重复推送通知。
     if (eventName === 'notification' && payload) {
-      _handleNotificationEvent(payload)
+      if (wsOptions?.handleNotifications) {
+        _handleNotificationEvent(payload)
+      }
       return
     }
 
@@ -280,6 +295,7 @@ export function useWebSocketChat() {
       eventType === 'message_stop' ||
       eventType === 'session_end' ||
       eventType === 'session_stopped' ||
+      eventType === 'error' ||
       eventName === 'done'
     ) {
       if (streamCompleteResolve) {

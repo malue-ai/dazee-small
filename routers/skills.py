@@ -39,6 +39,7 @@ router = APIRouter(prefix="/api/v1/skills", tags=["Skills 管理"])
 # ============================================================
 
 _NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+_AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
 
 def _validate_name(value: str, label: str) -> None:
@@ -48,6 +49,18 @@ def _validate_name(value: str, label: str) -> None:
             detail={
                 "code": "VALIDATION_ERROR",
                 "message": f"{label}格式不合法: {value}，必须以字母开头，只能包含字母、数字、下划线、连字符",
+            },
+        )
+
+
+def _validate_agent_id(value: str) -> None:
+    """Validate agent_id format (allows leading digits for UUID-based IDs)."""
+    if not value or not _AGENT_ID_RE.match(value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": f"agent_id 格式不合法: {value}，只能包含字母、数字、下划线、连字符",
             },
         )
 
@@ -86,7 +99,7 @@ def _get_skill_dir(skill_name: str, agent_id: Optional[str]) -> Path:
     """获取指定 Skill 的目录路径（带安全校验）"""
     _validate_name(skill_name, "Skill 名称")
     if agent_id:
-        _validate_name(agent_id, "agent_id")
+        _validate_agent_id(agent_id)
         base_dir = _get_instance_skills_dir(agent_id)
     else:
         base_dir = _get_skills_library_dir()
@@ -318,7 +331,7 @@ async def list_skills(
 
     # Agent 特定 Skills
     if agent_id:
-        _validate_name(agent_id, "agent_id")
+        _validate_agent_id(agent_id)
         instance_skills_dir = _get_instance_skills_dir(agent_id)
         agent_skills = _scan_skills_in_dir(instance_skills_dir, agent_id)
         skills.extend(agent_skills)
@@ -475,7 +488,7 @@ async def list_instance_skills(agent_id: str):
 
     从 skill_registry.yaml 读取，并从 skills.yaml 或 SKILL.md 补充描述信息
     """
-    _validate_name(agent_id, "agent_id")
+    _validate_agent_id(agent_id)
 
     from utils.instance_loader import load_skill_registry
 
@@ -550,7 +563,7 @@ async def get_skill_detail(
 
     # 确定 Skill 目录
     if agent_id:
-        _validate_name(agent_id, "agent_id")
+        _validate_agent_id(agent_id)
         skill_dir = _get_instance_skills_dir(agent_id) / skill_name
     else:
         skill_dir = _get_skills_library_dir() / skill_name
@@ -655,7 +668,7 @@ async def get_skill_file_content(
 
     # 确定 Skill 目录
     if agent_id:
-        _validate_name(agent_id, "agent_id")
+        _validate_agent_id(agent_id)
         skill_dir = _get_instance_skills_dir(agent_id) / skill_name
     else:
         skill_dir = _get_skills_library_dir() / skill_name
@@ -776,7 +789,7 @@ async def refresh_auth_skills(
     - 仅 re-check 状态为 NEED_AUTH 的 Skills（不是全量扫描）
     - 使用 macOS 原生 API 静默检测，不触发弹窗
     """
-    _validate_name(agent_id, "agent_id")
+    _validate_agent_id(agent_id)
 
     from services.agent_registry import get_agent_registry
 
@@ -843,7 +856,7 @@ async def install_skill(request: SkillInstallRequest):
     """
 
     _validate_name(request.skill_name, "Skill 名称")
-    _validate_name(request.agent_id, "agent_id")
+    _validate_agent_id(request.agent_id)
 
     # 源目录（全局库）
     source_dir = _get_skills_library_dir() / request.skill_name
@@ -929,7 +942,7 @@ async def uninstall_skill(request: SkillUninstallRequest):
     """
 
     _validate_name(request.skill_name, "Skill 名称")
-    _validate_name(request.agent_id, "agent_id")
+    _validate_agent_id(request.agent_id)
 
     skill_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
 
@@ -993,7 +1006,7 @@ async def configure_skill(request: SkillConfigureRequest):
 
     # Locate skill directory
     if request.agent_id and request.agent_id != "global":
-        _validate_name(request.agent_id, "agent_id")
+        _validate_agent_id(request.agent_id)
         skill_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
     else:
         skill_dir = _get_skills_library_dir() / request.skill_name
@@ -1092,7 +1105,7 @@ async def update_skill_content(request: SkillUpdateContentRequest):
     更新 Skill 内容 (SKILL.md)
     """
     _validate_name(request.skill_name, "Skill 名称")
-    _validate_name(request.agent_id, "agent_id")
+    _validate_agent_id(request.agent_id)
 
     skill_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
     skill_md_path = skill_dir / "SKILL.md"

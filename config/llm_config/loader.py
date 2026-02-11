@@ -53,6 +53,9 @@ async def get_llm_profile(profile_name: str, **overrides) -> Dict[str, Any]:
     """
     获取指定的 LLM Profile 配置
 
+    当 profile 缺少 provider/model 时（实例加载时未设置 agent.provider），
+    自动从 ModelRegistry 已激活模型中填充，确保不会 fallback 到硬编码默认值。
+
     Args:
         profile_name: Profile 名称（如 "intent_analyzer"）
         **overrides: 调用方覆盖参数
@@ -74,6 +77,31 @@ async def get_llm_profile(profile_name: str, **overrides) -> Dict[str, Any]:
     profile = _profiles[profile_name].copy()
     profile.pop("description", None)
     profile.pop("tier", None)  # tier is a resolution hint, not an LLMConfig param
+
+    # Auto-fill missing provider/model from activated models.
+    # This handles the case where the instance was loaded before the user
+    # activated a model (e.g. first-time user guide flow).
+    if "provider" not in profile or "model" not in profile:
+        try:
+            from core.llm.model_registry import ModelRegistry
+
+            activated = ModelRegistry.list_activated()
+            if activated:
+                first = activated[0]
+                if "provider" not in profile:
+                    profile["provider"] = first.provider
+                if "model" not in profile:
+                    profile["model"] = first.model_name
+                if "api_key_env" not in profile:
+                    profile["api_key_env"] = first.api_key_env
+                logger.debug(
+                    f"Profile '{profile_name}' 缺少 provider/model，"
+                    f"已从已激活模型填充: {first.provider}/{first.model_name}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"自动填充 profile '{profile_name}' 的 provider/model 失败: {e}"
+            )
 
     if overrides:
         profile.update(overrides)

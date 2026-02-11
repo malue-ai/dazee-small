@@ -193,18 +193,26 @@ def _create_channel_adapter(channel_id: str, config: ChannelConfig):
         config: channel configuration
 
     Returns:
-        ChannelAdapter instance or None if channel type unknown
+        ChannelAdapter instance or None if channel type unknown or dependency missing
     """
-    if channel_id == "telegram":
-        from core.gateway.channels.telegram import TelegramChannel
-        return TelegramChannel(config.params)
+    try:
+        if channel_id == "telegram":
+            from core.gateway.channels.telegram import TelegramChannel
+            return TelegramChannel(config.params)
 
-    elif channel_id == "feishu":
-        from core.gateway.channels.feishu import FeishuChannel
-        return FeishuChannel(config.params)
+        elif channel_id == "feishu":
+            from core.gateway.channels.feishu import FeishuChannel
+            return FeishuChannel(config.params)
 
-    else:
-        logger.warning(f"Unknown channel type: {channel_id}")
+        else:
+            logger.warning(f"Unknown channel type: {channel_id}")
+            return None
+
+    except ImportError as e:
+        logger.warning(
+            f"Channel '{channel_id}' skipped: missing dependency",
+            extra={"channel": channel_id, "error": str(e)},
+        )
         return None
 
 

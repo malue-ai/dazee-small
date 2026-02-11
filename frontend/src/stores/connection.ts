@@ -28,7 +28,7 @@ export const useConnectionStore = defineStore('connection', () => {
   async function initNotificationChannel(): Promise<void> {
     if (_notificationChannel) return
 
-    _notificationChannel = useWebSocketChat()
+    _notificationChannel = useWebSocketChat({ handleNotifications: true })
     try {
       await _notificationChannel.ensureConnected()
     } catch {

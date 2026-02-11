@@ -410,7 +410,7 @@ async def _test_feishu(params: Dict[str, Any]) -> Dict[str, Any]:
             }
 
         bot_info = bot_data.get("bot", {})
-        bot_name = bot_info.get("bot_name", "未命名")
+        bot_name = bot_info.get("app_name", "未命名")
         steps_passed.append(f"机器人「{bot_name}」")
 
         # ── Step 3: Real WebSocket connection test via official SDK ──

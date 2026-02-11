@@ -149,13 +149,15 @@ class ToolHint:
 
 @dataclass
 class IdentityHint:
-    """User self-identification hints (name, role, company, etc.)"""
+    """用户身份与个人信息线索"""
 
-    name: Optional[str] = None  # e.g. "良哥", "李良"
-    nickname: Optional[str] = None  # preferred way to be addressed
-    role: Optional[str] = None  # e.g. "产品经理", "CEO"
-    company: Optional[str] = None  # e.g. "焗基律动"
-    other: List[str] = field(default_factory=list)  # any other identity info
+    name: Optional[str] = None  # 姓名（如：李良、张三）
+    nickname: Optional[str] = None  # 希望被称呼的方式（如：良哥、老王）
+    role: Optional[str] = None  # 职业角色（如：产品经理、前端开发）
+    company: Optional[str] = None  # 公司/团队/组织
+    location: Optional[str] = None  # 所在地/时区
+    expertise_level: Optional[str] = None  # 专业水平：beginner/intermediate/expert
+    other: List[str] = field(default_factory=list)  # 其他身份特征
     confidence: float = 0.0
 
 
@@ -167,19 +169,6 @@ class GoalHint:
     risks: List[str] = field(default_factory=list)  # 风险信号
     blockers: List[str] = field(default_factory=list)  # 阻碍因素
     achievements: List[str] = field(default_factory=list)  # 成就/成果
-    confidence: float = 0.0
-
-
-@dataclass
-class IdentityHint:
-    """用户身份与个人信息线索"""
-
-    name: Optional[str] = None  # 姓名/称呼
-    role: Optional[str] = None  # 职业角色（如：产品经理、前端开发）
-    company: Optional[str] = None  # 公司/团队/组织
-    location: Optional[str] = None  # 所在地/时区
-    expertise_level: Optional[str] = None  # 专业水平：beginner/intermediate/expert
-    other_traits: List[str] = field(default_factory=list)  # 其他身份特征
     confidence: float = 0.0
 
 
@@ -351,11 +340,12 @@ class FragmentMemory:
             "identity_hint": (
                 {
                     "name": self.identity_hint.name,
+                    "nickname": self.identity_hint.nickname,
                     "role": self.identity_hint.role,
                     "company": self.identity_hint.company,
                     "location": self.identity_hint.location,
                     "expertise_level": self.identity_hint.expertise_level,
-                    "other_traits": self.identity_hint.other_traits,
+                    "other": self.identity_hint.other,
                     "confidence": self.identity_hint.confidence,
                 }
                 if self.identity_hint

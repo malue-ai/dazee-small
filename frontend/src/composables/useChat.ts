@@ -625,6 +625,12 @@ export function useChat() {
     if ((type === 'message_stop' || type === 'session_stopped' || type === 'error') && convId) {
        sessionStore.markCompleted(convId)
 
+       // 错误事件：将错误信息写入助手消息，让用户看到具体原因
+       if (type === 'error' && data?.error) {
+         const errorMsg = data.error.message || data.error.type || '请求处理失败'
+         msg.content = `⚠️ ${errorMsg}`
+       }
+
        // Safety net: 消息结束时如果 HITL 弹窗仍在显示则关闭
        if (hitl.showModal.value) {
          console.log('🔒 消息结束，关闭残留 HITL 弹窗')

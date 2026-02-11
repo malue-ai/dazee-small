@@ -136,6 +136,20 @@ class LocalWorkspace:
 
     # ==================== 会话上下文 ====================
 
+    def session(self) -> AsyncSession:
+        """Get an async session context manager.
+
+        Usage:
+            async with workspace.session() as session:
+                ...
+
+        Raises:
+            RuntimeError: If workspace is not started.
+        """
+        if self._session_factory is None:
+            raise RuntimeError("Workspace 未启动，请先调用 start()")
+        return self._session_factory()
+
     async def _get_session(self) -> AsyncSession:
         """获取数据库会话（内部使用）"""
         if not self._running or self._session_factory is None:

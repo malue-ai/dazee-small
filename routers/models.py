@@ -365,6 +365,22 @@ async def activate_model(request: ModelActivateRequest):
     action = "更新" if was_activated else "激活"
     logger.info(f"✅ 模型{action}: {request.model_name}")
 
+    # 模型激活后热重载 Agent + 清除 ChatService 缓存
+    # 确保后续请求使用新激活的模型（而非启动时缓存的旧模型）
+    try:
+        from services.agent_registry import get_agent_registry
+        registry = get_agent_registry()
+        reload_result = await registry.reload_agent()
+        logger.info(f"🔄 模型 '{request.model_name}' 激活后热重载 Agent: {reload_result}")
+    except Exception as e:
+        logger.warning(f"⚠️ 模型激活后 Agent 热重载失败（不影响激活）: {e}")
+
+    try:
+        from services.chat_service import get_chat_service
+        get_chat_service().invalidate_llm_caches()
+    except Exception as e:
+        logger.warning(f"⚠️ 清除 ChatService 缓存失败（不影响激活）: {e}")
+
     return {
         "success": True,
         "model_name": request.model_name,
@@ -780,6 +796,14 @@ async def activate_provider(request: ProviderActivateRequest):
     except Exception as e:
         logger.warning(f"⚠️ Provider 激活后 Agent 热重载失败（不影响激活）: {e}")
 
+    # 清除 ChatService 缓存（intent_llm / routers 等）
+    # 确保后续请求使用新激活的模型
+    try:
+        from services.chat_service import get_chat_service
+        get_chat_service().invalidate_llm_caches()
+    except Exception as e:
+        logger.warning(f"⚠️ 清除 ChatService 缓存失败（不影响激活）: {e}")
+
     return {
         "success": True,
         "provider": provider,
@@ -858,6 +882,13 @@ async def deactivate_model(model_name: str):
     await ModelRegistry.save_activated_models()
 
     logger.info(f"🗑️ 模型已停用: {model_name}")
+
+    # 清除 ChatService 缓存（停用后框架 LLM 需切换到其他可用模型）
+    try:
+        from services.chat_service import get_chat_service
+        get_chat_service().invalidate_llm_caches()
+    except Exception as e:
+        logger.warning(f"⚠️ 清除 ChatService 缓存失败（不影响停用）: {e}")
 
     return {
         "success": True,

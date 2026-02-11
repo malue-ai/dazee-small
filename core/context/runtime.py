@@ -520,8 +520,6 @@ class RuntimeContext:
     consecutive_failures: int = 0  # 连续失败次数（工具错误/超时等）
 
     # === 工具调用轨迹（去重检测）===
-    # 记录最近的 (tool_name, params_hash) 用于检测完全相同的重复调用
-    # 参考 TrajTune (2025) 的运行时轨迹监控思路
     _tool_call_signatures: List[str] = field(default_factory=list)
     _consecutive_duplicate_count: int = 0
 
@@ -639,11 +637,7 @@ class RuntimeContext:
     # === 工具调用轨迹（去重检测）===
 
     def record_tool_call(self, tool_name: str, tool_input: dict) -> None:
-        """
-        Record a tool call signature for deduplication.
-
-        Stores a deterministic hash of (tool_name, sorted_params).
-        """
+        """Record a tool call signature for deduplication."""
         import hashlib
         import json as _json
 
@@ -657,26 +651,13 @@ class RuntimeContext:
             self._consecutive_duplicate_count = 0
 
         self._tool_call_signatures.append(sig)
-        # Keep bounded
         if len(self._tool_call_signatures) > 50:
             self._tool_call_signatures = self._tool_call_signatures[-20:]
 
     def detect_repeated_call(self, threshold: int = 3) -> bool:
         """
-        Check if the same (tool_name, params) was called consecutively.
-
-        This is a deterministic deduplication check (same input = same output),
-        not a semantic judgment. Analogous to HTTP request deduplication.
-
-        Args:
-            threshold: Minimum number of consecutive identical calls to trigger.
-                       3 means: A() → A() → A() with identical params triggers.
-
-        Returns:
-            True if consecutive identical calls >= threshold.
+        Check if the same (tool_name, params) was called consecutively >= threshold times.
         """
-        # _consecutive_duplicate_count tracks duplicates after the first call,
-        # so 3 identical calls → count=2. Trigger when count >= threshold-1.
         return self._consecutive_duplicate_count >= threshold - 1
 
     # === 状态重置方法 ===

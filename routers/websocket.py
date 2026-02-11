@@ -546,8 +546,8 @@ async def _handle_chat_send(
             # 发送事件帧
             await send_event(event_type, event, seq)
 
-            # 流结束
-            if event_type in ("message_stop", "session.stopped"):
+            # 流结束（含错误路径：error 后跟 message_stop，防御性也检查 error）
+            if event_type in ("message_stop", "session.stopped", "error"):
                 # 刷新剩余缓冲
                 for buffered in throttle.flush_all():
                     seq += 1
@@ -559,10 +559,13 @@ async def _handle_chat_send(
         logger.info("chat.send 流式完成", extra={"conn_id": conn_id})
 
     except AgentNotFoundError as e:
-        await send_response(req_id, False, error={
-            "code": "AGENT_NOT_FOUND",
-            "message": str(e),
-        })
+        # Agent 加载失败：初始 OK 响应已发送，改用事件帧通知前端
+        error_payload = {
+            "type": "error",
+            "data": {"error": {"type": "agent_not_found", "message": str(e)}},
+        }
+        seq += 1
+        await send_event("error", error_payload, seq)
     except asyncio.CancelledError:
         logger.info("chat.send 流被取消", extra={"conn_id": conn_id})
     except Exception as e:
@@ -571,18 +574,26 @@ async def _handle_chat_send(
             extra={"conn_id": conn_id, "error": str(e)},
             exc_info=True,
         )
-        # 识别「未配置模型」场景，返回友好提示
+        # 初始 OK 响应已发送（req_id 已消费），改用事件帧通知前端
         err_msg = str(e)
         if "尚未配置" in err_msg or "API Key" in err_msg:
-            await send_response(req_id, False, error={
-                "code": "MODEL_NOT_CONFIGURED",
-                "message": "尚未配置 LLM 模型，请先在设置页面填写 API Key 并激活模型。",
-            })
+            error_payload = {
+                "type": "error",
+                "data": {"error": {
+                    "type": "model_not_configured",
+                    "message": "尚未配置 LLM 模型，请先在设置页面填写 API Key 并激活模型。",
+                }},
+            }
         else:
-            await send_response(req_id, False, error={
-                "code": "INTERNAL_ERROR",
-                "message": "对话处理失败，请稍后重试",
-            })
+            error_payload = {
+                "type": "error",
+                "data": {"error": {
+                    "type": "internal_error",
+                    "message": "对话处理失败，请稍后重试",
+                }},
+            }
+        seq += 1
+        await send_event("error", error_payload, seq)
     finally:
         clear_request_context()
 

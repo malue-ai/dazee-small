@@ -304,6 +304,32 @@ class ChatService:
             },
         )
 
+    # ==================== 缓存管理 ====================
+
+    def invalidate_llm_caches(self) -> None:
+        """
+        Invalidate cached LLM services and routers.
+
+        Called after model activation/deactivation to ensure the next request
+        picks up the newly activated model instead of stale cached services.
+        """
+        stale = []
+        if self._intent_llm is not None:
+            stale.append("intent_llm")
+            self._intent_llm = None
+        if self._routers:
+            stale.append(f"routers({len(self._routers)})")
+            self._routers.clear()
+        if self._preprocessing_handler is not None:
+            stale.append("preprocessing_handler")
+            self._preprocessing_handler = None
+
+        if stale:
+            logger.info(
+                "ChatService LLM 缓存已清除",
+                extra={"invalidated": stale},
+            )
+
     # ==================== 延迟初始化属性 ====================
 
     async def get_intent_llm(self):
@@ -1057,7 +1083,12 @@ class ChatService:
                 if event_type in ("message_stop", "session.stopped"):
                     saw_terminal = True
                     break
-                # 安全网：agent 异常退出（没发 message_stop）时不要无限等
+                # 安全网 1：error / session_end 也作为终止信号
+                # （错误路径已补发 message_stop，但防御性地也在此处 break）
+                if event_type in ("error", "session_end"):
+                    saw_terminal = True
+                    break
+                # 安全网 2：agent 异常退出（没发 message_stop）时不要无限等
                 if agent_task.done() and not saw_terminal:
                     exc = agent_task.exception() if not agent_task.cancelled() else None
                     if exc:
@@ -1778,6 +1809,17 @@ class ChatService:
                 )
             except Exception as ex:
                 logger.warning("发送错误事件失败", extra={"error": str(ex)})
+
+            # 补发 message_stop，确保前端和后端流生成器正确终止
+            try:
+                await events.message.emit_message_stop(
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    output_format=events.output_format,
+                    adapter=events.adapter,
+                )
+            except Exception as ex:
+                logger.warning("发送 message_stop 失败（错误路径）", extra={"error": str(ex)})
 
             try:
                 await events.session.emit_session_end(

@@ -69,10 +69,9 @@ class ChannelManager:
                 started.append(channel_id)
                 logger.info("Channel started", extra={"channel": channel_id})
             except Exception as e:
-                logger.error(
-                    "Failed to start channel",
+                logger.warning(
+                    "Failed to start channel (missing dependency is non-fatal)",
                     extra={"channel": channel_id, "error": str(e)},
-                    exc_info=True,
                 )
 
         if started:

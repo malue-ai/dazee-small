@@ -1061,9 +1061,22 @@ class RVRExecutor(BaseExecutor):
             if _needs_summary and llm:
                 logger.info("🔄 最终回复兜底: 循环结束但无非空 assistant 回复，生成总结...")
                 try:
+                    # 注入总结指令，引导 LLM 输出最终回复
+                    from core.llm.base import Message
+
+                    summary_instruction = Message(
+                        role="user",
+                        content=(
+                            "[系统提示] 你已完成所有工具调用。"
+                            "请直接用自然语言回复用户，简要总结你完成了什么、"
+                            "结果是什么。不要调用任何工具。"
+                        ),
+                    )
+                    summary_messages = llm_messages + [summary_instruction]
+
                     async for event in self._process_stream(
                         llm=llm,
-                        messages=llm_messages,
+                        messages=summary_messages,
                         system_prompt=system_prompt,
                         tools=[],  # No tools — just summarize
                         ctx=ctx,
@@ -1079,6 +1092,22 @@ class RVRExecutor(BaseExecutor):
                         ctx.set_completed(final_resp.content, final_resp.stop_reason)
                 except Exception as e:
                     logger.warning(f"最终回复兜底失败: {e}", exc_info=True)
+
+            # 最终保底：如果 P0 也没有产生内容，发送最低限度文本
+            if not ctx.is_completed() or not (ctx.final_result and ctx.final_result.strip()):
+                _fallback_text = "任务执行完毕，如有问题请继续向我提问。"
+                logger.warning("⚠️ P0 兜底后仍无最终回复，发送保底消息")
+                try:
+                    from core.agent.content_handler import create_content_handler
+
+                    _fb_handler = create_content_handler(
+                        broadcaster, ctx.block, session_id=session_id
+                    )
+                    await _fb_handler.handle_text(_fallback_text)
+                    await _fb_handler.stop_block(session_id)
+                    ctx.set_completed(_fallback_text, "fallback")
+                except Exception as fb_err:
+                    logger.error(f"保底消息也失败: {fb_err}", exc_info=True)
 
         logger.info(f"✅ RVRExecutor 执行完成: turns={ctx.current_turn}")
 

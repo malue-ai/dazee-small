@@ -199,16 +199,30 @@ class FeishuChannel:
 
         self._ws_task = self._loop.run_in_executor(None, _run_ws)
 
-        # Brief wait to let WebSocket handshake complete
-        await asyncio.sleep(2)
+        # Poll for WebSocket handshake completion (up to 8 seconds)
+        # The lark SDK WebSocket handshake may take several seconds;
+        # a fixed 2s sleep is often too short.
+        poll_interval = 0.5
+        max_wait = 8.0
+        elapsed = 0.0
+        while elapsed < max_wait:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            if self._ws_client._conn is not None:
+                break
 
-        # Verify connection was established
         if self._ws_client._conn is not None:
             self._status = ChannelStatus.CONNECTED
-            logger.info("Feishu channel started (WebSocket connected)")
+            logger.info(
+                "Feishu channel started (WebSocket connected)",
+                extra={"handshake_seconds": elapsed},
+            )
         else:
             self._status = ChannelStatus.ERROR
-            logger.warning("Feishu channel started but WebSocket may not be connected yet")
+            logger.warning(
+                "Feishu channel started but WebSocket not connected after timeout",
+                extra={"timeout_seconds": max_wait},
+            )
 
     async def _safe_handle(self, msg: InboundMessage) -> None:
         """Safely invoke on_message callback with error handling."""

@@ -18,9 +18,8 @@ RVRBExecutor - RVR-B 执行策略
 迁移自：core/agent/simple/mixins/backtrack_mixin.py
 """
 
-import hashlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from core.agent.backtrack import (
     BacktrackContext,
@@ -80,13 +79,6 @@ class RVRBState:
 
     # 最近的错误
     last_error: Optional[ClassifiedError] = None
-
-    # 断路器：工具调用历史（检测重复调用死循环）
-    # 每条记录: (tool_identity, output_fingerprint)
-    # - tool_identity: "nodes:run", "web_search" 等
-    # - output_fingerprint: 输出内容哈希，区分"同一工具不同结果"（在推进）vs"相同结果"（卡住了）
-    recent_tool_calls: List[Tuple[str, str]] = field(default_factory=list)
-    _reflection_count: int = 0  # 已注入反思引导次数（用尽后升级为终止）
 
     def record_execution(
         self, action: str, success: bool, result: Any = None, error: Optional[Exception] = None
@@ -231,115 +223,6 @@ class RVRBExecutor(RVRExecutor):
         """清除 RVR-B 状态"""
         if session_id in self._rvrb_states:
             del self._rvrb_states[session_id]
-
-    # ==================== 断路器：重复工具调用检测（两级） ====================
-    #
-    # 判定"卡住"的标准：同一工具 + 相同输出 连续 N 次（不只看工具名）
-    #
-    # Level 1（反思引导）: 注入反思 prompt，保留工具，让 LLM 自主换策略
-    # Level 2（终止）: 直接终止循环，输出消息给用户（绝不无声中断）
-    #
-    # 流程：
-    #   同一工具+相同输出 连续 N 次 → Level 1 反思引导（仍可用工具）
-    #   → 反思后仍重复（相同输出）→ 再次反思（最多 _MAX_REFLECTIONS 次）
-    #   → 反思次数用尽 → Level 2 终止（输出消息 + break）
-
-    # 复杂度 → 软轮次限制
-    _SOFT_TURN_LIMITS = {"simple": 8, "medium": 15, "complex": 30}
-    # 同一工具+相同输出 连续 N 次触发 Level 1 反思
-    _CONSECUTIVE_SAME_TOOL_LIMIT = 3
-    # 最大反思引导次数（用尽后升级到 Level 2 终止）
-    _MAX_REFLECTIONS = 2
-
-    @staticmethod
-    def _tool_call_identity(tool_call: Dict[str, Any]) -> str:
-        """
-        提取工具调用的有效身份标识
-
-        对多动作工具（如 nodes）拼入 action 参数，
-        避免不同子命令（run/status/describe）被误判为重复。
-        """
-        name = tool_call.get("name", "unknown")
-        tool_input = tool_call.get("input") or {}
-        action = tool_input.get("action") or tool_input.get("command_name")
-        if action:
-            return f"{name}:{action}"
-        return name
-
-    @staticmethod
-    def _output_fingerprint(content: str) -> str:
-        """
-        生成工具输出的紧凑指纹
-
-        用于区分"同一工具不同结果"（在推进）vs"完全相同结果"（卡住了）。
-        """
-        return hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:12]
-
-    def _check_circuit_breaker(
-        self,
-        state: RVRBState,
-        turn: int,
-        intent: Optional[Any] = None,
-    ) -> Tuple[str, str]:
-        """
-        两级断路器检测
-
-        判定"卡住"的核心逻辑：同一工具（含子命令）+ 返回相同输出，连续 N 次。
-        如果同一工具返回了不同结果，说明 agent 在推进，不触发。
-
-        Returns:
-            (action, reason) 其中 action 为:
-            - "none": 正常，无需干预
-            - "reflect": Level 1 反思引导（保留工具，注入反思 prompt）
-            - "terminate": Level 2 终止（输出消息给用户 + break）
-        """
-        # === 检测：同一工具+相同输出 连续 N 次 ===
-        limit = self._CONSECUTIVE_SAME_TOOL_LIMIT
-        _repeated_tool = None
-        if len(state.recent_tool_calls) >= limit:
-            last_n = state.recent_tool_calls[-limit:]
-            identities = [c[0] for c in last_n]
-            fingerprints = [c[1] for c in last_n]
-            # 工具相同 AND 输出也相同 → 真的卡住了
-            if len(set(identities)) == 1 and len(set(fingerprints)) == 1:
-                _repeated_tool = identities[0]
-
-        if _repeated_tool:
-            if state._reflection_count >= self._MAX_REFLECTIONS:
-                # 反思次数用尽 → Level 2 终止
-                return "terminate", (
-                    f"工具 {_repeated_tool} 连续 {limit} 次返回相同结果，"
-                    f"经过 {state._reflection_count} 次反思仍未改变策略"
-                )
-            else:
-                # Level 1: 反思引导（保留工具）
-                return "reflect", (
-                    f"工具 {_repeated_tool} 已连续 {limit} 次返回相同结果"
-                )
-
-        # === 检测：复杂度感知的软轮次限制 ===
-        complexity = "medium"
-        if intent and hasattr(intent, "complexity"):
-            complexity = (
-                intent.complexity.value
-                if hasattr(intent.complexity, "value")
-                else str(intent.complexity)
-            )
-        soft_limit = self._SOFT_TURN_LIMITS.get(complexity, 15)
-
-        if turn >= soft_limit:
-            if state._reflection_count >= self._MAX_REFLECTIONS:
-                return "terminate", (
-                    f"已执行 {turn + 1} 轮（complexity={complexity}），"
-                    f"经过 {state._reflection_count} 次反思仍未收敛"
-                )
-            else:
-                return "reflect", (
-                    f"已执行 {turn + 1} 轮（complexity={complexity}，"
-                    f"软限制={soft_limit}）"
-                )
-
-        return "none", ""
 
     async def _evaluate_backtrack(
         self, error: Exception, tool_name: str, tool_input: Dict[str, Any], state: RVRBState, llm
@@ -858,43 +741,6 @@ class RVRBExecutor(RVRExecutor):
             ctx.touch_activity()  # 更新活动时间（用于 idle_timeout 检测）
             state.turn = turn
 
-            # === 两级断路器：重复工具调用检测 ===
-            # Level 1 (reflect): 保留工具 + 注入反思 prompt → LLM 自主换策略
-            # Level 2 (terminate): 直接终止 + 输出消息给用户（绝不无声中断）
-            _current_tools = tools_for_llm
-            _cb_action, _cb_reason = self._check_circuit_breaker(
-                state, turn, intent
-            )
-            if _cb_action == "reflect":
-                # Level 1: 反思引导 —— 保留工具，让 LLM 反思后自主选择新策略
-                state._reflection_count += 1
-                _reflect_guidance = (
-                    f"[反思提示] {_cb_reason}，但结果不理想。\n"
-                    "请先分析：\n"
-                    "1. 之前的调用为什么没有达到预期？\n"
-                    "2. 是参数不对、路径不对、还是应该用完全不同的工具/方法？\n"
-                    "3. 如果已经获得了足够信息，请直接回复用户，无需继续调用工具。\n\n"
-                    "请换一种方法尝试，或者直接回复用户。"
-                )
-                append_user_message(llm_messages, _reflect_guidance)
-                logger.info(
-                    f"🪞 断路器 Level 1 反思引导 (turn={turn + 1}, "
-                    f"reflection={state._reflection_count}/{self._MAX_REFLECTIONS}): "
-                    f"{_cb_reason}"
-                )
-            elif _cb_action == "terminate":
-                # Level 2: 直接终止 —— 输出消息给用户，确保用户知道发生了什么
-                _terminate_msg = (
-                    "抱歉，我尝试了多种方法但未能完成任务。"
-                    "请尝试重新描述您的需求，或换一种方式提问。"
-                )
-                yield {"type": "content", "data": {"text": _terminate_msg}}
-                ctx.set_completed(_terminate_msg, "circuit_breaker_terminate")
-                logger.warning(
-                    f"🔌 断路器 Level 2 终止 (turn={turn + 1}): {_cb_reason}"
-                )
-                break
-
             logger.info(f"{'='*60}")
             logger.info(
                 f"🔄 RVR-B Turn {turn + 1} (backtracks: {state.backtrack_count}/{state.max_backtracks})"
@@ -1212,13 +1058,23 @@ class RVRBExecutor(RVRExecutor):
                                 },
                             }
 
-                        # 兜底：如果 accumulator 没有文本内容，
-                        # 让 LLM 做最后一次无工具回复，总结进度
-                        _has_content = bool(
-                            getattr(ctx, "accumulated_content", None)
-                            or (ctx.last_llm_response and ctx.last_llm_response.content)
+                        # 兜底：让 LLM 做最后一次无工具回复，总结进度
+                        #
+                        # 判断是否需要生成终止回复：
+                        # - 如果最后一次 LLM 响应是 tool_use（文本在工具调用之前，
+                        #   不算"最终回复"），必须生成总结
+                        # - 如果没有任何文本内容，也必须生成总结
+                        _last_was_tool_use = (
+                            ctx.last_llm_response
+                            and ctx.last_llm_response.stop_reason == "tool_use"
                         )
-                        if not _has_content:
+                        _has_final_text = (
+                            not _last_was_tool_use
+                            and ctx.last_llm_response
+                            and ctx.last_llm_response.content
+                            and ctx.last_llm_response.content.strip()
+                        )
+                        if not _has_final_text:
                             _reason = decision.reason or "unknown"
                             async for evt in self._generate_termination_reply(
                                 llm=llm,
@@ -1433,9 +1289,23 @@ class RVRBExecutor(RVRExecutor):
             if _needs_summary and llm:
                 logger.info("🔄 最终回复兜底(RVRB): 循环结束但无非空 assistant 回复，生成总结...")
                 try:
+                    # 注入总结指令，引导 LLM 输出最终回复
+                    # 不注入时 LLM 可能返回空内容（因为它不知道需要总结）
+                    from core.llm.base import Message
+
+                    summary_instruction = Message(
+                        role="user",
+                        content=(
+                            "[系统提示] 你已完成所有工具调用。"
+                            "请直接用自然语言回复用户，简要总结你完成了什么、"
+                            "结果是什么。不要调用任何工具。"
+                        ),
+                    )
+                    summary_messages = llm_messages + [summary_instruction]
+
                     async for event in self._process_stream(
                         llm=llm,
-                        messages=llm_messages,
+                        messages=summary_messages,
                         system_prompt=system_prompt,
                         tools=[],
                         ctx=ctx,
@@ -1451,6 +1321,23 @@ class RVRBExecutor(RVRExecutor):
                         ctx.set_completed(final_resp.content, final_resp.stop_reason)
                 except Exception as e:
                     logger.warning(f"最终回复兜底(RVRB)失败: {e}", exc_info=True)
+
+            # 最终保底：如果 P0 也没有产生内容（LLM 调用失败等），
+            # 通过 broadcaster 发送最低限度文本，确保用户看到回复
+            if not ctx.is_completed() or not (ctx.final_result and ctx.final_result.strip()):
+                _fallback_text = "任务执行完毕，如有问题请继续向我提问。"
+                logger.warning("⚠️ P0 兜底后仍无最终回复，发送保底消息")
+                try:
+                    from core.agent.content_handler import create_content_handler
+
+                    _fb_handler = create_content_handler(
+                        broadcaster, ctx.block, session_id=session_id
+                    )
+                    await _fb_handler.handle_text(_fallback_text)
+                    await _fb_handler.stop_block(session_id)
+                    ctx.set_completed(_fallback_text, "fallback")
+                except Exception as fb_err:
+                    logger.error(f"保底消息也失败: {fb_err}", exc_info=True)
 
         # 清理状态
         self._clear_rvrb_state(session_id)
@@ -1564,47 +1451,25 @@ class RVRBExecutor(RVRExecutor):
             # Record tool call signature for dedup detection
             ctx.record_tool_call(tool_name, tool_input)
 
-            # 断路器记录：执行后记录 (identity, output_fingerprint)
-            # 在工具执行完毕后记录，这样断路器能同时看到工具名和输出内容
-            _tc_identity = self._tool_call_identity(tool_call)
-            _tc_fp = self._output_fingerprint(result_content)
-            state.recent_tool_calls.append((_tc_identity, _tc_fp))
-
-        # 截断历史避免内存膨胀
-        if len(state.recent_tool_calls) > 50:
-            state.recent_tool_calls = state.recent_tool_calls[-20:]
-
-        # 反思生效检测：反思后 LLM 换了不同工具或拿到了不同结果 → 重置反思计数
-        if state._reflection_count > 0 and len(state.recent_tool_calls) >= 2:
-            limit = self._CONSECUTIVE_SAME_TOOL_LIMIT
-            if len(state.recent_tool_calls) >= limit:
-                last_n = state.recent_tool_calls[-limit:]
-                identities = set(c[0] for c in last_n)
-                fingerprints = set(c[1] for c in last_n)
-                # 只要工具或输出有变化，就说明反思起效了
-                if len(identities) > 1 or len(fingerprints) > 1:
-                    logger.info("🪞 反思生效: LLM 改变了策略/获得了不同结果，重置反思计数")
-                    state._reflection_count = 0
-
         append_assistant_message(llm_messages, response.raw_content)
 
         if tool_results:
             # Context Pollution 清理：回溯成功后（替代工具返回了正确结果），
             # 将失败的 tool_result 替换为简洁摘要，避免错误信息污染后续 LLM 推理。
-            # 参考 2025 研究：context pollution 是 Agent 回溯后性能下降的主要原因。
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
 
-        # Trajectory dedup: same (tool_name, params) called N+ times in a row
-        # → inject hint for LLM to self-correct (not force stop)
-        # This is deterministic dedup (same input = same output), not semantic judgment.
+        # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
         if ctx.detect_repeated_call(threshold=3):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
             )
             append_user_message(llm_messages, _dedup_hint)
-            logger.warning(f"🔁 轨迹去重: 完全相同的工具调用连续 {ctx._consecutive_duplicate_count + 1} 次，注入提示")
+            logger.warning(
+                f"🔁 轨迹去重: 完全相同的工具调用连续 "
+                f"{ctx._consecutive_duplicate_count + 1} 次，注入反思提示"
+            )
 
         # HITL pending 检测：如果工具返回了 pending_user_input，暂停执行等待用户响应。
         # 防止 LLM 看到 pending 结果后再次调用 hitl（连续 2 次调用 bug）。
@@ -1718,39 +1583,22 @@ class RVRBExecutor(RVRExecutor):
             # Record tool call signature for dedup detection
             ctx.record_tool_call(tool_name, tool_input)
 
-            # 断路器记录：执行后记录 (identity, output_fingerprint)
-            _tc_identity = self._tool_call_identity(tool_call)
-            _tc_fp = self._output_fingerprint(result_content)
-            state.recent_tool_calls.append((_tc_identity, _tc_fp))
-
-        # 截断历史避免内存膨胀
-        if len(state.recent_tool_calls) > 50:
-            state.recent_tool_calls = state.recent_tool_calls[-20:]
-
-        # 反思生效检测（非流式路径）
-        if state._reflection_count > 0 and len(state.recent_tool_calls) >= 2:
-            limit = self._CONSECUTIVE_SAME_TOOL_LIMIT
-            if len(state.recent_tool_calls) >= limit:
-                last_n = state.recent_tool_calls[-limit:]
-                identities = set(c[0] for c in last_n)
-                fingerprints = set(c[1] for c in last_n)
-                if len(identities) > 1 or len(fingerprints) > 1:
-                    logger.info("🪞 反思生效: LLM 改变了策略/获得了不同结果，重置反思计数")
-                    state._reflection_count = 0
-
         if tool_results:
             # Context Pollution 清理（与 stream 版本对齐）
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
 
-        # Trajectory dedup (non-stream, same logic as stream)
+        # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
         if ctx.detect_repeated_call(threshold=3):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
             )
             append_user_message(llm_messages, _dedup_hint)
-            logger.warning(f"🔁 轨迹去重: 完全相同的工具调用连续 {ctx._consecutive_duplicate_count + 1} 次，注入提示")
+            logger.warning(
+                f"🔁 轨迹去重: 完全相同的工具调用连续 "
+                f"{ctx._consecutive_duplicate_count + 1} 次，注入反思提示"
+            )
 
         # HITL pending 检测（non-stream 版本，逻辑与 stream 版本一致）
         for _tr in tool_results:

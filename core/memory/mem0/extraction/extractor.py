@@ -18,7 +18,7 @@ from logger import get_logger
 from ..schemas import (
     ConstraintHint,
     DayOfWeek,
-    EmotionHint,
+    EmotionHint, 
     FragmentMemory,
     GoalHint,
     IdentityHint,
@@ -378,6 +378,8 @@ class FragmentExtractor:
             nickname=data.get("nickname"),
             role=data.get("role"),
             company=data.get("company"),
+            location=data.get("location"),
+            expertise_level=data.get("expertise_level"),
             other=data.get("other", []),
             confidence=data.get("confidence", 0.5),
         )
