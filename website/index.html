@@ -144,21 +144,24 @@
         0 0.25rem 1.5rem rgba(3,203,134,0.3);
     }
 
-    /* 移动端汉堡按钮 */
-    .mobile-menu-btn {
-      display: none; align-items: center; justify-content: center;
-      width: 2.5rem; height: 2.5rem;
+    /* 移动端语言切换按钮 */
+    .mobile-lang-btn {
+      display: none; align-items: center; justify-content: center; gap: 0.25rem;
+      padding: 0.375rem 0.625rem;
       border: none; background: transparent; cursor: pointer;
-      color: var(--text-dark);
+      font-family: 'Poppins', sans-serif; font-size: 0.8125rem; font-weight: 600;
+      color: var(--text-dark); border-radius: 1.5rem;
+      transition: background 0.2s ease;
     }
-    .mobile-menu-btn svg { width: 1.5rem; height: 1.5rem; }
+    .mobile-lang-btn:hover { background: rgba(0,0,0,0.04); }
+    .mobile-lang-btn svg { width: 1rem; height: 1rem; flex-shrink: 0; }
 
     @media (max-width: 1440px) { .nav { padding: 1.25rem 5rem; } }
     @media (max-width: 1280px) { .nav { padding: 1.25rem 2.5rem; } }
     @media (max-width: 768px) {
       .nav { padding: 1rem 1.25rem; height: 4rem; /* 64px */ }
       .header-actions { display: none; }
-      .mobile-menu-btn { display: flex; }
+      .mobile-lang-btn { display: flex; }
     }
 
     /* ==================== Hero ==================== */
@@ -619,9 +622,10 @@
         </button>
         <a href="#features" class="btn-nav" data-i18n="nav_getstarted">Get started</a>
       </div>
-      <!-- 移动端汉堡菜单 -->
-      <button class="mobile-menu-btn" aria-label="Menu">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      <!-- 移动端语言切换 -->
+      <button class="mobile-lang-btn" onclick="toggleLang()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span data-i18n="lang_label">ZH</span>
       </button>
     </div>
   </nav>
