@@ -13,6 +13,8 @@ This closes the "learn from success" loop:
   successful session → extract strategy → user confirms → Playbook approved → future injection
 """
 
+import asyncio
+import json
 from typing import TYPE_CHECKING
 
 from logger import get_logger
@@ -26,8 +28,8 @@ if TYPE_CHECKING:
 logger = get_logger("background_tasks.playbook_extraction")
 
 # Minimum thresholds for extraction (format checks, not semantic judgment)
-_MIN_ASSISTANT_CHARS = 10  # TEMP: lowered from 100 for testing
-_MIN_USER_CHARS = 5  # TEMP: lowered from 10 for testing
+_MIN_ASSISTANT_CHARS = 100  # Skip if assistant response is too short
+_MIN_USER_CHARS = 10  # Skip if user message is trivial
 
 
 def _should_skip(ctx: "TaskContext") -> str:
@@ -61,25 +63,23 @@ async def playbook_extraction_task(
     4. Call PlaybookManager.extract_from_session()
     5. Emit playbook_suggestion event if extraction succeeds
     """
-    # If assistant_response is empty (e.g. accumulator only had tool blocks),
-    # try to extract from conversation messages before giving up
+    # If assistant_response is empty (e.g. accumulator only had thinking/tool blocks),
+    # try to extract from conversation messages in DB
     if not ctx.assistant_response and ctx.conversation_service and ctx.conversation_id:
         try:
-            import asyncio
-            await asyncio.sleep(1)  # TEMP: wait for DB commit
-            msgs = await ctx.conversation_service.get_messages(ctx.conversation_id, limit=5)
-            logger.info(
-                f"[PLAYBOOK] fallback get_messages: {len(msgs or [])} msgs, "
-                f"roles={[m.get('role') for m in (msgs or [])]}"
+            await asyncio.sleep(1)  # Wait for DB commit
+            result = await ctx.conversation_service.list_messages(
+                ctx.conversation_id, limit=5, order="desc"
             )
-            for msg in reversed(msgs or []):
-                if msg.get("role") == "assistant":
-                    content = msg.get("content", "")
-                    # Content may be a JSON-encoded string of blocks
+            msgs = result.get("items", []) if isinstance(result, dict) else []
+            for msg in msgs:
+                role = getattr(msg, "role", None)
+                if role == "assistant":
+                    content = getattr(msg, "content", "")
+                    # Content is stored as JSON string of blocks
                     blocks = content
                     if isinstance(content, str) and content.startswith("["):
                         try:
-                            import json
                             blocks = json.loads(content)
                         except (json.JSONDecodeError, ValueError):
                             pass
@@ -100,15 +100,9 @@ async def playbook_extraction_task(
         except Exception as e:
             logger.debug(f"Failed to fetch assistant response from messages: {e}")
 
-    logger.info(
-        f"[PLAYBOOK] pre-filter: "
-        f"assistant_response={len(ctx.assistant_response or '')} chars, "
-        f"user_message={len(ctx.user_message or '')} chars"
-    )
-
     skip_reason = _should_skip(ctx)
     if skip_reason:
-        logger.info(f"[PLAYBOOK] skipped: {skip_reason}")
+        logger.debug(f"Playbook extraction skipped: {skip_reason}")
         return
 
     try:
@@ -117,42 +111,34 @@ async def playbook_extraction_task(
             logger.debug("Playbook extraction skipped: no conversation_service")
             return
 
-        messages = await ctx.conversation_service.get_messages(
+        result = await ctx.conversation_service.list_messages(
             ctx.conversation_id, limit=50
         )
+        messages = result.get("items", []) if isinstance(result, dict) else []
         if not messages:
-            logger.debug("Playbook extraction skipped: no messages")
+            logger.debug("Playbook extraction skipped: no messages in DB")
             return
-
-        # TEMP DEBUG: log message structure
-        logger.info(f"[PLAYBOOK DEBUG] Total messages: {len(messages)}")
-        for i, msg in enumerate(messages):
-            role = msg.get("role", "?")
-            content = msg.get("content", "")
-            content_type = type(content).__name__
-            if isinstance(content, list):
-                block_types = [b.get("type", "?") if isinstance(b, dict) else type(b).__name__ for b in content]
-                logger.info(f"[PLAYBOOK DEBUG] msg[{i}] role={role}, content=list({len(content)}), block_types={block_types}")
-            elif isinstance(content, str):
-                logger.info(f"[PLAYBOOK DEBUG] msg[{i}] role={role}, content=str({len(content)} chars), preview={content[:80]}")
-            else:
-                logger.info(f"[PLAYBOOK DEBUG] msg[{i}] role={role}, content_type={content_type}")
 
         # Check if session had meaningful tool usage
         tool_calls = []
         for msg in messages:
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                for block in content:
+            content = getattr(msg, "content", "")
+            # Parse JSON string content into blocks
+            blocks = content
+            if isinstance(content, str) and content.startswith("["):
+                try:
+                    blocks = json.loads(content)
+                except (ValueError, json.JSONDecodeError):
+                    blocks = content
+            if isinstance(blocks, list):
+                for block in blocks:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         tool_calls.append(block.get("name", "unknown"))
             elif isinstance(content, str) and "tool_use" in content:
                 tool_calls.append("unknown_tool")
 
-        logger.info(f"[PLAYBOOK DEBUG] tool_calls found: {tool_calls}")
-
         if not tool_calls:
-            logger.info("Playbook extraction skipped: no tool calls in session")
+            logger.debug("Playbook extraction skipped: no tool calls in session")
             return
 
         # Build a lightweight SessionReward (without full RewardAttribution)
