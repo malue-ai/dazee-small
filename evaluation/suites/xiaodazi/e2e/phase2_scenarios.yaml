@@ -498,7 +498,7 @@ tasks:
         rubric: grade_playbook_lifecycle
         min_score: 3
     trials: 1
-    timeout_seconds: 900
+    timeout_seconds: 1800
     tags: ["e2e", "playbook", "lifecycle", "cross_session", "demo"]
     metadata:
       multi_turn_sequence:

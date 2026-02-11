@@ -465,7 +465,16 @@ class SqliteVecVectorStore(VectorStoreBase):
         limit: int = 5,
         filters: Optional[Dict] = None,
     ) -> List[OutputData]:
-        """搜索相似向量"""
+        """搜索相似向量（支持 user_id 过滤）
+
+        sqlite-vec KNN 查询（vec0 MATCH）不支持额外 WHERE 条件，
+        因此采用"多取后过滤"策略：取 limit * 3 条候选，在应用层按
+        payload.user_id 过滤，最终返回 limit 条。
+
+        filters 支持:
+        - {"user_id": "xxx"} — 按 user_id 过滤
+        - {"metadata.key": "val"} — 按 metadata 字段过滤（json_extract）
+        """
         try:
             if not vectors:
                 return []
@@ -475,6 +484,14 @@ class SqliteVecVectorStore(VectorStoreBase):
                 vectors[0] if vectors and isinstance(vectors[0], list) else vectors
             )
             query_json = json.dumps(query_vector)
+
+            # Extract user_id filter (if present) for post-KNN filtering
+            filter_user_id = None
+            if filters:
+                filter_user_id = filters.get("user_id")
+
+            # Over-fetch to compensate for post-KNN user_id filtering
+            fetch_limit = limit * 3 if filter_user_id else limit
 
             # sqlite-vec v0.1.6+ requires 'k = ?' constraint
             # instead of SQL LIMIT for vec0 KNN queries.
@@ -486,7 +503,7 @@ class SqliteVecVectorStore(VectorStoreBase):
                 WHERE v.embedding MATCH ? AND k = ?
                 ORDER BY v.distance
                 """,
-                (query_json, limit),
+                (query_json, fetch_limit),
             )
 
             results = []
@@ -497,13 +514,25 @@ class SqliteVecVectorStore(VectorStoreBase):
                 except json.JSONDecodeError:
                     payload = {}
 
+                # Post-KNN user_id filtering
+                if filter_user_id:
+                    record_user_id = payload.get("user_id", "")
+                    if record_user_id != filter_user_id:
+                        continue
+
                 # sqlite-vec 返回距离（越小越相似），转换为分数（越大越相似）
                 score = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
                 results.append(
                     OutputData(id=vec_id, score=score, payload=payload)
                 )
 
-            logger.debug(f"[SqliteVec] 搜索完成: {len(results)} 条结果")
+                if len(results) >= limit:
+                    break
+
+            logger.debug(
+                f"[SqliteVec] 搜索完成: {len(results)} 条结果"
+                f"{f' (user_id={filter_user_id})' if filter_user_id else ''}"
+            )
             return results
 
         except Exception as e:

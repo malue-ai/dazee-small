@@ -1,6 +1,6 @@
 # 09 — LLM Multi-Model Support
 
-> Unified abstraction over 5 LLM providers with format adapters, ModelRouter failover, YAML-driven profiles, and one-key provider switching — from free Gemini to local Ollama to cloud Claude.
+> Unified abstraction over 6 LLM providers with format adapters, ModelRouter failover, YAML-driven profiles, and one-key provider switching — from free Gemini to local Ollama to cloud Claude.
 
 [< Prev: Memory System](08-memory-system.md) | [Back to Overview](README.md) | [Next: Instance & Config >](10-instance-and-config.md)
 
@@ -18,23 +18,23 @@
   Agent._llm
       │
       ▼
-┌─ ModelRouter ─────────────────────────────────────────────────────┐
-│  RouterPolicy (max_failures, cooldown)                             │
-│  LLMHealthMonitor (failure_count, cooldown_until, probe)           │
-│  RouteTarget[] (ordered by priority)                               │
-└──────┬────────────┬────────────┬────────────┬────────────┬────────┘
-       │            │            │            │            │
-       ▼            ▼            ▼            ▼            ▼
-┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-│  Claude   │ │  OpenAI  │ │   Qwen   │ │ DeepSeek │ │  Gemini  │
-│  Service  │ │  Service │ │  Service │ │  Service │ │  Service │
-└─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘
-      ▼            ▼            ▼            ▼            ▼
-┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-│  Claude   │ │  OpenAI  │ │  OpenAI  │ │ DeepSeek │ │  Gemini  │
-│  Adaptor  │ │  Adaptor │ │  Adaptor │ │  Adaptor │ │  Adaptor │
-│ (native)  │ │(func call)│ │(func call)│ │(reasoning)│ │ (parts) │
-└──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+┌─ ModelRouter ──────────────────────────────────────────────────────────────────┐
+│  RouterPolicy (max_failures, cooldown)                                          │
+│  LLMHealthMonitor (failure_count, cooldown_until, probe)                        │
+│  RouteTarget[] (ordered by priority)                                            │
+└──────┬────────────┬────────────┬────────────┬────────────┬────────────┬────────┘
+       │            │            │            │            │            │
+       ▼            ▼            ▼            ▼            ▼            ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  Claude   │ │  OpenAI  │ │   Qwen   │ │ DeepSeek │ │  Gemini  │ │   GLM    │
+│  Service  │ │  Service │ │  Service │ │  Service │ │  Service │ │  Service │
+└─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘
+      ▼            ▼            ▼            ▼            ▼            ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  Claude   │ │  OpenAI  │ │  OpenAI  │ │ DeepSeek │ │  Gemini  │ │  OpenAI  │
+│  Adaptor  │ │  Adaptor │ │  Adaptor │ │  Adaptor │ │  Adaptor │ │  Adaptor │
+│ (native)  │ │(func call)│ │(func call)│ │(reasoning)│ │ (parts) │ │(func call)│
+└──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 ## Supported Providers
@@ -46,6 +46,7 @@
 | **Qwen** (Alibaba) | qwen3-max, qwen-plus, qwen-turbo | OpenAI-compatible | Thinking blocks |
 | **DeepSeek** | deepseek-chat, deepseek-reasoner | OpenAI-compatible | `reasoning_content` |
 | **Gemini** (Google) | gemini-2.5-pro, gemini-flash | Generative Language API | Thinking |
+| **GLM** (Zhipu AI) | glm-4-plus, glm-4-flash, glm-4-long | OpenAI-compatible | — |
 | **Ollama** (Local) | llama3, mistral, qwen2, etc. | OpenAI-compatible | Varies |
 
 ## Format Adapters
@@ -58,6 +59,7 @@ Each provider has a different API format for tool calling. Adapters handle bidir
 Claude format:    content blocks with tool_use / tool_result
 OpenAI format:    tool_calls array + separate tool messages
 Gemini format:    parts with function_call / function_response
+GLM format:       OpenAI-compatible tool_calls (via Zhipu AI API)
 ```
 
 The agent internally uses Claude's format (content blocks). Adapters convert on the fly:
