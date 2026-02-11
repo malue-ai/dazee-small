@@ -118,10 +118,10 @@ _settings_cache: Optional[Dict[str, Any]] = None
 
 def load_config_to_env() -> None:
     """
-    从 config.yaml 加载配置并注入 os.environ。
+    Load config.yaml and inject values into os.environ.
 
-    若 config.yaml 不存在或未提供 API Key，则回退加载项目根目录 .env，
-    保证开发时用 .env 配置 ANTHROPIC_API_KEY 仍能生效。
+    Falls back to loading .env from project root if config.yaml is missing
+    or does not provide an ANTHROPIC_API_KEY.
     """
     config_path = get_user_config_path()
 

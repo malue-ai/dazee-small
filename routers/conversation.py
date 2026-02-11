@@ -104,6 +104,7 @@ async def search_conversations(
 async def create_conversation(
     user_id: str = Query(..., description="用户ID"),
     title: str = Query("新对话", description="对话标题"),
+    agent_id: Optional[str] = Query(None, description="关联的 Agent ID（可选）"),
 ):
     """
     创建新对话
@@ -111,27 +112,19 @@ async def create_conversation(
     ## 参数
     - **user_id**: 用户ID（必填）
     - **title**: 对话标题（可选，默认"新对话"）
-
-    ## 返回
-    ```json
-    {
-      "code": 200,
-      "message": "success",
-      "data": {
-        "id": "conv_abc123",
-        "user_id": "user_001",
-        "title": "新对话",
-        "created_at": "2024-01-01T12:00:00",
-        "updated_at": "2024-01-01T12:00:00",
-        "metadata": {}
-      }
-    }
-    ```
+    - **agent_id**: 关联的 Agent ID（可选，传入后写入 metadata）
     """
     try:
-        logger.info(f"📨 创建新对话: user_id={user_id}, title={title}")
+        logger.info(f"📨 创建新对话: user_id={user_id}, title={title}, agent_id={agent_id}")
 
-        conversation = await conversation_service.create_conversation(user_id=user_id, title=title)
+        metadata = {}
+        if agent_id:
+            metadata["agent_id"] = agent_id
+            metadata["channel"] = "web"
+
+        conversation = await conversation_service.create_conversation(
+            user_id=user_id, title=title, metadata=metadata or None
+        )
 
         logger.info(f"✅ 对话创建成功: id={conversation.id}")
 
@@ -179,6 +172,7 @@ async def list_conversations(
     user_id: str = Query(..., description="用户ID"),
     limit: int = Query(20, description="每页数量", ge=1, le=100),
     offset: int = Query(0, description="偏移量", ge=0),
+    agent_id: Optional[str] = Query(None, description="按 Agent ID 过滤（可选）"),
 ):
     """
     获取用户的对话列表
@@ -187,38 +181,15 @@ async def list_conversations(
     - **user_id**: 用户ID（必填）
     - **limit**: 每页数量（默认20，最大100）
     - **offset**: 偏移量（默认0）
-
-    ## 返回
-    ```json
-    {
-      "code": 200,
-      "message": "success",
-      "data": {
-        "conversations": [
-          {
-            "id": "conv_abc123",
-            "user_id": "user_001",
-            "title": "讨论Python编程",
-            "created_at": "2024-01-01T12:00:00",
-            "updated_at": "2024-01-01T12:30:00",
-            "message_count": 10,
-            "last_message": "好的，我理解了",
-            "last_message_at": "2024-01-01T12:30:00"
-          },
-          ...
-        ],
-        "total": 50,
-        "limit": 20,
-        "offset": 0
-      }
-    }
-    ```
+    - **agent_id**: Agent ID（可选，传入后只返回该 Agent 的对话）
     """
     try:
-        logger.info(f"📨 获取对话列表: user_id={user_id}, limit={limit}, offset={offset}")
+        logger.info(
+            f"📨 获取对话列表: user_id={user_id}, limit={limit}, offset={offset}, agent_id={agent_id}"
+        )
 
         result = await conversation_service.list_conversations(
-            user_id=user_id, limit=limit, offset=offset
+            user_id=user_id, limit=limit, offset=offset, agent_id=agent_id
         )
 
         logger.info(f"✅ 返回 {len(result['conversations'])} 条对话")

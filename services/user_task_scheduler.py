@@ -284,9 +284,12 @@ class UserTaskScheduler:
         """
         通过 task_id 从数据库读取任务并注册到调度器。
 
-        比 register_task(orm_obj) 更可靠：
-        - 使用独立 session 从 DB 读取，确保数据已持久化
-        - 避免依赖跨 session 的 ORM 对象属性
+        包含重试机制，应对 SQLite WAL 可见性延迟：
+        pool_size=1 + aiosqlite 线程层可能导致刚提交的数据
+        在极短时间窗口内对新 session 不可见。
+
+        推荐：如果调用方已持有 ORM 对象，优先使用 register_task(orm_obj)
+        避免重新查询。
         """
         if not self._running:
             logger.warning(
@@ -303,19 +306,34 @@ class UserTaskScheduler:
         from infra.local_store.crud.scheduled_task import get_scheduled_task
 
         assert self._workspace._session_factory is not None
-        async with self._workspace._session_factory() as session:
-            task = await get_scheduled_task(session, task_id)
-            if not task:
-                logger.error(
-                    f"❌ [Scheduler] register_task_by_id 查不到任务: "
-                    f"task_id={task_id}"
-                )
-                return False
 
-            result = self._register_job(task)
-            if result:
-                self._log_scheduler_status()
-            return result
+        # Retry with exponential backoff for WAL visibility delay
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+
+        for attempt in range(1, max_retries + 1):
+            async with self._workspace._session_factory() as session:
+                task = await get_scheduled_task(session, task_id)
+                if task:
+                    result = self._register_job(task)
+                    if result:
+                        self._log_scheduler_status()
+                    return result
+
+            if attempt < max_retries:
+                logger.warning(
+                    f"⚠️ [Scheduler] register_task_by_id 任务未找到，"
+                    f"重试 {attempt}/{max_retries}: task_id={task_id}, "
+                    f"等待 {retry_delay}s（WAL 可见性延迟）"
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # exponential backoff
+
+        logger.error(
+            f"❌ [Scheduler] register_task_by_id 在 {max_retries} 次重试后"
+            f"仍查不到任务: task_id={task_id}"
+        )
+        return False
 
     async def unregister_task(self, task_id: str) -> bool:
         """

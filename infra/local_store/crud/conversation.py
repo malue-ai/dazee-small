@@ -139,8 +139,19 @@ async def list_conversations(
     limit: int = 50,
     offset: int = 0,
     exclude_hidden: bool = True,
+    agent_id: Optional[str] = None,
 ) -> List[LocalConversation]:
-    """获取用户的会话列表（默认过滤 metadata.hidden=true 的内部会话）"""
+    """
+    获取用户的会话列表
+
+    Args:
+        session: 数据库会话
+        user_id: 用户 ID
+        limit: 每页数量
+        offset: 偏移量
+        exclude_hidden: 是否排除 hidden 会话
+        agent_id: 可选，按 agent_id 过滤（metadata.agent_id）
+    """
     normalized_user_id = _normalize_user_id(user_id)
     query = (
         select(LocalConversation)
@@ -150,6 +161,10 @@ async def list_conversations(
         query = query.where(
             text("COALESCE(json_extract(metadata, '$.hidden'), 0) != 1")
         )
+    if agent_id is not None:
+        query = query.where(
+            text("json_extract(metadata, '$.agent_id') = :agent_id")
+        ).params(agent_id=agent_id)
     query = (
         query
         .order_by(LocalConversation.updated_at.desc())
@@ -164,8 +179,17 @@ async def count_conversations(
     session: AsyncSession,
     user_id: str,
     exclude_hidden: bool = True,
+    agent_id: Optional[str] = None,
 ) -> int:
-    """统计用户的会话数量（默认排除 hidden 会话）"""
+    """
+    统计用户的会话数量
+
+    Args:
+        session: 数据库会话
+        user_id: 用户 ID
+        exclude_hidden: 是否排除 hidden 会话
+        agent_id: 可选，按 agent_id 过滤（metadata.agent_id）
+    """
     normalized_user_id = _normalize_user_id(user_id)
     query = select(func.count(LocalConversation.id)).where(
         LocalConversation.user_id == normalized_user_id
@@ -174,6 +198,10 @@ async def count_conversations(
         query = query.where(
             text("COALESCE(json_extract(metadata, '$.hidden'), 0) != 1")
         )
+    if agent_id is not None:
+        query = query.where(
+            text("json_extract(metadata, '$.agent_id') = :agent_id")
+        ).params(agent_id=agent_id)
     result = await session.execute(query)
     return result.scalar() or 0
 

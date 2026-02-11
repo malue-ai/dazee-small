@@ -3,25 +3,41 @@ import type { ApiResponse, Conversation, Message } from '@/types'
 
 /**
  * 创建新对话
+ * @param userId - 用户 ID
+ * @param title - 对话标题
+ * @param agentId - 可选，关联的 Agent ID
  */
-export async function createConversation(userId: string, title = '新对话'): Promise<Conversation> {
+export async function createConversation(userId: string, title = '新对话', agentId?: string): Promise<Conversation> {
+  const params: Record<string, unknown> = { user_id: userId, title }
+  if (agentId) {
+    params.agent_id = agentId
+  }
   const response = await api.post<ApiResponse<Conversation>>('/v1/conversations', null, {
-    params: { user_id: userId, title }
+    params
   })
   return response.data.data
 }
 
 /**
  * 获取对话列表
+ * @param userId - 用户 ID
+ * @param limit - 每页数量
+ * @param offset - 偏移量
+ * @param agentId - 可选，按 Agent ID 过滤
  */
 export async function getConversationList(
   userId: string,
   limit = 20,
-  offset = 0
+  offset = 0,
+  agentId?: string
 ): Promise<{ conversations: Conversation[]; total: number }> {
+  const params: Record<string, unknown> = { user_id: userId, limit, offset }
+  if (agentId) {
+    params.agent_id = agentId
+  }
   const response = await api.get<ApiResponse<{ conversations: Conversation[]; total: number }>>(
     '/v1/conversations',
-    { params: { user_id: userId, limit, offset } }
+    { params }
   )
   // 防御性处理：确保返回值始终包含 conversations 数组
   const data = response.data?.data

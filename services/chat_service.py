@@ -659,6 +659,7 @@ class ChatService:
         files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
         output_format: str = "zenflux",
+        channel: str = "web",
     ) -> Union[AsyncGenerator[dict[str, Any], None], dict[str, Any]]:
         """
         统一的对话入口
@@ -729,7 +730,7 @@ class ChatService:
                 user_id=user_id,
                 conversation_id=conversation_id,
                 title="新对话",
-                metadata={"agent_id": effective_agent_id},
+                metadata={"agent_id": effective_agent_id, "channel": channel},
             )
             conversation_id = conv.id
 
@@ -738,13 +739,18 @@ class ChatService:
                 user_id=user_id, conversation_id=conversation_id, message_id=message_id or ""
             )
 
-            # Ensure conversation metadata carries agent_id for non-web
-            # entry points (e.g., Feishu/Telegram gateway) so UI can
-            # consistently discover agent ownership.
+            # Ensure conversation metadata carries agent_id and channel
+            # for all entry points so UI can consistently discover ownership.
             conv_metadata = conv.metadata if isinstance(conv.metadata, dict) else {}
+            needs_update = False
+            updated_metadata = dict(conv_metadata)
             if conv_metadata.get("agent_id") != effective_agent_id:
-                updated_metadata = dict(conv_metadata)
                 updated_metadata["agent_id"] = effective_agent_id
+                needs_update = True
+            if not conv_metadata.get("channel"):
+                updated_metadata["channel"] = channel
+                needs_update = True
+            if needs_update:
                 await self.conversation_service.update_conversation(
                     conversation_id=conversation_id,
                     metadata=updated_metadata,

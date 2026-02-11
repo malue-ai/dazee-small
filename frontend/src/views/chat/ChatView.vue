@@ -107,7 +107,7 @@
                 class="absolute right-0 top-full mt-1 w-72 bg-card border border-border rounded-xl shadow-lg z-50 overflow-hidden"
               >
                 <div class="px-3 py-2 border-b border-border">
-                  <span class="text-xs font-medium text-muted-foreground">历史对话（{{ historyIds.length }}）</span>
+                  <span class="text-xs font-medium text-muted-foreground">历史对话（{{ historyTotalCount }}）</span>
                 </div>
                 <div class="max-h-64 overflow-y-auto scrollbar-thin">
                   <!-- 无历史记录 -->
@@ -141,13 +141,13 @@
                   </div>
                 </div>
                 <div
-                  v-if="historyIds.length > historyPageSize"
+                  v-if="historyTotalCount > historyPageSize"
                   class="px-3 py-2 border-t border-border flex items-center justify-between"
                 >
                   <button
                     class="px-2 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     :disabled="historyPage <= 1"
-                    @click="historyPage = Math.max(1, historyPage - 1)"
+                    @click="handleHistoryPrevPage"
                   >
                     上一页
                   </button>
@@ -155,7 +155,7 @@
                   <button
                     class="px-2 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     :disabled="historyPage >= historyTotalPages"
-                    @click="historyPage = Math.min(historyTotalPages, historyPage + 1)"
+                    @click="handleHistoryNextPage"
                   >
                     下一页
                   </button>
@@ -586,25 +586,11 @@ const agentId = computed(() => {
   return (route.params.agentId as string) || null
 })
 
-/** 过滤后的对话列表（排除 hidden 内部会话 + Agent 模式只显示关联的对话） */
+/** 过滤后的对话列表（后端已按 agent_id 过滤，前端仅做 hidden 防御性排除） */
 const filteredConversations = computed(() => {
-  // Defense-in-depth: exclude hidden conversations (e.g. scheduled tasks)
-  // even if the backend already filters them.
-  const visible = conversationStore.conversations.filter(
+  return conversationStore.conversations.filter(
     (c) => !c.metadata?.hidden,
   )
-  if (!isAgentMode.value || !agentId.value) {
-    return visible
-  }
-  const linkedIds = new Set(agentStore.getConversationIds(agentId.value))
-  return visible.filter((c) => {
-    if (linkedIds.has(c.id)) return true
-    const ownerAgentId = c.metadata?.agent_id
-    // Keep backward compatibility for historical conversations migrated
-    // from external channels: if no agent_id is recorded, treat as visible.
-    if (!ownerAgentId) return true
-    return ownerAgentId === agentId.value
-  })
 })
 
 /** 当前 Plan（优先从 conversation_metadata 获取，否则从消息中查找） */
@@ -644,11 +630,8 @@ onMounted(async () => {
   // 初始化
   conversationStore.initUserId()
   
-  // 并行加载对话列表和 Agent 列表
-  await Promise.all([
-    conversationStore.fetchList(),
-    agentStore.fetchList()
-  ])
+  // 先加载 Agent 列表，确定当前 agentId 后再按 agentId 拉对话列表
+  await agentStore.fetchList()
   
   // 如果路由中有 agentId，加载对应 Agent；
   // 否则尝试恢复之前选中的 Agent（从设置/技能等页面返回时）；
@@ -674,6 +657,9 @@ onMounted(async () => {
     await agentStore.selectAgent(firstAgent.agent_id)
     router.replace({ name: 'agent', params: { agentId: firstAgent.agent_id } })
   }
+
+  // 按当前 agentId 拉取对话列表（后端过滤，只返回该 Agent 的对话）
+  await conversationStore.fetchList(20, 0, routeAgentId)
 
   // 同步 localStorage 缓存：移除后端已不存在的对话 ID
   if (routeAgentId && conversationStore.conversations.length > 0) {
@@ -868,7 +854,7 @@ function handleHistoryClickOutside(e: MouseEvent) {
 
 watch(showHistoryDropdown, (isOpen) => {
   if (isOpen) {
-    historyPage.value = 1
+    void fetchHistoryPage(1)
     // nextTick 避免当前点击事件立即触发关闭
     nextTick(() => {
       document.addEventListener('click', handleHistoryClickOutside)
@@ -895,6 +881,9 @@ watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
       // 切换 Agent 并加载详情
       await agentStore.selectAgent(newAgentId)
 
+      // 按新 Agent 重新拉取对话列表（后端过滤）
+      await conversationStore.fetchList(50, 0, newAgentId)
+
       // 同步 localStorage 缓存：移除失效对话 ID
       if (conversationStore.conversations.length > 0) {
         const validIds = new Set(conversationStore.conversations.map(c => c.id))
@@ -907,11 +896,11 @@ watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
 
       // 尝试恢复最近使用的会话：优先打开的标签页 > 历史记录
       const openTabs = agentStore.getOpenTabIds(newAgentId)
-      const historyIds = agentStore.getConversationIds(newAgentId)
+      const convList = conversationStore.conversations
       const lastConvId = openTabs.length > 0
         ? openTabs[openTabs.length - 1]
-        : historyIds.length > 0
-          ? historyIds[historyIds.length - 1]
+        : convList.length > 0
+          ? convList[0].id
           : null
 
       if (lastConvId) {
@@ -951,7 +940,7 @@ async function handleCreateConversation(): Promise<void> {
   } else {
     router.push({ name: 'chat' })
   }
-  await conversationStore.fetchList(50)
+  await conversationStore.fetchList(50, 0, agentId.value || undefined)
 }
 
 /** 删除会话 */
@@ -1003,22 +992,44 @@ const conversationMap = computed(() => {
 })
 
 const historyIds = computed(() => filteredConversations.value.map((c) => c.id))
+const historyTotalCount = computed(() => {
+  return conversationStore.conversationsTotal || historyIds.value.length
+})
 
 watch(() => historyIds.value.length, (len) => {
-  const totalPages = Math.max(1, Math.ceil(len / historyPageSize))
+  const totalPages = Math.max(1, Math.ceil(historyTotalCount.value / historyPageSize))
   if (historyPage.value > totalPages) {
     historyPage.value = totalPages
   }
 })
 
 const historyTotalPages = computed(() => {
-  return Math.max(1, Math.ceil(historyIds.value.length / historyPageSize))
+  return Math.max(1, Math.ceil(historyTotalCount.value / historyPageSize))
 })
 
 const pagedHistoryIds = computed(() => {
-  const start = (historyPage.value - 1) * historyPageSize
-  return historyIds.value.slice(start, start + historyPageSize)
+  return historyIds.value
 })
+
+/** 拉取历史对话指定页（后端分页） */
+async function fetchHistoryPage(page: number): Promise<void> {
+  const targetPage = Math.max(1, page)
+  const offset = (targetPage - 1) * historyPageSize
+  await conversationStore.fetchList(historyPageSize, offset, agentId.value || undefined)
+  historyPage.value = targetPage
+}
+
+/** 历史上一页 */
+async function handleHistoryPrevPage(): Promise<void> {
+  if (historyPage.value <= 1) return
+  await fetchHistoryPage(historyPage.value - 1)
+}
+
+/** 历史下一页 */
+async function handleHistoryNextPage(): Promise<void> {
+  if (historyPage.value >= historyTotalPages.value) return
+  await fetchHistoryPage(historyPage.value + 1)
+}
 
 /** 获取对话标题（O(1) 查找） */
 function getConversationTitle(convId: string): string {
@@ -1111,13 +1122,16 @@ async function handleSelectAgent(selectedAgentId: string): Promise<void> {
     chat.isLoading.value = false
     chat.isStopping.value = false
 
-    // 尝试恢复最近使用的会话：优先打开的标签页 > 历史记录
+    // 按新 Agent 重新拉取对话列表（后端过滤）
+    await conversationStore.fetchList(50, 0, selectedAgentId)
+
+    // 尝试恢复最近使用的会话：优先打开的标签页 > 对话列表第一条
     const openTabs = agentStore.getOpenTabIds(selectedAgentId)
-    const historyIds = agentStore.getConversationIds(selectedAgentId)
+    const convList = conversationStore.conversations
     const lastConvId = openTabs.length > 0
       ? openTabs[openTabs.length - 1]
-      : historyIds.length > 0
-        ? historyIds[historyIds.length - 1]
+      : convList.length > 0
+        ? convList[0].id
         : null
 
     if (lastConvId) {
@@ -1204,7 +1218,7 @@ async function handleSendMessage(): Promise<void> {
 
   // Agent 模式下，如果是新对话，先创建并立即绑定到项目（不等流式完成）
   if (sendIsAgentMode && sendAgentId && !hadConversation) {
-    await conversationStore.create(content.slice(0, 20) || '新对话')
+    await conversationStore.create(content.slice(0, 20) || '新对话', sendAgentId)
     if (conversationStore.currentId) {
       agentStore.linkConversation(sendAgentId, conversationStore.currentId)
       router.replace({
@@ -1222,7 +1236,7 @@ async function handleSendMessage(): Promise<void> {
 
   // 刷新会话列表（保持 50 条，失败不影响用户体验）
   try {
-    await conversationStore.fetchList(50)
+    await conversationStore.fetchList(50, 0, sendAgentId || undefined)
   } catch (e) {
     console.warn('⚠️ 刷新会话列表失败:', e)
   }

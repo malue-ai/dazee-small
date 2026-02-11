@@ -272,7 +272,10 @@ class ScheduledTaskTool(BaseTool):
                 }
             # ---- session 已关闭，commit 已持久化 ----
 
-            # Phase 2: 验证任务确实写入了数据库
+            # Phase 2: 验证任务确实写入了数据库，并保留 ORM 对象
+            # 使用 expire_on_commit=False 的 session，ORM 对象在 session
+            # 关闭后仍可安全读取属性（避免 register_task_by_id 的重查询问题）
+            verified_task = None
             async with workspace.session() as verify_session:
                 verified_task = await get_scheduled_task(
                     verify_session, task_snapshot["id"]
@@ -291,15 +294,17 @@ class ScheduledTaskTool(BaseTool):
                     f"status={verified_task.status}"
                 )
 
-            # Phase 3: 注册到调度器（session 已关闭，无连接池竞争）
+            # Phase 3: 注册到调度器
+            # 直接传递 ORM 对象，避免 register_task_by_id 重新查询时的
+            # SQLite WAL 可见性延迟问题（pool_size=1 + aiosqlite 线程层）
             from services.user_task_scheduler import get_user_task_scheduler
 
             scheduler = get_user_task_scheduler()
             scheduler_registered = False
 
             if scheduler.is_running():
-                scheduler_registered = await scheduler.register_task_by_id(
-                    task_snapshot["id"]
+                scheduler_registered = await scheduler.register_task(
+                    verified_task
                 )
                 if not scheduler_registered:
                     logger.warning(
@@ -530,13 +535,14 @@ class ScheduledTaskTool(BaseTool):
                     return {"success": False, "error": "更新任务失败"}
 
             # Re-sync APScheduler with the new schedule
+            # 直接传 ORM 对象，避免 WAL 可见性延迟导致的重查询失败
             if updated_task:
                 from services.user_task_scheduler import get_user_task_scheduler
 
                 scheduler = get_user_task_scheduler()
                 if scheduler.is_running():
                     await scheduler.unregister_task(task_id)
-                    await scheduler.register_task_by_id(task_id)
+                    await scheduler.register_task(updated_task)
 
             return {
                 "success": True,

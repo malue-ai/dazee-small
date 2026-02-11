@@ -189,6 +189,7 @@ class ConversationService:
         user_id: str,
         limit: int = 20,
         offset: int = 0,
+        agent_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         获取对话列表
@@ -197,18 +198,22 @@ class ConversationService:
             user_id: 用户ID
             limit: 每页数量
             offset: 偏移量
+            agent_id: 可选，按 agent_id 过滤
 
         Returns:
             包含 conversations, total, limit, offset 的字典
         """
         factory = await get_local_session_factory()
         async with factory() as session:
-            total = await local_crud.count_conversations(session, user_id)
+            total = await local_crud.count_conversations(
+                session, user_id, agent_id=agent_id
+            )
             conversations = await local_crud.list_conversations(
                 session=session,
                 user_id=user_id,
                 limit=limit,
                 offset=offset,
+                agent_id=agent_id,
             )
 
             items = [

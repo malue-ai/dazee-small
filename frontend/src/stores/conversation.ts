@@ -13,6 +13,8 @@ export const useConversationStore = defineStore('conversation', () => {
 
   /** 会话列表 */
   const conversations = ref<Conversation[]>([])
+  /** 会话总数（后端分页 total） */
+  const conversationsTotal = ref(0)
 
   /** 当前会话 ID */
   const currentId = ref<string | null>(null)
@@ -77,8 +79,9 @@ export const useConversationStore = defineStore('conversation', () => {
    * 获取会话列表
    * @param limit - 数量限制
    * @param offset - 偏移量
+   * @param agentId - 可选，按 Agent ID 过滤
    */
-  async function fetchList(limit = 20, offset = 0): Promise<Conversation[]> {
+  async function fetchList(limit = 20, offset = 0, agentId?: string): Promise<Conversation[]> {
     // 防止重复请求
     if (loading.value) {
       console.log('🔄 会话列表正在加载中，跳过重复请求')
@@ -89,8 +92,9 @@ export const useConversationStore = defineStore('conversation', () => {
     loading.value = true
 
     try {
-      const result = await chatApi.getConversationList(uid, limit, offset)
+      const result = await chatApi.getConversationList(uid, limit, offset, agentId)
       conversations.value = result?.conversations ?? []
+      conversationsTotal.value = result?.total ?? 0
       return conversations.value
     } catch (error) {
       console.error('❌ 获取会话列表失败:', error)
@@ -103,17 +107,20 @@ export const useConversationStore = defineStore('conversation', () => {
   /**
    * 创建新会话
    * @param title - 会话标题
+   * @param agentId - 可选，关联的 Agent ID
    */
-  async function create(title = '新对话'): Promise<Conversation> {
+  async function create(title = '新对话', agentId?: string): Promise<Conversation> {
     const uid = initUserId()
 
     try {
-      const conversation = await chatApi.createConversation(uid, title)
+      const conversation = await chatApi.createConversation(uid, title, agentId)
       currentId.value = conversation.id
       messagesMap.value[conversation.id] = []
       
-      // 刷新列表
-      await fetchList()
+      // 将新对话追加到本地列表（避免在此处刷新全量列表，
+      // 调用方会在合适时机带 agentId 刷新）
+      conversations.value = [conversation, ...conversations.value]
+      conversationsTotal.value += 1
       
       console.log('✅ 会话创建成功:', conversation.id)
       return conversation
@@ -247,7 +254,11 @@ export const useConversationStore = defineStore('conversation', () => {
     if (currentId.value === conversationId) {
       currentId.value = null
     }
+    const beforeCount = conversations.value.length
     conversations.value = conversations.value.filter(c => c.id !== conversationId)
+    if (conversations.value.length < beforeCount) {
+      conversationsTotal.value = Math.max(0, conversationsTotal.value - 1)
+    }
     const { [conversationId]: _, ...rest } = messagesMap.value
     messagesMap.value = rest
 
@@ -337,6 +348,7 @@ export const useConversationStore = defineStore('conversation', () => {
     currentId.value = null
     // messagesMap.value = {} // 不清空缓存，保留后台会话状态
     conversationPlan.value = null
+    conversationsTotal.value = 0
     hasMore.value = false
     nextCursor.value = null
   }
@@ -481,6 +493,7 @@ export const useConversationStore = defineStore('conversation', () => {
   return {
     // 状态
     conversations,
+    conversationsTotal,
     currentId,
     messagesMap,
     messages,

@@ -290,9 +290,10 @@ export function useChat() {
         }
       })
 
-      // 刷新会话列表
+      // 刷新会话列表（按当前 agentId 过滤）
       try {
-        await conversationStore.fetchList()
+        const currentAgentId = (route.params.agentId as string) || undefined
+        await conversationStore.fetchList(50, 0, currentAgentId)
       } catch (e) {
         console.warn('⚠️ 发送后刷新会话列表失败:', e)
       }

@@ -219,6 +219,7 @@ class GatewayBridge:
             conversation_id=conversation_id,
             agent_id=effective_agent_id,
             stream=True,
+            channel=channel_id,
         )
         generator = cast(AsyncGenerator[Dict[str, Any], None], raw_stream)
 
