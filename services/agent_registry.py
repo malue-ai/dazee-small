@@ -303,11 +303,18 @@ class AgentRegistry:
 
     def get_current_instance(self) -> Optional[str]:
         """
-        获取当前加载的实例名称（单实例模式下使用）
+        获取当前默认实例名称。
+
+        优先级：
+        1. AGENT_INSTANCE 环境变量（已在 main.py 中自动设置）
+        2. 单实例模式下直接取唯一加载的实例
 
         Returns:
-            当前实例名称，如果是多实例模式或未加载则返回 None
+            当前实例名称，或 None
         """
+        env_instance = os.environ.get("AGENT_INSTANCE")
+        if env_instance and env_instance in self._configs:
+            return env_instance
         if len(self._configs) == 1:
             return list(self._configs.keys())[0]
         return None

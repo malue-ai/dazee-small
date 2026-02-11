@@ -6,6 +6,7 @@ Provides endpoints to:
 - Read / update gateway configuration (gateway.yaml)
 """
 
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
@@ -137,6 +138,80 @@ CHANNEL_META = {
 }
 
 
+def _resolve_default_agent_id() -> Optional[str]:
+    """
+    Resolve default agent_id for gateway channel bindings.
+
+    Priority:
+    1. AGENT_INSTANCE environment variable
+    2. Currently loaded single instance from AgentRegistry
+    """
+    env_instance = os.getenv("AGENT_INSTANCE")
+    if env_instance:
+        return env_instance
+
+    try:
+        from services.agent_registry import get_agent_registry
+
+        registry = get_agent_registry()
+        return registry.get_current_instance()
+    except Exception as e:
+        logger.warning(
+            "Failed to resolve current instance for gateway binding",
+            extra={"error": str(e)},
+            exc_info=True,
+        )
+        return None
+
+
+def _ensure_default_channel_bindings(raw_config: Dict[str, Any]) -> None:
+    """
+    Ensure each enabled channel has a channel-level binding.
+
+    This keeps gateway routing stable when users enable a new channel
+    (e.g. Feishu) from frontend settings without manually editing bindings.
+    """
+    channels_raw = raw_config.get("channels", {}) or {}
+    bindings = raw_config.get("bindings", []) or []
+    if not isinstance(bindings, list):
+        bindings = []
+
+    default_agent_id = _resolve_default_agent_id()
+    if not default_agent_id:
+        logger.warning("Skip auto-binding: cannot resolve default agent_id")
+        raw_config["bindings"] = bindings
+        return
+
+    for channel_id, channel_data in channels_raw.items():
+        if not isinstance(channel_data, dict):
+            continue
+        if not channel_data.get("enabled", False):
+            continue
+
+        # channel-level binding (without conversation_id) is enough
+        exists = any(
+            isinstance(b, dict)
+            and b.get("channel") == channel_id
+            and not b.get("conversation_id")
+            for b in bindings
+        )
+        if exists:
+            continue
+
+        bindings.append(
+            {
+                "channel": channel_id,
+                "agent_id": default_agent_id,
+            }
+        )
+        logger.info(
+            "Auto-added gateway binding",
+            extra={"channel": channel_id, "agent_id": default_agent_id},
+        )
+
+    raw_config["bindings"] = bindings
+
+
 def _build_channel_response(channel_id: str, channel_data: dict) -> Dict[str, Any]:
     """Build a channel config response with metadata. No masking — local project."""
     meta = CHANNEL_META.get(channel_id, {})
@@ -248,6 +323,9 @@ async def update_gateway_config(body: GatewayConfigUpdate) -> Dict[str, Any]:
     # Update bindings
     if body.bindings is not None:
         raw["bindings"] = body.bindings
+
+    # Auto-ensure enabled channels have explicit bindings (channel -> agent)
+    _ensure_default_channel_bindings(raw)
 
     # Save to YAML
     await save_gateway_config(raw)

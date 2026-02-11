@@ -120,6 +120,12 @@ async def _preload_capability_registry() -> None:
     print(f"✅ 已加载 {len(registry.capabilities)} 个工具能力")
 
 
+def _is_hash_instance(name: str) -> bool:
+    """Check if instance name looks like a hex hash (e.g. ac79243a, 40e2a104)."""
+    import re
+    return bool(re.fullmatch(r"[0-9a-f]{6,}", name))
+
+
 async def _preload_agent_registry() -> int:
     """
     预加载 Agent 配置到 AgentRegistry
@@ -170,8 +176,12 @@ async def _preload_agent_registry() -> int:
 
                 # 本地桌面模式自动设置 AGENT_INSTANCE
                 # 确保后续组件（调度器、存储）能正确定位实例数据库
+                # 优先选「有名字」的实例（非 hash ID），避免误选临时实例
                 if not os.getenv("AGENT_INSTANCE") and agents:
-                    auto_instance = agents[0]["agent_id"]
+                    agent_ids = [a["agent_id"] for a in agents]
+                    # 过滤掉纯 hex hash 命名的临时实例（如 ac79243a、40e2a104）
+                    named = [aid for aid in agent_ids if not _is_hash_instance(aid)]
+                    auto_instance = named[0] if named else agent_ids[0]
                     os.environ["AGENT_INSTANCE"] = auto_instance
                     print(f"🎯 自动设置 AGENT_INSTANCE={auto_instance}")
             else:

@@ -662,18 +662,27 @@ onMounted(async () => {
   await conversationStore.fetchList(20, 0, routeAgentId)
 
   // 同步 localStorage 缓存：移除后端已不存在的对话 ID
-  if (routeAgentId && conversationStore.conversations.length > 0) {
+  // 即使列表为空也要 sync，确保清掉所有已失效的缓存 ID
+  if (routeAgentId) {
     const validIds = new Set(conversationStore.conversations.map(c => c.id))
     agentStore.syncConversations(routeAgentId, validIds)
   }
 
-  // 根据路由加载会话
+  // 根据路由加载会话（仅当该会话确实存在于后端列表中）
   const conversationId = route.params.conversationId
   if (conversationId && typeof conversationId === 'string') {
-    await conversationStore.load(conversationId)
-    // Agent 模式下，确保该会话在标签页中显示
-    if (routeAgentId) {
-      agentStore.openTab(routeAgentId, conversationId)
+    const existsInList = conversationStore.conversations.some(c => c.id === conversationId)
+    if (existsInList) {
+      await conversationStore.load(conversationId)
+      if (routeAgentId) {
+        agentStore.openTab(routeAgentId, conversationId)
+      }
+    } else {
+      // 路由中的会话 ID 已失效，重置到空状态
+      conversationStore.reset()
+      if (routeAgentId) {
+        router.replace({ name: 'agent', params: { agentId: routeAgentId } })
+      }
     }
   }
   
@@ -884,24 +893,20 @@ watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
       // 按新 Agent 重新拉取对话列表（后端过滤）
       await conversationStore.fetchList(50, 0, newAgentId)
 
-      // 同步 localStorage 缓存：移除失效对话 ID
-      if (conversationStore.conversations.length > 0) {
-        const validIds = new Set(conversationStore.conversations.map(c => c.id))
-        agentStore.syncConversations(newAgentId, validIds)
-      }
+      // 同步 localStorage 缓存：移除失效对话 ID（即使列表为空也 sync）
+      const validIds = new Set(conversationStore.conversations.map(c => c.id))
+      agentStore.syncConversations(newAgentId, validIds)
 
       // 重置聊天加载状态
       chat.isLoading.value = false
       chat.isStopping.value = false
 
       // 尝试恢复最近使用的会话：优先打开的标签页 > 历史记录
+      // 但必须验证 ID 在后端列表中确实存在
       const openTabs = agentStore.getOpenTabIds(newAgentId)
       const convList = conversationStore.conversations
-      const lastConvId = openTabs.length > 0
-        ? openTabs[openTabs.length - 1]
-        : convList.length > 0
-          ? convList[0].id
-          : null
+      const validOpenTab = openTabs.reverse().find(id => validIds.has(id))
+      const lastConvId = validOpenTab ?? (convList.length > 0 ? convList[0].id : null)
 
       if (lastConvId) {
         agentStore.openTab(newAgentId, lastConvId)
