@@ -74,7 +74,7 @@
                 <FileText class="w-5 h-5 text-muted-foreground/50" />
                 <div class="flex flex-col text-left">
                   <span class="text-sm font-medium text-foreground truncate max-w-[12rem]">{{ file.file_name }}</span>
-                  <span class="text-xs text-muted-foreground">{{ getFileTypeLabel(file.file_type) }}</span>
+                  <span class="text-xs text-muted-foreground">{{ getFileTypeLabel(file.file_type, file.file_name) }}</span>
                 </div>
               </div>
             </div>
@@ -384,8 +384,8 @@ function parseUserMessage(content: string): string {
 /**
  * 获取文件类型标签
  */
-function getFileTypeLabel(mimeType: string): string {
-  return getLabel(mimeType)
+function getFileTypeLabel(mimeType: string, fileName?: string): string {
+  return getLabel(mimeType, fileName)
 }
 
 /**

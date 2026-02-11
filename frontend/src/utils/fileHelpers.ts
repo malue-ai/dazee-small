@@ -33,36 +33,60 @@ export function getFileIcon(mimeType: string | undefined): string {
  * @param mimeType - MIME 类型
  * @returns 类型标签
  */
-export function getFileTypeLabel(mimeType: string | undefined): string {
-  if (!mimeType) return 'File'
+export function getFileTypeLabel(mimeType: string | undefined, fileName?: string): string {
+  if (!mimeType && !fileName) return 'File'
   
-  const type = mimeType.toLowerCase()
-  
-  if (type.startsWith('image/')) {
-    if (type.includes('png')) return 'PNG'
-    if (type.includes('jpeg') || type.includes('jpg')) return 'JPEG'
-    if (type.includes('gif')) return 'GIF'
-    if (type.includes('webp')) return 'WebP'
-    if (type.includes('svg')) return 'SVG'
-    return 'Image'
+  // 先尝试通过 MIME 类型识别
+  if (mimeType) {
+    const type = mimeType.toLowerCase()
+    
+    if (type.startsWith('image/')) {
+      if (type.includes('png')) return 'PNG'
+      if (type.includes('jpeg') || type.includes('jpg')) return 'JPEG'
+      if (type.includes('gif')) return 'GIF'
+      if (type.includes('webp')) return 'WebP'
+      if (type.includes('svg')) return 'SVG'
+      return 'Image'
+    }
+    
+    if (type === 'application/pdf') return 'PDF'
+    if (type === 'text/plain') return 'Text'
+    if (type === 'text/markdown') return 'Markdown'
+    if (type === 'text/csv') return 'CSV'
+    if (type === 'text/html') return 'HTML'
+    if (type.includes('json')) return 'JSON'
+    if (type.includes('xml')) return 'XML'
+    if (type.includes('javascript')) return 'JavaScript'
+    if (type.includes('typescript')) return 'TypeScript'
+    if (type.includes('python')) return 'Python'
+    
+    if (type.includes('spreadsheet') || type.includes('excel')) return 'Excel'
+    if (type.includes('presentation') || type.includes('powerpoint')) return 'PPT'
+    if (type.includes('word') || type.includes('document')) return 'Word'
+    if (type.includes('zip')) return 'ZIP'
+
+    // MIME 类型有效且非通用类型时直接返回
+    if (type !== 'application/octet-stream') return 'File'
   }
-  
-  if (type === 'application/pdf') return 'PDF'
-  if (type === 'text/plain') return 'Text'
-  if (type === 'text/markdown') return 'Markdown'
-  if (type === 'text/csv') return 'CSV'
-  if (type === 'text/html') return 'HTML'
-  if (type.includes('json')) return 'JSON'
-  if (type.includes('xml')) return 'XML'
-  if (type.includes('javascript')) return 'JavaScript'
-  if (type.includes('typescript')) return 'TypeScript'
-  if (type.includes('python')) return 'Python'
-  
-  if (type.includes('spreadsheet') || type.includes('excel')) return 'Excel'
-  if (type.includes('presentation') || type.includes('powerpoint')) return 'PPT'
-  if (type.includes('word') || type.includes('document')) return 'Word'
-  if (type.includes('zip')) return 'ZIP'
-  
+
+  // MIME 类型不可用或为通用 octet-stream 时，通过文件名后缀推断
+  if (fileName) {
+    const ext = fileName.split('.').pop()?.toLowerCase()
+    const extMap: Record<string, string> = {
+      md: 'Markdown', txt: 'Text', csv: 'CSV', json: 'JSON', xml: 'XML',
+      html: 'HTML', htm: 'HTML', css: 'CSS', js: 'JavaScript', ts: 'TypeScript',
+      py: 'Python', java: 'Java', go: 'Go', rs: 'Rust', c: 'C', cpp: 'C++',
+      rb: 'Ruby', php: 'PHP', sh: 'Shell', sql: 'SQL', yaml: 'YAML', yml: 'YAML',
+      toml: 'TOML', ini: 'INI', cfg: 'Config', log: 'Log', env: 'Env',
+      pdf: 'PDF', doc: 'Word', docx: 'Word', xls: 'Excel', xlsx: 'Excel',
+      ppt: 'PPT', pptx: 'PPT', zip: 'ZIP', rar: 'RAR', tar: 'Archive', gz: 'Archive',
+      png: 'PNG', jpg: 'JPEG', jpeg: 'JPEG', gif: 'GIF', webp: 'WebP', svg: 'SVG',
+      mp3: 'Audio', wav: 'Audio', mp4: 'Video', avi: 'Video', mov: 'Video',
+      vue: 'Vue', tsx: 'TSX', jsx: 'JSX', svelte: 'Svelte',
+    }
+    if (ext && extMap[ext]) return extMap[ext]
+  }
+
   return 'File'
 }
 

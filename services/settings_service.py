@@ -275,6 +275,8 @@ async def update_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
             # 空字符串 = 删除配置
             if value == "":
                 settings[group_key].pop(key, None)
+                # 同步清除 os.environ，避免 fallback 读到旧值
+                os.environ.pop(key, None)
             else:
                 settings[group_key][key] = value
 

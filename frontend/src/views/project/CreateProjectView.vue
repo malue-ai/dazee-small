@@ -30,11 +30,28 @@
           </div>
 
           <!-- 用户消息 -->
-          <div
-            v-else
-            class="max-w-[85%] px-4 py-2.5 bg-accent text-accent-foreground rounded-2xl rounded-br-md text-sm leading-relaxed"
-          >
-            <p class="whitespace-pre-wrap">{{ msg.content }}</p>
+          <div v-else class="flex flex-col items-end gap-2 max-w-[85%]">
+            <!-- 文件附件 -->
+            <div v-if="msg.files && msg.files.length > 0" class="flex flex-col gap-2">
+              <div
+                v-for="(file, fIdx) in msg.files"
+                :key="fIdx"
+                class="flex items-center gap-3 p-3 bg-white rounded-xl border border-border shadow-sm"
+              >
+                <FileText class="w-5 h-5 text-muted-foreground/50 flex-shrink-0" />
+                <div class="flex flex-col text-left min-w-0">
+                  <span class="text-sm font-medium text-foreground truncate max-w-[12rem]">{{ file.file_name }}</span>
+                  <span class="text-xs text-muted-foreground">{{ getFileTypeLabel(file.file_type, file.file_name) }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- 文本内容 -->
+            <div
+              v-if="msg.content"
+              class="px-4 py-2.5 bg-accent text-accent-foreground rounded-2xl rounded-br-md text-sm leading-relaxed"
+            >
+              <p class="whitespace-pre-wrap">{{ msg.content }}</p>
+            </div>
           </div>
         </div>
 
@@ -469,7 +486,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ArrowLeft, ArrowUp, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save, FolderOpen } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUp, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save, FolderOpen, FileText } from 'lucide-vue-next'
 import { useAgentStore } from '@/stores/agent'
 import { useAgentCreationStore } from '@/stores/agentCreation'
 import { useGuideStore } from '@/stores/guide'
@@ -480,6 +497,7 @@ import { isTauriEnv } from '@/api/tauri'
 import api from '@/api/index'
 import type { ChatRequest, AttachedFile } from '@/types'
 import { useFileUpload } from '@/composables/useFileUpload'
+import { getFileTypeLabel } from '@/utils'
 
 // ==================== 路由 & Store & WebSocket ====================
 
@@ -523,6 +541,7 @@ const GUIDE_PROMPT = `[系统上下文] 用户正在创建一个新的 AI 项目
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  files?: AttachedFile[]
 }
 
 // ==================== 聊天状态 ====================
@@ -781,7 +800,11 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
   fileUpload.clearFiles()
 
   // 添加用户消息（显示给用户的是原始文本，不含系统 prompt）
-  messages.value.push({ role: 'user', content: text })
+  messages.value.push({
+    role: 'user',
+    content: text,
+    ...(pendingFiles.length > 0 ? { files: pendingFiles } : {})
+  })
   scrollToBottom()
 
   // 构造发送给后端的消息内容（首条消息拼接引导 prompt，但不影响 UI 展示）

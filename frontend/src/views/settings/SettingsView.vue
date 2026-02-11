@@ -521,16 +521,14 @@
                           <div class="min-w-0">
                             <p class="text-xs font-medium text-foreground leading-relaxed">{{ step.title }}</p>
                             <p class="text-[11px] text-muted-foreground leading-relaxed mt-0.5 whitespace-pre-line">{{ step.detail }}</p>
-                            <a
+                            <button
                               v-if="step.link"
-                              :href="step.link"
-                              target="_blank"
-                              rel="noopener"
-                              class="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary-hover mt-1 transition-colors"
+                              @click="openExternalUrl(step.link)"
+                              class="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary-hover mt-1 transition-colors cursor-pointer"
                             >
                               <ExternalLink class="w-3 h-3" />
                               <span>打开平台</span>
-                            </a>
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -698,6 +696,7 @@ import {
   type ChannelTestResult,
 } from '@/api/gateway'
 import { useGuideStore } from '@/stores/guide'
+import { openExternalUrl } from '@/api/tauri'
 
 const router = useRouter()
 const guideStore = useGuideStore()
@@ -1260,11 +1259,19 @@ async function saveSettings() {
   }
 
   const toSave: ProviderToSave[] = []
+  /** 已配置但被用户清空的 Provider（需要发送空字符串让后端删除） */
+  const toDelete: ProviderDetail[] = []
 
   for (const p of providers.value) {
     const key = providerKeys[p.name]?.trim()
     if (!key && !p.api_key_configured) continue // 没填 Key 且未配置过 → 跳过
-    if (!key) continue // 没填 Key → 跳过
+
+    // 已配置但用户清空了 → 标记为删除
+    if (!key && p.api_key_configured) {
+      toDelete.push(p)
+      continue
+    }
+    if (!key) continue
 
     toSave.push({
       detail: p,
@@ -1274,8 +1281,8 @@ async function saveSettings() {
     })
   }
 
-  // 校验：至少有一个 Provider 填写了 Key
-  if (toSave.length === 0) {
+  // 校验：至少有一个 Provider 填写了 Key（纯删除操作也允许通过）
+  if (toSave.length === 0 && toDelete.length === 0) {
     saveError.value = '请至少为一个 Provider 填写 API Key'
     rollbackGuideToStep2('请先选择一个 Provider 并填写 API Key')
     return
@@ -1342,6 +1349,14 @@ async function saveSettings() {
       }
     }
 
+    // 删除被清空的 Key（发送空字符串，后端会移除）
+    for (const p of toDelete) {
+      updates['api_keys'][p.api_key_env] = ''
+      // 同时清除对应的 Base URL
+      const baseUrlEnv = p.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+      updates['api_keys'][baseUrlEnv] = ''
+    }
+
     // 默认模型：取第一个验证通过的 Provider 的首个模型
     if (firstValidModels.length) {
       updates.llm = {}
@@ -1360,9 +1375,21 @@ async function saveSettings() {
       }
     }
 
-    // Refresh status
-    const statusData = await getSettingsStatus()
+    // Refresh all states (provider list, status, embedding status)
+    const [statusData, providerData] = await Promise.all([
+      getSettingsStatus(),
+      modelApi.getSupportedProviders(),
+      loadEmbeddingStatus(),
+    ])
     status.value = statusData
+    providers.value = providerData
+
+    // 同步 provider key 输入框（删除的 Key 清空输入框）
+    for (const p of toDelete) {
+      providerKeys[p.name] = ''
+      delete providerBaseUrls[p.name]
+      delete validateResults[p.name]
+    }
 
     saveSuccess.value = true
 

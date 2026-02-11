@@ -205,6 +205,34 @@ export async function setConnectionStatus(
 }
 
 // ============================================================================
+// 外部链接
+// ============================================================================
+
+/**
+ * 在系统默认浏览器中打开外部 URL
+ *
+ * Tauri WebView 内的 <a target="_blank"> 不会打开系统浏览器，
+ * 需要通过 shell plugin 的 open() 方法来实现。
+ *
+ * @param url 要打开的 URL
+ */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!url) return
+
+  if (isTauriEnv()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell')
+      await open(url)
+    } catch (e) {
+      console.error('Tauri shell open 失败，回退到 window.open:', e)
+      window.open(url, '_blank')
+    }
+  } else {
+    window.open(url, '_blank')
+  }
+}
+
+// ============================================================================
 // 系统设置
 // ============================================================================
 
@@ -232,6 +260,7 @@ export default {
   runCommand,
   whichCommand,
   sendNotification,
+  openExternalUrl,
   getNodeInfo,
   getConnectionStatus,
   setConnectionStatus,
