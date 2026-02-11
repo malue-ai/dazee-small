@@ -10,11 +10,22 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.local_store.fts import delete_conversation_from_fts
 from infra.local_store.models import LocalConversation, LocalMessage, _to_json
+
+
+def _normalize_user_id(_: str) -> str:
+    """
+    Normalize all conversation ownership to a single local user.
+
+    The desktop app currently runs in single-user mode. For consistency across
+    web, gateway channels, and local tasks, conversation rows are always stored
+    and queried under user_id="local".
+    """
+    return "local"
 
 
 async def create_conversation(
@@ -37,10 +48,11 @@ async def create_conversation(
     Returns:
         创建的会话对象
     """
+    normalized_user_id = _normalize_user_id(user_id)
     now = datetime.now()
     conv = LocalConversation(
         id=conversation_id or str(uuid4()),
-        user_id=user_id,
+        user_id=normalized_user_id,
         title=title,
         created_at=now,
         updated_at=now,
@@ -81,15 +93,18 @@ async def get_or_create_conversation(
     Returns:
         (conversation, is_new)
     """
+    normalized_user_id = _normalize_user_id(user_id)
     if not conversation_id:
-        conv = await create_conversation(session, user_id, title, metadata)
+        conv = await create_conversation(session, normalized_user_id, title, metadata)
         return conv, True
 
     conv = await get_conversation(session, conversation_id)
     if conv:
         return conv, False
 
-    conv = await create_conversation(session, user_id, title, metadata, conversation_id)
+    conv = await create_conversation(
+        session, normalized_user_id, title, metadata, conversation_id
+    )
     return conv, True
 
 
@@ -123,28 +138,43 @@ async def list_conversations(
     user_id: str,
     limit: int = 50,
     offset: int = 0,
+    exclude_hidden: bool = True,
 ) -> List[LocalConversation]:
-    """获取用户的会话列表"""
-    result = await session.execute(
+    """获取用户的会话列表（默认过滤 metadata.hidden=true 的内部会话）"""
+    normalized_user_id = _normalize_user_id(user_id)
+    query = (
         select(LocalConversation)
-        .where(LocalConversation.user_id == user_id)
+        .where(LocalConversation.user_id == normalized_user_id)
+    )
+    if exclude_hidden:
+        query = query.where(
+            text("COALESCE(json_extract(metadata, '$.hidden'), 0) != 1")
+        )
+    query = (
+        query
         .order_by(LocalConversation.updated_at.desc())
         .limit(limit)
         .offset(offset)
     )
+    result = await session.execute(query)
     return list(result.scalars().all())
 
 
 async def count_conversations(
     session: AsyncSession,
     user_id: str,
+    exclude_hidden: bool = True,
 ) -> int:
-    """统计用户的会话数量"""
-    result = await session.execute(
-        select(func.count(LocalConversation.id)).where(
-            LocalConversation.user_id == user_id
-        )
+    """统计用户的会话数量（默认排除 hidden 会话）"""
+    normalized_user_id = _normalize_user_id(user_id)
+    query = select(func.count(LocalConversation.id)).where(
+        LocalConversation.user_id == normalized_user_id
     )
+    if exclude_hidden:
+        query = query.where(
+            text("COALESCE(json_extract(metadata, '$.hidden'), 0) != 1")
+        )
+    result = await session.execute(query)
     return result.scalar() or 0
 
 
