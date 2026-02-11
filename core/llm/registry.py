@@ -321,6 +321,11 @@ class LLMRegistry:
         except ImportError as e:
             logger.warning(f"⚠️ 无法导入 deepseek 模块: {e}")
 
+        try:
+            from . import glm  # noqa: F401
+        except ImportError as e:
+            logger.warning(f"⚠️ 无法导入 glm 模块: {e}")
+
         cls._initialized = True
         logger.info(f"✅ LLM Registry 初始化完成，已注册 {len(cls._providers)} 个 Provider")
 

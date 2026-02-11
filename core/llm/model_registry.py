@@ -1682,6 +1682,167 @@ def _register_preset_models() -> None:
         )
     )
 
+    # ==================== GLM（智谱AI）系列 ====================
+
+    _GLM_COMMON = dict(
+        adapter=AdapterType.OPENAI,
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key_env="ZHIPUAI_API_KEY",
+        provider="glm",
+    )
+
+    # --- GLM-4.7 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.7",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.7",
+            description="智谱最新旗舰模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=2.00),
+            **_GLM_COMMON,
+        )
+    )
+
+    # --- GLM-4.6 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.6",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.6",
+            description="智谱上一代旗舰模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=2.00),
+            **_GLM_COMMON,
+        )
+    )
+
+    # --- GLM-4.5 系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.5",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.5",
+            description="355B MoE 旗舰，128K 上下文，Agent/Coding 最强",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.20, output_per_million=1.10),
+            **_GLM_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.5-air",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.5-Air",
+            description="106B MoE 轻量旗舰，高性价比",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.08, output_per_million=0.40),
+            **_GLM_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.5-x",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.5-X",
+            description="高性能加速版，超快响应",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=2.00),
+            **_GLM_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.5-airx",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.5-AirX",
+            description="轻量加速版，低延迟高并发",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.10, output_per_million=0.50),
+            **_GLM_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.5-flash",
+            model_type=ModelType.LLM,
+            display_name="GLM-4.5-Flash",
+            description="免费快速模型，Coding/Agent/Reasoning",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.0, output_per_million=0.0),
+            **_GLM_COMMON,
+        )
+    )
+
+    # --- GLM 视觉模型 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.6v",
+            model_type=ModelType.VLM,
+            display_name="GLM-4.6V",
+            description="智谱视觉语言模型（GLM-4.6 视觉版）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=2.00),
+            **_GLM_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-4.5v",
+            model_type=ModelType.VLM,
+            display_name="GLM-4.5V",
+            description="智谱视觉语言模型（GLM-4.5 视觉版）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=96000, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.20, output_per_million=1.10),
+            **_GLM_COMMON,
+        )
+    )
+
     # ==================== DeepSeek 系列 ====================
 
     _DEEPSEEK_COMMON = dict(

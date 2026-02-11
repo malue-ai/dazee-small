@@ -17,6 +17,7 @@ LLM 服务模块
 - gemini.py: Gemini 实现
 - qwen.py: 千问实现
 - deepseek.py: DeepSeek 实现
+- glm.py: GLM 实现
 
 使用示例：
 ```python
@@ -114,6 +115,12 @@ from .deepseek import (
     create_deepseek_service,
 )
 
+# GLM 实现
+from .glm import (
+    GLMLLMService,
+    create_glm_service,
+)
+
 # 千问实现
 from .qwen import (
     QwenConfig,
@@ -208,6 +215,7 @@ def create_llm_service(
         LLMProvider.GEMINI: "gemini-pro",
         LLMProvider.QWEN: "qwen3-max",
         LLMProvider.DEEPSEEK: "deepseek-reasoner",
+        LLMProvider.GLM: "glm-4.5",
     }
 
     if model is None:
@@ -230,6 +238,7 @@ def create_llm_service(
                 LLMProvider.GEMINI: "GOOGLE_API_KEY",
                 LLMProvider.QWEN: "DASHSCOPE_API_KEY",
                 LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
+                LLMProvider.GLM: "ZHIPUAI_API_KEY",
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 
@@ -278,6 +287,7 @@ __all__ = [
     "QwenLLMService",
     "QwenConfig",
     "DeepSeekLLMService",
+    "GLMLLMService",
     # ========== 适配器 ==========
     "BaseAdaptor",
     "ClaudeAdaptor",
@@ -300,4 +310,5 @@ __all__ = [
     "create_claude_service",
     "create_qwen_service",
     "create_deepseek_service",
+    "create_glm_service",
 ]
