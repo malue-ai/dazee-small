@@ -107,16 +107,16 @@
                 class="absolute right-0 top-full mt-1 w-72 bg-card border border-border rounded-xl shadow-lg z-50 overflow-hidden"
               >
                 <div class="px-3 py-2 border-b border-border">
-                  <span class="text-xs font-medium text-muted-foreground">历史对话</span>
+                  <span class="text-xs font-medium text-muted-foreground">历史对话（{{ historyIds.length }}）</span>
                 </div>
                 <div class="max-h-64 overflow-y-auto scrollbar-thin">
                   <!-- 无历史记录 -->
-                  <div v-if="agentStore.currentConversationIds.length === 0" class="px-4 py-6 text-center">
+                  <div v-if="historyIds.length === 0" class="px-4 py-6 text-center">
                     <p class="text-xs text-muted-foreground/50">暂无对话记录</p>
                   </div>
                   <!-- 历史列表 -->
                   <div
-                    v-for="convId in agentStore.currentConversationIds"
+                    v-for="convId in pagedHistoryIds"
                     :key="convId"
                     class="group flex items-center gap-2 px-3 py-2.5 hover:bg-muted cursor-pointer transition-colors"
                     @click="handleOpenFromHistory(convId)"
@@ -139,6 +139,26 @@
                       <Trash2 class="w-4 h-4" />
                     </button>
                   </div>
+                </div>
+                <div
+                  v-if="historyIds.length > historyPageSize"
+                  class="px-3 py-2 border-t border-border flex items-center justify-between"
+                >
+                  <button
+                    class="px-2 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    :disabled="historyPage <= 1"
+                    @click="historyPage = Math.max(1, historyPage - 1)"
+                  >
+                    上一页
+                  </button>
+                  <span class="text-xs text-muted-foreground">{{ historyPage }} / {{ historyTotalPages }}</span>
+                  <button
+                    class="px-2 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    :disabled="historyPage >= historyTotalPages"
+                    @click="historyPage = Math.min(historyTotalPages, historyPage + 1)"
+                  >
+                    下一页
+                  </button>
                 </div>
               </div>
             </Transition>
@@ -445,6 +465,8 @@ const rightSidebarTab = ref<'plan' | 'workspace'>('plan')
 const showLocalWorkspace = ref(true)
 const showHistoryDropdown = ref(false)
 const historyDropdownRef = ref<HTMLElement | null>(null)
+const historyPage = ref(1)
+const historyPageSize = 20
 
 // 输入
 const inputMessage = ref('')
@@ -564,13 +586,25 @@ const agentId = computed(() => {
   return (route.params.agentId as string) || null
 })
 
-/** 过滤后的对话列表（Agent 模式下只显示关联的对话） */
+/** 过滤后的对话列表（排除 hidden 内部会话 + Agent 模式只显示关联的对话） */
 const filteredConversations = computed(() => {
+  // Defense-in-depth: exclude hidden conversations (e.g. scheduled tasks)
+  // even if the backend already filters them.
+  const visible = conversationStore.conversations.filter(
+    (c) => !c.metadata?.hidden,
+  )
   if (!isAgentMode.value || !agentId.value) {
-    return conversationStore.conversations
+    return visible
   }
-  const linkedIds = agentStore.getConversationIds(agentId.value)
-  return conversationStore.conversations.filter(c => linkedIds.includes(c.id))
+  const linkedIds = new Set(agentStore.getConversationIds(agentId.value))
+  return visible.filter((c) => {
+    if (linkedIds.has(c.id)) return true
+    const ownerAgentId = c.metadata?.agent_id
+    // Keep backward compatibility for historical conversations migrated
+    // from external channels: if no agent_id is recorded, treat as visible.
+    if (!ownerAgentId) return true
+    return ownerAgentId === agentId.value
+  })
 })
 
 /** 当前 Plan（优先从 conversation_metadata 获取，否则从消息中查找） */
@@ -834,12 +868,20 @@ function handleHistoryClickOutside(e: MouseEvent) {
 
 watch(showHistoryDropdown, (isOpen) => {
   if (isOpen) {
+    historyPage.value = 1
     // nextTick 避免当前点击事件立即触发关闭
     nextTick(() => {
       document.addEventListener('click', handleHistoryClickOutside)
     })
   } else {
     document.removeEventListener('click', handleHistoryClickOutside)
+  }
+})
+
+watch(() => historyIds.value.length, (len) => {
+  const totalPages = Math.max(1, Math.ceil(len / historyPageSize))
+  if (historyPage.value > totalPages) {
+    historyPage.value = totalPages
   }
 })
 
@@ -967,9 +1009,20 @@ const conversationMap = computed(() => {
   return map
 })
 
+const historyIds = computed(() => filteredConversations.value.map((c) => c.id))
+
+const historyTotalPages = computed(() => {
+  return Math.max(1, Math.ceil(historyIds.value.length / historyPageSize))
+})
+
+const pagedHistoryIds = computed(() => {
+  const start = (historyPage.value - 1) * historyPageSize
+  return historyIds.value.slice(start, start + historyPageSize)
+})
+
 /** 获取对话标题（O(1) 查找） */
 function getConversationTitle(convId: string): string {
-  return conversationMap.value.get(convId)?.title || '新对话'
+  return conversationMap.value.get(convId)?.title || `会话 ${convId.slice(0, 8)}`
 }
 
 /** 关闭标签页（不删除对话，仅从标签栏移除） */

@@ -77,6 +77,11 @@ export function useChat() {
   const showLongRunConfirmModal = ref(false)
   const longRunConfirmData = ref<{ turn: number; message: string } | null>(null)
 
+  // Register playbook suggestion handler eagerly when useChat is created.
+  // ChatView currently does not call initialize(), so registering only there
+  // can miss WebSocket-pushed playbook_suggestion events.
+  connectionStore.registerPlaybookHandler(injectPlaybookSuggestion)
+
   // ==================== 计算属性 ====================
 
   /** 消息列表（从 store 获取） */
@@ -136,11 +141,6 @@ export function useChat() {
    */
   async function initialize(): Promise<boolean> {
     conversationStore.initUserId()
-
-    // Register playbook suggestion handler on the global WebSocket notification channel.
-    // When playbook_extraction finishes (after SSE stream closed), the backend pushes
-    // via WebSocket → this handler injects the suggestion into the last assistant message.
-    connectionStore.registerPlaybookHandler(injectPlaybookSuggestion)
 
     // 加载会话列表
     await conversationStore.fetchList()

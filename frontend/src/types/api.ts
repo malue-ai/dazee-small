@@ -42,6 +42,10 @@ export interface Conversation {
   user_id: string
   created_at: string
   updated_at: string
+  metadata?: {
+    agent_id?: string
+    [key: string]: unknown
+  }
 }
 
 /**
