@@ -55,22 +55,32 @@
             <button 
               class="p-2.5 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-colors flex-shrink-0"
               title="上传文件"
+              :disabled="fileUpload.isUploading.value"
+              @click="handleUploadClick"
             >
-              <Paperclip class="w-5 h-5" />
+              <Loader2 v-if="fileUpload.isUploading.value" class="w-5 h-5 animate-spin" />
+              <Plus v-else class="w-5 h-5" />
             </button>
 
-            <textarea
-              ref="inputRef"
-              v-model="inputText"
-              @keydown.enter.exact="handleSendMessage"
-              @compositionstart="isComposing = true"
-              @compositionend="isComposing = false"
-              @input="adjustInputHeight"
-              placeholder="告诉我你需要什么项目"
-              :disabled="isTypewriting"
-              rows="1"
-              class="flex-1 max-h-[120px] py-2.5 bg-transparent border-none outline-none text-sm text-foreground placeholder:text-muted-foreground/50 resize-none leading-relaxed"
-            ></textarea>
+            <!-- contenteditable 编辑器：支持文本 + 内联文件标签 -->
+            <div class="flex-1 min-w-0 relative">
+              <div
+                ref="editorRef"
+                contenteditable="true"
+                @input="onEditorInput"
+                @keydown="onEditorKeydown"
+                @compositionstart="isComposing = true"
+                @compositionend="isComposing = false"
+                @paste="onEditorPaste"
+                class="min-h-[28px] max-h-[120px] py-2 outline-none text-sm text-foreground leading-relaxed overflow-y-auto whitespace-pre-wrap break-words"
+              ></div>
+              <!-- 占位符 -->
+              <div
+                v-if="editorEmpty"
+                @click="focusEditor"
+                class="absolute left-0 top-2 text-sm text-muted-foreground/50 pointer-events-none select-none"
+              >告诉我你需要什么项目</div>
+            </div>
 
             <button 
               ref="sendBtnRef"
@@ -85,6 +95,16 @@
           </div>
         </div>
       </div>
+
+      <!-- 隐藏的文件上传 input -->
+      <input
+        type="file"
+        ref="fileInputRef"
+        @change="handleFileSelect"
+        multiple
+        accept="image/*,.pdf,.txt,.md,.csv,.json"
+        style="display: none"
+      />
     </div>
 
     <!-- ==================== 右侧：项目配置面板 ==================== -->
@@ -449,7 +469,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save, FolderOpen } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUp, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save, FolderOpen } from 'lucide-vue-next'
 import { useAgentStore } from '@/stores/agent'
 import { useAgentCreationStore } from '@/stores/agentCreation'
 import { useGuideStore } from '@/stores/guide'
@@ -458,7 +478,8 @@ import { modelApi, type ModelInfo } from '@/api/models'
 import { getAgentDetail } from '@/api/agent'
 import { isTauriEnv } from '@/api/tauri'
 import api from '@/api/index'
-import type { ChatRequest } from '@/types'
+import type { ChatRequest, AttachedFile } from '@/types'
+import { useFileUpload } from '@/composables/useFileUpload'
 
 // ==================== 路由 & Store & WebSocket ====================
 
@@ -468,6 +489,8 @@ const agentStore = useAgentStore()
 const agentCreationStore = useAgentCreationStore()
 const guideStore = useGuideStore()
 const ws = useWebSocketChat()
+const fileUpload = useFileUpload()
+const fileInputRef = ref<HTMLInputElement | null>(null)
 
 // ==================== 编辑模式 ====================
 
@@ -507,10 +530,11 @@ interface ChatMessage {
 const messages = ref<ChatMessage[]>([])
 
 const inputText = ref('')
-const inputRef = ref<HTMLTextAreaElement | null>(null)
+const editorRef = ref<HTMLDivElement | null>(null)
 const messageListRef = ref<HTMLDivElement | null>(null)
 const isComposing = ref(false)
 const isThinking = ref(false)
+const editorEmpty = ref(true)
 
 /** 是否正在流式生成中 */
 const isGenerating = ref(false)
@@ -577,6 +601,28 @@ async function openFolderPicker() {
     }
   } catch (e) {
     console.error('打开文件夹选择器失败:', e)
+  }
+}
+
+// ==================== 聊天文件上传 ====================
+
+/** 点击上传按钮 */
+function handleUploadClick(): void {
+  fileInputRef.value?.click()
+}
+
+/** 处理文件选择 */
+async function handleFileSelect(event: Event): Promise<void> {
+  try {
+    const beforeCount = fileUpload.selectedFiles.value.length
+    await fileUpload.handleFileSelect(event)
+    // 将新上传的文件作为标签插入编辑器
+    const newFiles = fileUpload.selectedFiles.value.slice(beforeCount)
+    for (const file of newFiles) {
+      insertFileChip(file)
+    }
+  } catch (e) {
+    console.error('文件上传失败:', e)
   }
 }
 
@@ -673,8 +719,8 @@ const projectIcon = computed(() => {
   return 'M'
 })
 
-/** 是否可以发送消息（不在生成中、不在打字机动画中且有内容） */
-const canSend = computed(() => inputText.value.trim().length > 0 && !isGenerating.value && !isTypewriting.value)
+/** 是否可以发送消息（不在生成中、不在打字机动画中且有内容或文件） */
+const canSend = computed(() => !editorEmpty.value && !isGenerating.value && !isTypewriting.value)
 
 /** 是否可以创建项目（名称、描述、模型都必填） */
 const canCreate = computed(() => form.name.trim().length > 0 && form.description.trim().length > 0 && !!form.model)
@@ -725,19 +771,18 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
     guideStore.tooltipOverride = 'AI 正在为你生成项目配置，请稍候...'
   }
 
-  const text = inputText.value.trim()
-  inputText.value = ''
+  const text = getEditorText().trim()
+  // 收集编辑器内的文件标签 + selectedFiles 列表
+  const editorFiles = getEditorFiles()
+  const pendingFiles = editorFiles.length > 0 ? editorFiles : [...fileUpload.selectedFiles.value]
+
+  // 清空编辑器和文件列表
+  clearEditor()
+  fileUpload.clearFiles()
 
   // 添加用户消息（显示给用户的是原始文本，不含系统 prompt）
   messages.value.push({ role: 'user', content: text })
   scrollToBottom()
-
-  // 重置输入框高度
-  nextTick(() => {
-    if (inputRef.value) {
-      inputRef.value.style.height = 'auto'
-    }
-  })
 
   // 构造发送给后端的消息内容（首条消息拼接引导 prompt，但不影响 UI 展示）
   const messageContent = isFirstMessage.value
@@ -758,7 +803,16 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
       message: messageContent,
       user_id: 'local',
       stream: true,
-      ...(conversationId.value ? { conversation_id: conversationId.value } : {})
+      ...(conversationId.value ? { conversation_id: conversationId.value } : {}),
+      ...(pendingFiles.length > 0 ? {
+        files: pendingFiles.map(f => ({
+          file_url: f.file_url,
+          local_path: f.local_path,
+          file_name: f.file_name,
+          file_type: f.file_type,
+          file_size: f.file_size
+        }))
+      } : {})
     }
 
     // 通过 WebSocket 发送并等待流结束
@@ -995,12 +1049,166 @@ function scrollToBottom() {
   })
 }
 
-/** 调整输入框高度 */
-function adjustInputHeight() {
-  if (inputRef.value) {
-    inputRef.value.style.height = 'auto'
-    inputRef.value.style.height = Math.min(inputRef.value.scrollHeight, 120) + 'px'
+// ==================== contenteditable 编辑器逻辑 ====================
+
+/** 从编辑器 DOM 中提取纯文本（跳过文件标签内部文字） */
+function getEditorText(): string {
+  if (!editorRef.value) return ''
+  let text = ''
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent || ''
+    } else if (node instanceof HTMLElement) {
+      if (node.hasAttribute('data-file-chip')) return
+      if (node.tagName === 'BR') text += '\n'
+      Array.from(node.childNodes).forEach(walk)
+    }
   }
+  walk(editorRef.value)
+  return text
+}
+
+/** 更新编辑器空状态 */
+function updateEditorEmpty() {
+  if (!editorRef.value) { editorEmpty.value = true; return }
+  const text = getEditorText().trim()
+  const hasChips = !!editorRef.value.querySelector('[data-file-chip]')
+  editorEmpty.value = text.length === 0 && !hasChips
+}
+
+/** 编辑器 input 事件 */
+function onEditorInput() {
+  if (!editorRef.value) return
+  const text = getEditorText().trim()
+  const hasChips = !!editorRef.value.querySelector('[data-file-chip]')
+  if (!text && !hasChips && editorRef.value.innerHTML !== '') {
+    editorRef.value.innerHTML = ''
+  }
+  inputText.value = getEditorText()
+  updateEditorEmpty()
+}
+
+/** 编辑器 keydown 事件 */
+function onEditorKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (isComposing.value || e.isComposing || e.keyCode === 229) return
+    e.preventDefault()
+    handleSendMessage()
+  }
+}
+
+/** 编辑器粘贴事件（仅保留纯文本，同时支持粘贴文件） */
+function onEditorPaste(e: ClipboardEvent) {
+  const files = Array.from(e.clipboardData?.files || [])
+  if (files.length > 0) {
+    e.preventDefault()
+    handlePastedFiles(files)
+    return
+  }
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (text) document.execCommand('insertText', false, text)
+}
+
+/** 处理粘贴的文件 */
+async function handlePastedFiles(files: File[]) {
+  fileUpload.isUploading.value = true
+  try {
+    for (const file of files) {
+      const result = await fileUpload.uploadFile(file)
+      if (result) {
+        fileUpload.selectedFiles.value.push(result)
+        insertFileChip(result)
+      }
+    }
+  } catch (e) {
+    console.error('文件上传失败:', e)
+  } finally {
+    fileUpload.isUploading.value = false
+  }
+}
+
+/** 在编辑器光标处插入文件标签 */
+function insertFileChip(file: AttachedFile) {
+  if (!editorRef.value) return
+
+  const chip = document.createElement('span')
+  chip.setAttribute('data-file-chip', '')
+  chip.setAttribute('data-file-data', JSON.stringify({
+    file_url: file.file_url,
+    file_name: file.file_name,
+    file_type: file.file_type,
+    file_size: file.file_size,
+  }))
+  chip.contentEditable = 'false'
+  chip.className = 'file-chip'
+
+  const icon = document.createElement('span')
+  icon.className = 'file-chip-icon'
+  icon.textContent = '\u{1F4C4}'
+
+  const nameEl = document.createElement('span')
+  nameEl.className = 'file-chip-name'
+  nameEl.textContent = file.file_name
+
+  const closeBtn = document.createElement('span')
+  closeBtn.className = 'file-chip-close'
+  closeBtn.textContent = '\u2715'
+  closeBtn.onmousedown = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    chip.remove()
+    onEditorInput()
+  }
+
+  chip.appendChild(icon)
+  chip.appendChild(nameEl)
+  chip.appendChild(closeBtn)
+
+  const sel = window.getSelection()
+  if (sel && sel.rangeCount > 0 && editorRef.value.contains(sel.anchorNode)) {
+    const range = sel.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(chip)
+    const space = document.createTextNode('\u00A0')
+    chip.after(space)
+    range.setStartAfter(space)
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+  } else {
+    editorRef.value.appendChild(chip)
+    editorRef.value.appendChild(document.createTextNode('\u00A0'))
+  }
+
+  editorRef.value.focus()
+  onEditorInput()
+}
+
+/** 获取编辑器中所有文件标签的数据 */
+function getEditorFiles(): AttachedFile[] {
+  if (!editorRef.value) return []
+  const files: AttachedFile[] = []
+  editorRef.value.querySelectorAll('[data-file-chip]').forEach(el => {
+    const raw = (el as HTMLElement).dataset.fileData
+    if (raw) {
+      try { files.push(JSON.parse(raw)) } catch { /* skip */ }
+    }
+  })
+  return files
+}
+
+/** 聚焦编辑器 */
+function focusEditor() {
+  editorRef.value?.focus()
+}
+
+/** 清空编辑器 */
+function clearEditor() {
+  if (!editorRef.value) return
+  editorRef.value.innerHTML = ''
+  inputText.value = ''
+  updateEditorEmpty()
 }
 
 // ==================== 打字机效果（引导 Step 2） ====================
@@ -1011,11 +1219,15 @@ function adjustInputHeight() {
  */
 function startTypewriter(text: string) {
   isTypewriting.value = true
-  inputText.value = ''
+  clearEditor()
   let i = 0
   typewriterTimer = setInterval(() => {
     if (i < text.length) {
-      inputText.value += text[i]
+      if (editorRef.value) {
+        editorRef.value.textContent = (editorRef.value.textContent || '') + text[i]
+        inputText.value = editorRef.value.textContent || ''
+        updateEditorEmpty()
+      }
       i++
     } else {
       clearInterval(typewriterTimer!)
@@ -1193,6 +1405,9 @@ onMounted(() => {
   // 注册点击外部关闭下拉框
   document.addEventListener('click', handleClickOutside)
 
+  // 设置文件上传引用
+  fileUpload.setFileInputRef(fileInputRef.value)
+
   // Load available models & default data path
   loadModels()
   loadDefaultDataPath()
@@ -1224,7 +1439,7 @@ onMounted(() => {
       // 引导模式：延迟启动打字机效果
       setTimeout(() => startTypewriter('创建一个会议纪要项目'), 600)
     } else {
-      inputRef.value?.focus()
+      focusEditor()
     }
   }
 })
@@ -1330,5 +1545,49 @@ watch(() => guideStore.currentStep, (step) => {
 .toast-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+</style>
+
+<style>
+/* 文件标签样式（非 scoped，因为标签通过 DOM API 动态创建） */
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0 2px;
+  vertical-align: middle;
+  user-select: none;
+  line-height: 1.5;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+.file-chip-icon {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.file-chip-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip-close {
+  margin-left: 2px;
+  cursor: pointer;
+  opacity: 0.4;
+  font-size: 10px;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.file-chip-close:hover {
+  opacity: 1;
+  color: hsl(var(--destructive));
 }
 </style>

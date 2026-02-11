@@ -616,10 +616,24 @@ onMounted(async () => {
     agentStore.fetchList()
   ])
   
-  // 如果路由中有 agentId，加载对应 Agent；否则默认选中第一个项目
+  // 如果路由中有 agentId，加载对应 Agent；
+  // 否则尝试恢复之前选中的 Agent（从设置/技能等页面返回时）；
+  // 最后 fallback 到第一个项目
   let routeAgentId = route.params.agentId as string | undefined
   if (routeAgentId) {
     await agentStore.selectAgent(routeAgentId)
+  } else if (
+    agentStore.currentAgentId &&
+    agentStore.agents.some(a => a.agent_id === agentStore.currentAgentId)
+  ) {
+    // 从其他页面返回时，恢复之前选中的 Agent 及会话路由
+    routeAgentId = agentStore.currentAgentId
+    const existingConvId = conversationStore.currentId
+    if (existingConvId) {
+      router.replace({ name: 'agent-conversation', params: { agentId: routeAgentId, conversationId: existingConvId } })
+    } else {
+      router.replace({ name: 'agent', params: { agentId: routeAgentId } })
+    }
   } else if (agentStore.agents.length > 0) {
     const firstAgent = agentStore.agents[0]
     routeAgentId = firstAgent.agent_id
@@ -831,6 +845,13 @@ watch(showHistoryDropdown, (isOpen) => {
 
 // 监听路由中的 agentId 变化（通知卡片"打开"、浏览器前进/后退等外部路由跳转）
 watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
+  // 导航到非聊天页面（设置、技能、知识库等）时，保留当前 Agent/会话状态，
+  // 以便返回时恢复高亮和会话上下文。
+  // NOTE: 以下路由名必须与 router/index.ts 中聊天相关路由的 name 保持一致，
+  //       新增聊天路由时需同步更新此列表。
+  const chatRouteNames = ['chat', 'conversation', 'agent', 'agent-conversation']
+  if (!chatRouteNames.includes(route.name as string)) return
+
   if (newAgentId && typeof newAgentId === 'string') {
     if (agentStore.currentAgentId !== newAgentId) {
       // 刷新 Agent 列表（新创建的 Agent 可能尚未在列表中）
