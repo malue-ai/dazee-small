@@ -44,6 +44,8 @@ class PlaybookEntryResponse(BaseModel):
     updated_at: str
     reviewed_by: Optional[str] = None
     review_notes: Optional[str] = None
+    last_used_at: Optional[str] = None
+    is_stale: bool = False
 
 
 class PlaybookListResponse(BaseModel):
@@ -55,9 +57,9 @@ class PlaybookListResponse(BaseModel):
 
 
 class PlaybookActionRequest(BaseModel):
-    """策略操作请求（approve / reject / dismiss）"""
+    """策略操作请求（approve / reject / dismiss / deprecate）"""
 
-    action: str = Field(..., description="操作类型: approve / reject / dismiss")
+    action: str = Field(..., description="操作类型: approve / reject / dismiss / deprecate")
     reviewer: str = Field(default="user", description="审核人")
     notes: Optional[str] = Field(default=None, description="审核备注")
 
@@ -83,6 +85,7 @@ async def _get_manager() -> PlaybookManager:
 def _entry_to_response(entry) -> PlaybookEntryResponse:
     """PlaybookEntry → PlaybookEntryResponse"""
     data = entry.to_dict()
+    data["is_stale"] = entry.is_stale()
     return PlaybookEntryResponse(**data)
 
 
@@ -142,6 +145,7 @@ async def playbook_action(playbook_id: str, request: PlaybookActionRequest):
     - approve: 审核通过（PENDING_REVIEW → APPROVED）
     - reject: 审核拒绝（PENDING_REVIEW → REJECTED）
     - dismiss: 忽略/删除策略
+    - deprecate: 废弃策略（APPROVED → DEPRECATED）
     """
     manager = await _get_manager()
     entry = manager.get(playbook_id)
@@ -200,10 +204,27 @@ async def playbook_action(playbook_id: str, request: PlaybookActionRequest):
             playbook_id=playbook_id,
         )
 
+    elif action == "deprecate":
+        success = await manager.deprecate(
+            playbook_id,
+            reason=request.notes or "用户废弃",
+        )
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail=f"策略 {playbook_id} 当前状态 ({entry.status.value}) 无法废弃"
+                f"（仅 APPROVED 状态可废弃）",
+            )
+        return PlaybookActionResponse(
+            success=True,
+            message="策略已废弃",
+            playbook_id=playbook_id,
+        )
+
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的操作: {action}，支持: approve / reject / dismiss",
+            detail=f"不支持的操作: {action}，支持: approve / reject / dismiss / deprecate",
         )
 
 

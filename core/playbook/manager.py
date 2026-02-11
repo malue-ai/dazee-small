@@ -23,6 +23,10 @@ from utils.app_paths import get_instance_playbooks_dir
 
 logger = get_logger(__name__)
 
+# Playbook unused for longer than this is considered stale and skipped during matching.
+# Lazy evaluation: checked at match time, no background scan needed.
+STALE_DAYS = 30
+
 
 class PlaybookStatus(Enum):
     """策略状态"""
@@ -90,6 +94,21 @@ class PlaybookEntry:
     reviewed_by: Optional[str] = None  # 审核人
     review_notes: Optional[str] = None  # 审核备注
     usage_count: int = 0  # 使用次数
+    last_used_at: Optional[str] = None  # 最后一次被匹配注入的时间（ISO 8601）
+
+    def is_stale(self, stale_days: int = STALE_DAYS) -> bool:
+        """
+        Check if this entry has been unused for too long.
+
+        Uses last_used_at if available, otherwise falls back to updated_at.
+        Newly approved entries (never used) get a grace period from updated_at.
+        """
+        ref = self.last_used_at or self.updated_at or self.created_at
+        try:
+            ref_dt = datetime.fromisoformat(ref)
+            return (datetime.now() - ref_dt).days > stale_days
+        except (ValueError, TypeError):
+            return False
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -127,21 +146,32 @@ class PlaybookEntry:
 
     def get_searchable_text(self) -> str:
         """
-        生成用于语义搜索的文本描述
+        生成用于语义搜索的文本描述。
 
-        将 Playbook 的名称、描述、工具序列合并为一段文本，
-        供 Mem0 向量搜索使用。
+        描述质量直接决定匹配精度（Precision-First）。
+        合并名称、描述、工具序列、触发条件为一段文本，
+        供 Mem0 向量/FTS5 搜索使用。
 
         Returns:
-            可搜索的文本
+            可搜索的文本（不含"[策略]"等前缀，避免搜索噪音）
         """
         parts = [self.name, self.description]
+
+        # 工具序列：兼容 purpose / description / tool 三种 key
         if self.tool_sequence:
             tools = [
-                step.get("description", step.get("tool", ""))
+                step.get("purpose", step.get("description", step.get("tool", "")))
                 for step in self.tool_sequence
             ]
-            parts.append("步骤: " + " -> ".join(tools))
+            tools = [t for t in tools if t]
+            if tools:
+                parts.append("步骤: " + " -> ".join(tools))
+
+        # 触发条件中的 task_types 有助于 FTS5 关键词命中
+        task_types = self.trigger.get("task_types", [])
+        if task_types:
+            parts.append("任务类型: " + ", ".join(task_types))
+
         return " | ".join(filter(None, parts))
 
 
@@ -179,7 +209,7 @@ class PlaybookManager:
             storage_path: 存储路径，默认使用实例隔离路径
             auto_save: 是否自动保存
             min_reward_threshold: 最低奖励阈值（用于自动提取）
-            llm_service: LLM 服务（用于策略提取）
+            llm_service: LLM 服务（用于策略提取，可选，未传时懒加载）
         """
         if storage_path is None:
             instance_name = os.getenv("AGENT_INSTANCE", "default")
@@ -188,7 +218,7 @@ class PlaybookManager:
         self._storage_path = storage_path
         self.auto_save = auto_save
         self.min_reward_threshold = min_reward_threshold
-        self.llm = llm_service
+        self._llm_service = llm_service
 
         # 延迟初始化的存储后端
         self._storage = None
@@ -198,6 +228,30 @@ class PlaybookManager:
         self._loaded = False
 
         logger.info(f"✅ PlaybookManager 初始化: storage={storage_path}")
+
+    async def _get_llm_service(self):
+        """
+        Async getter for LLM service (lazy-loaded from config).
+
+        使用 background_task profile（light tier），但覆盖 max_tokens
+        以满足 playbook 描述生成（~200-300 tokens JSON 输出）。
+
+        Follows the same pattern as MemoryExtractor.get_llm_service(),
+        QualityController.get_llm_service(), etc.
+        """
+        if self._llm_service is None:
+            try:
+                from config.llm_config import get_llm_profile
+                from core.llm import create_llm_service
+
+                profile = await get_llm_profile(
+                    "background_task", max_tokens=512
+                )
+                self._llm_service = create_llm_service(**profile)
+            except Exception as e:
+                logger.debug(f"LLM 服务懒加载失败（approve 时不生成描述）: {e}")
+                return None
+        return self._llm_service
 
     def _get_storage(self):
         """获取存储后端（延迟初始化）"""
@@ -273,21 +327,61 @@ class PlaybookManager:
 
     # ==================== Mem0 同步 ====================
 
+    async def _delete_from_mem0(self, entry_id: str):
+        """
+        从 Mem0 删除指定 playbook 的所有向量记录。
+
+        通过 vector_store.list(filters) 按 metadata.playbook_id 查找，
+        再逐条删除。Best-effort：失败时静默跳过。
+        """
+        try:
+            from core.memory.mem0 import get_mem0_pool
+
+            pool = get_mem0_pool()
+            vector_store = pool.memory.vector_store
+
+            # sqlite-vec list() 支持 json_extract 过滤
+            results_and_count = vector_store.list(
+                filters={"metadata.playbook_id": entry_id}
+            )
+            results = results_and_count[0] if results_and_count else []
+
+            deleted = 0
+            for item in results:
+                try:
+                    vector_store.delete(item.id)
+                    deleted += 1
+                except Exception:
+                    pass
+
+            if deleted:
+                logger.debug(f"Mem0 删除: playbook={entry_id}, 删除 {deleted} 条记录")
+        except Exception as e:
+            logger.debug(f"Mem0 删除跳过: {e}")
+
     async def _sync_to_mem0(self, entry: PlaybookEntry):
         """
-        将 Playbook 描述写入 Mem0，用于语义匹配。
+        将 Playbook 描述写入 Mem0（upsert 语义：先删后增）。
 
         写入后 find_matching_async() 的 Layer 2 才能搜索到该条目。
+        先删旧记录避免重复，再写新记录。
+
+        如果 delete 成功但 add 失败，playbook 暂时从 Mem0 搜索中消失，
+        但 JSON 文件（source of truth）不受影响，下次 sync 会恢复。
         Best-effort：Mem0 不可用时静默跳过。
         """
         try:
+            # Step 1: 删除旧记录（避免重复条目）
+            await self._delete_from_mem0(entry.id)
+
+            # Step 2: 写入新记录
             from core.memory.mem0 import get_mem0_pool
 
             pool = get_mem0_pool()
             pool.add(
                 user_id="playbook",
                 messages=[
-                    {"role": "user", "content": f"[策略] {entry.get_searchable_text()}"}
+                    {"role": "user", "content": entry.get_searchable_text()}
                 ],
                 metadata={
                     "playbook_id": entry.id,
@@ -297,7 +391,9 @@ class PlaybookManager:
             )
             logger.debug(f"Mem0 同步: playbook={entry.id}")
         except Exception as e:
-            logger.debug(f"Mem0 同步跳过: {e}")
+            # WARNING not DEBUG: if add fails after delete, the entry
+            # temporarily disappears from search until next sync.
+            logger.warning(f"Mem0 同步失败（playbook 暂时不可搜索）: {e}")
 
     # ==================== CRUD 操作 ====================
 
@@ -376,7 +472,7 @@ class PlaybookManager:
         return sorted(entries, key=lambda e: e.created_at, reverse=True)
 
     async def update(self, entry_id: str, **updates) -> Optional[PlaybookEntry]:
-        """更新策略"""
+        """更新策略（同步 Mem0 索引以保持搜索数据一致）"""
         entry = self._entries.get(entry_id)
         if not entry:
             return None
@@ -388,10 +484,14 @@ class PlaybookManager:
         entry.updated_at = datetime.now().isoformat()
         await self._save_entry(entry)
 
+        # 已审核的条目更新后需要同步 Mem0 索引
+        if entry.status == PlaybookStatus.APPROVED:
+            await self._sync_to_mem0(entry)
+
         return entry
 
     async def delete(self, entry_id: str) -> bool:
-        """删除策略"""
+        """删除策略（同步清理 Mem0 索引）"""
         if entry_id not in self._entries:
             return False
 
@@ -403,6 +503,7 @@ class PlaybookManager:
         except Exception as e:
             logger.warning(f"⚠️ 删除策略文件失败: {e}")
 
+        await self._delete_from_mem0(entry_id)
         await self._save_index()
         return True
 
@@ -422,19 +523,79 @@ class PlaybookManager:
         return True
 
     async def approve(self, entry_id: str, reviewer: str, notes: Optional[str] = None) -> bool:
-        """审核通过（仅 PENDING_REVIEW → APPROVED）"""
+        """
+        审核通过（仅 PENDING_REVIEW → APPROVED）
+
+        当 description 仍为自动提取的泛化模板时，尝试用 LLM 重新生成。
+        高质量的 description 直接决定 Mem0 语义匹配的精度。
+        """
         entry = self._entries.get(entry_id)
         if not entry or entry.status != PlaybookStatus.PENDING_REVIEW:
             return False
+
+        # 如果 description 仍是默认模板（低区分度），尝试 LLM 重新生成
+        if self._is_default_description(entry):
+            llm = await self._get_llm_service()
+            if llm:
+                try:
+                    name, description = await self._regenerate_description(entry)
+                    entry.name = name
+                    entry.description = description
+                    logger.info(f"📝 LLM 重新生成描述: {name}")
+                except Exception as e:
+                    logger.warning(f"LLM 描述重新生成失败，保留原描述: {e}")
 
         entry.status = PlaybookStatus.APPROVED
         entry.reviewed_by = reviewer
         entry.review_notes = notes
         entry.updated_at = datetime.now().isoformat()
         await self._save_entry(entry)
+        await self._sync_to_mem0(entry)
 
         logger.info(f"✅ 策略审核通过: {entry.name} (by {reviewer})")
         return True
+
+    @staticmethod
+    def _is_default_description(entry: "PlaybookEntry") -> bool:
+        """Check if description is a low-discriminability default template."""
+        if not entry.description:
+            return True
+        default_patterns = ["自动提取的策略", "自动生成的策略"]
+        return any(p in entry.description for p in default_patterns)
+
+    async def _regenerate_description(
+        self, entry: "PlaybookEntry"
+    ) -> tuple[str, str]:
+        """Regenerate name + description from entry's tool_sequence via LLM."""
+
+        @dataclass
+        class _FakeStep:
+            action: str
+            reward: float = 0.8
+            is_critical: bool = False
+
+        @dataclass
+        class _FakeReward:
+            session_id: str
+            total_reward: float = 0.8
+            success: bool = True
+            step_rewards: list = None  # type: ignore[assignment]
+
+            def __post_init__(self):
+                if self.step_rewards is None:
+                    self.step_rewards = []
+
+        steps = [
+            _FakeStep(action=f"tool:{t.get('tool', '')}")
+            for t in (entry.tool_sequence or [])
+        ]
+        fake_reward = _FakeReward(
+            session_id=entry.source_session_id or entry.id,
+            step_rewards=steps,
+        )
+        return await self._generate_description_with_llm(
+            fake_reward, entry.tool_sequence or []
+        )
 
     async def reject(self, entry_id: str, reviewer: str, reason: str) -> bool:
         """审核拒绝（仅 PENDING_REVIEW → REJECTED）"""
@@ -452,7 +613,7 @@ class PlaybookManager:
         return True
 
     async def deprecate(self, entry_id: str, reason: str = None) -> bool:
-        """废弃策略（仅 APPROVED → DEPRECATED）"""
+        """废弃策略（仅 APPROVED → DEPRECATED，同步清理 Mem0 索引）"""
         entry = self._entries.get(entry_id)
         if not entry or entry.status != PlaybookStatus.APPROVED:
             return False
@@ -462,13 +623,19 @@ class PlaybookManager:
         entry.updated_at = datetime.now().isoformat()
         await self._save_entry(entry)
 
+        # 废弃的策略不应出现在搜索结果中
+        await self._delete_from_mem0(entry_id)
+
         logger.info(f"🗑️ 策略已废弃: {entry.name}")
         return True
 
     # ==================== 策略提取 ====================
 
     async def extract_from_session(
-        self, session_reward, use_llm: bool = True  # SessionReward from RewardAttribution
+        self,
+        session_reward,
+        use_llm: bool = True,
+        user_query: str = "",
     ) -> Optional[PlaybookEntry]:
         """
         从成功会话中提取策略
@@ -476,6 +643,7 @@ class PlaybookManager:
         Args:
             session_reward: 会话奖励结果
             use_llm: 是否使用 LLM 生成描述
+            user_query: 用户原始查询（用于生成有语义的策略描述，提高后续匹配率）
 
         Returns:
             提取的策略条目，或 None
@@ -533,18 +701,26 @@ class PlaybookManager:
             "avg_turns": len(session_reward.step_rewards),
         }
 
-        # 生成名称和描述（默认值不暴露 session_id）
-        tools_brief = ", ".join([t["tool"] for t in tool_sequence[:3]])
-        name = f"Auto-{tools_brief}" if tool_sequence else "Auto-strategy"
-        description = "自动提取的策略"
+        # 生成名称和描述
+        # 优先用 user_query 保留语义信息（提高后续 Mem0 匹配率），
+        # 否则用工具名摘要作默认值（不暴露 session_id）
+        if user_query:
+            name = user_query[:40].strip()
+            description = user_query[:200].strip()
+        else:
+            tools_brief = ", ".join([t["tool"] for t in tool_sequence[:3]])
+            name = f"Auto-{tools_brief}" if tool_sequence else "Auto-strategy"
+            description = "自动提取的策略"
 
-        if use_llm and self.llm:
-            try:
-                name, description = await self._generate_description_with_llm(
-                    session_reward, tool_sequence
-                )
-            except Exception as e:
-                logger.warning(f"LLM 生成描述失败: {e}")
+        if use_llm:
+            llm = await self._get_llm_service()
+            if llm:
+                try:
+                    name, description = await self._generate_description_with_llm(
+                        session_reward, tool_sequence
+                    )
+                except Exception as e:
+                    logger.warning(f"LLM 生成描述失败: {e}")
 
         # 创建策略条目（quality_metrics 直接传入，避免双重保存）
         entry = await self.create(
@@ -567,12 +743,17 @@ class PlaybookManager:
     async def _generate_description_with_llm(
         self, session_reward, tool_sequence: List[Dict]
     ) -> tuple[str, str]:
-        """使用 LLM 生成策略名称和描述"""
+        """
+        使用 LLM 生成策略名称和描述。
+
+        描述质量直接决定 Mem0 语义匹配的精度。
+        泛化的描述（如"自动提取的策略"）会导致假阳性匹配。
+        """
         from core.llm import Message
 
         tools_str = ", ".join([t["tool"] for t in tool_sequence])
 
-        prompt = f"""根据以下会话执行信息，生成一个简洁的策略名称和描述。
+        prompt = f"""根据以下会话执行信息，生成策略名称和描述。
 
 会话信息：
 - 使用的工具序列：{tools_str}
@@ -580,16 +761,35 @@ class PlaybookManager:
 - 成功率：100%
 
 要求：
-1. 名称：简洁，10-20 字，描述这个策略的用途
-2. 描述：1-2 句话，说明什么场景下使用这个策略
+1. 名称：10-20 字，说明这个策略做什么
+2. 描述：1-2 句话，说明什么场景、什么输入数据下使用这个策略。描述必须**具体**，能和不相关的任务区分开
+
+<examples>
+<example>
+<tools>data_analysis_skill, chart_generation</tools>
+<output>{{"name": "Excel 数据分析并生成图表", "description": "用户上传 Excel/CSV 表格文件，需要分析数据特征并生成可视化图表时使用"}}</output>
+</example>
+<example>
+<tools>web_search, web_scraping</tools>
+<output>{{"name": "网络搜索与信息整理", "description": "用户需要从互联网搜索特定主题的信息并整理成结构化摘要时使用"}}</output>
+</example>
+<example>
+<tools>nodes, file_operation</tools>
+<output>{{"name": "本地文件批量整理", "description": "用户需要扫描本地文件夹、按类型分类或批量重命名文件时使用"}}</output>
+</example>
+</examples>
 
 输出 JSON 格式：
 {{"name": "策略名称", "description": "策略描述"}}
 """
 
-        response = await self.llm.create_message_async(
+        llm = await self._get_llm_service()
+        if not llm:
+            return "自动策略", "自动生成的策略"
+
+        response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
-            system="你是一个策略库管理助手，帮助生成清晰的策略描述。",
+            system="你是一个策略库管理助手。生成的描述必须具体、有区分度，避免泛化。",
         )
 
         import re
@@ -608,32 +808,36 @@ class PlaybookManager:
         query: str,
         task_type: str = "",
         top_k: int = 3,
-        min_score: float = 0.3,
+        min_score: float = 0.5,
         only_approved: bool = True,
     ) -> List[tuple["PlaybookEntry", float]]:
         """
-        语义匹配策略（LLM-First 设计）
+        语义匹配策略（LLM-First 设计，Precision-First）
 
         两层匹配：
         1. Layer 1: task_type 预筛（确定性规则，<1ms）
         2. Layer 2: Mem0 语义搜索（向量相似度，零额外 LLM 调用）
 
+        Precision > Recall：宁可不匹配（假阴），不能误匹配（假阳）。
+        误匹配会注入无关策略，误导 Agent 的工具选择和执行流程。
+
         Args:
             query: 用户查询（自然语言）
             task_type: 意图识别输出的任务类型（可选）
             top_k: 返回前 k 个
-            min_score: 最低匹配分数
+            min_score: 最低匹配分数（默认 0.5，宁缺毋滥）
             only_approved: 仅返回已审核通过的策略
 
         Returns:
             [(策略, 匹配分数), ...]
         """
-        # Layer 1: task_type 预筛
+        # Layer 1: task_type 预筛 + 过期过滤（lazy evaluation）
         candidates = {
             entry_id: entry
             for entry_id, entry in self._entries.items()
             if (not only_approved or entry.status == PlaybookStatus.APPROVED)
             and entry.matches_task_type(task_type)
+            and not entry.is_stale()
         }
 
         if not candidates:
@@ -646,18 +850,32 @@ class PlaybookManager:
             pool = get_mem0_pool()
             search_results = pool.search(
                 user_id="playbook",
-                query=f"任务策略: {query}",
+                query=query,
                 limit=top_k * 2,
             )
 
-            # 匹配搜索结果和候选 Playbook
+            # 匹配搜索结果和候选 Playbook（按 playbook_id 去重）
             matched = []
+            seen_ids: set = set()
             for result in search_results:
                 metadata = result.get("metadata") or {}
                 playbook_id = metadata.get("playbook_id", "")
                 score = result.get("score", 0.0)
 
-                if playbook_id in candidates and score >= min_score:
+                # Log all candidate scores for observability
+                if playbook_id in candidates and playbook_id not in seen_ids:
+                    logger.info(
+                        f"Playbook 匹配候选: id={playbook_id[:8]}, "
+                        f"score={score:.3f}, min={min_score}, "
+                        f"pass={'Y' if score >= min_score else 'N'}"
+                    )
+
+                if (
+                    playbook_id in candidates
+                    and playbook_id not in seen_ids
+                    and score >= min_score
+                ):
+                    seen_ids.add(playbook_id)
                     matched.append((candidates[playbook_id], score))
 
             if matched:
@@ -665,15 +883,10 @@ class PlaybookManager:
                 return matched[:top_k]
 
         except Exception as e:
-            logger.warning(f"Mem0 语义匹配失败，降级到全量返回: {e}")
+            # Precision-first: Mem0 不可用时不做猜测性匹配
+            logger.warning(f"Mem0 语义匹配失败，跳过 playbook 匹配: {e}")
 
-        # 降级：Mem0 不可用时按使用次数排序，给予低置信度分数
-        fallback = sorted(
-            candidates.values(),
-            key=lambda e: e.usage_count,
-            reverse=True,
-        )
-        return [(entry, 0.5) for entry in fallback[:top_k]]
+        return []
 
     def find_matching(
         self,
@@ -710,10 +923,11 @@ class PlaybookManager:
         return candidates[:top_k]
 
     async def record_usage(self, entry_id: str):
-        """记录策略使用"""
+        """Record a successful match+injection (updates usage_count and last_used_at)."""
         entry = self._entries.get(entry_id)
         if entry:
             entry.usage_count += 1
+            entry.last_used_at = datetime.now().isoformat()
             await self._save_entry(entry)
 
     # ==================== 统计信息 ====================
@@ -721,6 +935,7 @@ class PlaybookManager:
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         entries = list(self._entries.values())
+        approved = [e for e in entries if e.status == PlaybookStatus.APPROVED]
 
         return {
             "total": len(entries),
@@ -734,6 +949,8 @@ class PlaybookManager:
                 "import": sum(1 for e in entries if e.source == "import"),
             },
             "total_usage": sum(e.usage_count for e in entries),
+            "stale_count": sum(1 for e in approved if e.is_stale()),
+            "stale_days_threshold": STALE_DAYS,
             "avg_quality": (
                 sum(e.quality_metrics.get("avg_reward", 0) for e in entries) / len(entries)
                 if entries

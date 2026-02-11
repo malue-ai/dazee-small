@@ -4,12 +4,14 @@ PlaybookHintInjector - Playbook 策略提示注入器
 职责：
 1. 根据当前用户 query 和 task_type 匹配历史成功策略（Playbook）
 2. 以 <playbook_hint> 标签注入 Phase 2，供 Agent 参考（不强制遵循）
+3. 注入成功后 fire-and-forget 记录 usage（更新 last_used_at 用于过期判定）
 
 缓存策略：SESSION
 注入位置：Phase 2 - User Context Message
 优先级：80（低于用户记忆）
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from logger import get_logger
@@ -90,17 +92,42 @@ class PlaybookHintInjector(BaseInjector):
                 query=query,
                 task_type=task_type,
                 top_k=1,
-                min_score=0.3,
                 only_approved=True,
+                # min_score 使用 manager 默认值 0.5（Precision-First）
+                # 修复了策略描述后（使用 user_query），真正相似的任务应 >= 0.6
             )
         except Exception as e:
-            logger.debug(f"Playbook 匹配跳过: {e}")
+            logger.info(f"PlaybookHintInjector: 匹配跳过 ({e})")
             return InjectionResult()
 
         if not matched:
+            approved_count = sum(
+                1 for e in manager._entries.values()
+                if e.status.value == "approved"
+            )
+            logger.info(
+                f"PlaybookHintInjector: 无匹配策略 "
+                f"(approved={approved_count}, query={query[:50]}...)"
+            )
             return InjectionResult()
 
         entry, score = matched[0]
         content = _format_playbook_hint(entry, score)
+
+        # Fire-and-forget: record usage for staleness tracking.
+        # MUST NOT block the chat response — use create_task so the
+        # injector returns immediately and the user sees no delay.
+        asyncio.create_task(
+            self._record_usage_safe(manager, entry.id)
+        )
+
         logger.info(f"PlaybookHintInjector: 注入 1 条策略 hint (score={score:.2f})")
         return InjectionResult(content=content, xml_tag=None)
+
+    @staticmethod
+    async def _record_usage_safe(manager: Any, entry_id: str):
+        """Best-effort usage recording. Never raises."""
+        try:
+            await manager.record_usage(entry_id)
+        except Exception as e:
+            logger.debug(f"record_usage 失败（non-critical）: {e}")

@@ -244,7 +244,9 @@ async def playbook_extraction_task(
         await manager.load_all_async()
 
         entry = await manager.extract_from_session(
-            session_reward, use_llm=False  # Use simple extraction, avoid extra LLM cost
+            session_reward,
+            use_llm=False,
+            user_query=ctx.user_message,  # Preserve semantic info for Mem0 matching
         )
 
         if entry:
