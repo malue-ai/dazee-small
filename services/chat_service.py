@@ -915,7 +915,30 @@ class ChatService:
                 conversation_service=self.conversation_service,
             )
             agent_acquired = True
-            logger.debug("Agent 就绪", extra={"agent_id": pool_key})
+            tool_count = 0
+            has_desktop_tool = False
+            try:
+                capability_registry = getattr(agent, "capability_registry", None)
+                capabilities = getattr(capability_registry, "capabilities", {})
+                if isinstance(capabilities, dict):
+                    tool_count = len(capabilities)
+                    # Lightweight diagnosis for desktop execution path.
+                    has_desktop_tool = any(
+                        name in capabilities
+                        for name in ("observe_screen", "shell", "apple_script")
+                    )
+            except Exception:
+                tool_count = 0
+                has_desktop_tool = False
+
+            logger.info(
+                "Agent acquired for chat",
+                extra={
+                    "agent_id": pool_key,
+                    "tool_count": tool_count,
+                    "has_desktop_tool": has_desktop_tool,
+                },
+            )
 
             shared_tracker = UsageTracker()
             agent._usage_tracker = shared_tracker

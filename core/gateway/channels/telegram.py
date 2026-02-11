@@ -3,6 +3,10 @@ Telegram channel adapter
 
 Uses python-telegram-bot (v21+) with long polling.
 No public IP required.
+
+Includes automatic reconnection: a background watchdog task checks
+polling health every ``_HEALTH_CHECK_INTERVAL`` seconds and restarts
+the application when the connection is lost.
 """
 
 import asyncio
@@ -27,11 +31,19 @@ class TelegramChannel:
     """
     Telegram bot adapter using long polling.
 
+    Includes automatic reconnection: a background watchdog task checks
+    polling health every ``_HEALTH_CHECK_INTERVAL`` seconds and
+    restarts the polling when the connection is lost.
+
     Config params:
         bot_token: Telegram Bot API token (from @BotFather)
         allowed_users: list of allowed user IDs (empty = allow all)
         allowed_groups: list of allowed group IDs (empty = allow all)
     """
+
+    _HEALTH_CHECK_INTERVAL = 30  # seconds between health checks
+    _MAX_RECONNECT_BACKOFF = 120  # max backoff between reconnect attempts
+    _INITIAL_RECONNECT_DELAY = 5  # first reconnect wait
 
     def __init__(self, config: dict) -> None:
         self._bot_token: str = config["bot_token"]
@@ -44,6 +56,9 @@ class TelegramChannel:
         self._application = None
         self._status: ChannelStatus = ChannelStatus.DISCONNECTED
         self._on_message: Optional[OnMessageCallback] = None
+        self._watchdog_task: Optional[asyncio.Task] = None
+        self._should_run: bool = False
+        self._consecutive_failures: int = 0
 
     @property
     def id(self) -> str:
@@ -57,10 +72,10 @@ class TelegramChannel:
         return self._status
 
     async def start(self, on_message: OnMessageCallback) -> None:
-        """Start Telegram bot with long polling."""
+        """Start Telegram bot with long polling and health watchdog."""
         try:
-            from telegram import Update
-            from telegram.ext import (
+            from telegram import Update  # noqa: F401
+            from telegram.ext import (  # noqa: F401
                 Application,
                 ApplicationBuilder,
                 MessageHandler,
@@ -73,18 +88,23 @@ class TelegramChannel:
             )
 
         self._on_message = on_message
-        self._status = ChannelStatus.CONNECTING
+        self._should_run = True
 
         logger.info("Starting Telegram channel (long polling)")
 
-        # Build application
-        self._application = (
-            ApplicationBuilder()
-            .token(self._bot_token)
-            .build()
+        # Initial connection
+        await self._connect_polling()
+
+        # Start health watchdog (auto-reconnect on failure)
+        self._watchdog_task = asyncio.create_task(
+            self._watchdog_loop(), name="telegram_watchdog"
         )
 
-        # Register handler for all text messages
+    def _build_message_handler(self):
+        """Build the Telegram message handler function."""
+        from telegram import Update
+        from telegram.ext import MessageHandler, filters
+
         async def _handle_message(update: Update, context: Any) -> None:
             """Convert Telegram Update to InboundMessage and forward."""
             if not update.message:
@@ -148,26 +168,145 @@ class TelegramChannel:
             # Process in a task to avoid blocking the polling loop
             asyncio.create_task(self._safe_handle(inbound))
 
-        self._application.add_handler(
-            MessageHandler(filters.TEXT | filters.CAPTION, _handle_message)
-        )
+        return MessageHandler(filters.TEXT | filters.CAPTION, _handle_message)
 
-        # Initialize and start (manual mode, not run_polling)
-        await self._application.initialize()
-        await self._application.start()
-        await self._application.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=["message"],
-        )
+    async def _connect_polling(self) -> bool:
+        """
+        Create and start a fresh Application with polling. Returns True on success.
 
-        self._status = ChannelStatus.CONNECTED
-        logger.info("Telegram channel started (long polling)")
+        Isolated so that the watchdog can call it for reconnection.
+        """
+        from telegram.ext import ApplicationBuilder
+
+        self._status = ChannelStatus.CONNECTING
+
+        try:
+            # Build a fresh application for each (re)connection
+            self._application = (
+                ApplicationBuilder()
+                .token(self._bot_token)
+                .build()
+            )
+
+            self._application.add_handler(self._build_message_handler())
+
+            await self._application.initialize()
+            await self._application.start()
+            await self._application.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=["message"],
+            )
+
+            self._status = ChannelStatus.CONNECTED
+            self._consecutive_failures = 0
+            logger.info("Telegram channel started (long polling)")
+            return True
+
+        except Exception as e:
+            self._status = ChannelStatus.ERROR
+            self._consecutive_failures += 1
+            logger.warning(
+                "Telegram polling start failed",
+                extra={
+                    "error": str(e),
+                    "consecutive_failures": self._consecutive_failures,
+                },
+            )
+            return False
+
+    def _is_polling_healthy(self) -> bool:
+        """Check whether the Telegram polling updater is still running."""
+        if self._application is None:
+            return False
+        if not self._application.running:
+            return False
+        updater = self._application.updater
+        if updater is None or not updater.running:
+            return False
+        return True
+
+    async def _watchdog_loop(self) -> None:
+        """
+        Periodically check polling health and reconnect if needed.
+
+        Uses exponential backoff capped at ``_MAX_RECONNECT_BACKOFF``.
+        """
+        while self._should_run:
+            try:
+                await asyncio.sleep(self._HEALTH_CHECK_INTERVAL)
+
+                if not self._should_run:
+                    break
+
+                if self._is_polling_healthy():
+                    # Connection is fine
+                    if self._consecutive_failures > 0:
+                        logger.info(
+                            "Telegram polling recovered",
+                            extra={"previous_failures": self._consecutive_failures},
+                        )
+                        self._consecutive_failures = 0
+                    continue
+
+                # Polling lost — attempt reconnect
+                delay = min(
+                    self._INITIAL_RECONNECT_DELAY * (2 ** self._consecutive_failures),
+                    self._MAX_RECONNECT_BACKOFF,
+                )
+                logger.warning(
+                    "Telegram polling stopped, reconnecting",
+                    extra={
+                        "consecutive_failures": self._consecutive_failures,
+                        "backoff_seconds": delay,
+                    },
+                )
+
+                # Tear down the old application cleanly before reconnecting
+                await self._teardown_application()
+
+                await asyncio.sleep(delay)
+
+                if not self._should_run:
+                    break
+
+                success = await self._connect_polling()
+                if success:
+                    logger.info("Telegram polling reconnected successfully")
+                else:
+                    logger.warning(
+                        "Telegram polling reconnect failed, will retry",
+                        extra={"consecutive_failures": self._consecutive_failures},
+                    )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(
+                    "Telegram watchdog unexpected error",
+                    extra={"error": str(e)},
+                    exc_info=True,
+                )
+                await asyncio.sleep(self._HEALTH_CHECK_INTERVAL)
+
+    # Maximum time allowed for processing a single inbound message (seconds).
+    # Prevents a stuck Agent from blocking all subsequent messages.
+    _MESSAGE_TIMEOUT = 300  # 5 minutes
 
     async def _safe_handle(self, msg: InboundMessage) -> None:
-        """Safely invoke on_message callback with error handling."""
+        """Safely invoke on_message callback with timeout and error handling."""
         try:
             if self._on_message:
-                await self._on_message(msg)
+                await asyncio.wait_for(
+                    self._on_message(msg), timeout=self._MESSAGE_TIMEOUT
+                )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Telegram message processing timed out",
+                extra={
+                    "message_id": msg.message_id,
+                    "timeout_seconds": self._MESSAGE_TIMEOUT,
+                },
+            )
         except Exception as e:
             logger.error(
                 "Error handling Telegram message",
@@ -175,17 +314,39 @@ class TelegramChannel:
                 exc_info=True,
             )
 
+    async def _teardown_application(self) -> None:
+        """Gracefully tear down the current application (used before reconnect)."""
+        if self._application is None:
+            return
+
+        try:
+            if self._application.updater and self._application.updater.running:
+                await self._application.updater.stop()
+            if self._application.running:
+                await self._application.stop()
+            await self._application.shutdown()
+        except Exception as e:
+            logger.warning(
+                "Error tearing down Telegram application",
+                extra={"error": str(e)},
+            )
+        finally:
+            self._application = None
+
     async def stop(self) -> None:
-        """Stop the Telegram bot."""
-        if self._application:
+        """Stop the Telegram bot and watchdog."""
+        self._should_run = False
+
+        # Cancel watchdog first
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
             try:
-                if self._application.updater and self._application.updater.running:
-                    await self._application.updater.stop()
-                if self._application.running:
-                    await self._application.stop()
-                await self._application.shutdown()
-            except Exception as e:
-                logger.warning("Error stopping Telegram", extra={"error": str(e)})
+                await self._watchdog_task
+            except asyncio.CancelledError:
+                pass
+            self._watchdog_task = None
+
+        await self._teardown_application()
 
         self._status = ChannelStatus.DISCONNECTED
         logger.info("Telegram channel stopped")
