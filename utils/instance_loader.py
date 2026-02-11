@@ -1647,12 +1647,12 @@ async def _update_skill_registry(instance_name: str, skills: List[SkillConfig]) 
 
     registry_path = get_instances_dir() / instance_name / "skills" / "skill_registry.yaml"
 
-    if not registry_path.exists():
-        return
-
-    async with aiofiles.open(registry_path, "r", encoding="utf-8") as f:
-        content = await f.read()
-        registry = yaml.safe_load(content) or {}
+    # Load existing registry or start with empty dict
+    registry: dict = {}
+    if registry_path.exists():
+        async with aiofiles.open(registry_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+            registry = yaml.safe_load(content) or {}
 
     # 更新 skills 列表
     skills_data = []
@@ -1666,7 +1666,8 @@ async def _update_skill_registry(instance_name: str, skills: List[SkillConfig]) 
 
     registry["skills"] = skills_data
 
-    # 异步写回文件
+    # Ensure parent directory exists, then write
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
     output = yaml.dump(registry, default_flow_style=False, allow_unicode=True, sort_keys=False)
     async with aiofiles.open(registry_path, "w", encoding="utf-8") as f:
         await f.write(output)

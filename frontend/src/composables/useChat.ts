@@ -114,6 +114,10 @@ export function useChat() {
     () => route.params.conversationId,
     async (newId) => {
       if (newId && typeof newId === 'string') {
+        // Skip if already on this conversation (e.g. router.replace after creating
+        // a new conversation in handleSendMessage). Without this guard, the
+        // loadConversation() call resets isLoading=false and kills the loading dots.
+        if (conversationId.value === newId) return
         await loadConversation(newId)
       }
     }
