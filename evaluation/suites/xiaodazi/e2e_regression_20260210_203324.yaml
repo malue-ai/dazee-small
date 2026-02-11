@@ -1,0 +1,32 @@
+id: regression_auto
+name: 自动回归测试 (2026-02-10)
+description: 从测评失败中自动生成的回归套件，共 1 个用例
+category: regression
+default_trials: 2
+metadata:
+  generated_at: '2026-02-10T20:33:24.443351'
+  source: loop_automation
+tasks:
+- id: REG_I1
+  description: '[回归] RVR-B PARAM_ADJUST — 毒药 CSV 格式修复回溯'
+  category: regression_unknown
+  input:
+    user_query: RVR-B PARAM_ADJUST — 毒药 CSV 格式修复回溯
+    conversation_history: []
+    context:
+      original_suite: E2E Phase2 开源宣发场景
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - unknown
+  metadata:
+    original_task_id: I1
+    original_suite: E2E Phase2 开源宣发场景
+    failure_category: unknown
+    failing_graders:
+    - check_backtrack_occurred

@@ -116,18 +116,27 @@ class SkillPromptBuilder:
         return prompt
 
     @staticmethod
-    def build_lazy_instructions(language: str = "zh") -> str:
+    def build_lazy_instructions(
+        language: str = "zh",
+        instance_name: str = "",
+    ) -> str:
         """
         构建延迟加载的系统指令
 
         Args:
             language: 语言（zh/en）
+            instance_name: 实例名称（用于 Skill 路径）
 
         Returns:
             系统指令文本
         """
+        import os
+
+        inst = instance_name or os.environ.get("AGENT_INSTANCE", "default")
+        skills_path = f"instances/{inst}/skills"
+
         if language == "zh":
-            return """
+            return f"""
 ## Skills（技能）
 
 扫描 `<available_skills>` 的 `<description>` 条目，选择最匹配的 Skill。
@@ -146,14 +155,14 @@ class SkillPromptBuilder:
 不要直接跳到替代方案。先用 hitl 工具告知用户缺失了什么依赖并询问是否安装，用户同意后安装并重试，用户拒绝后再寻找替代方案。
 
 **用户提到的 Skill 不在 `<available_skills>` 中时：**
-不要说"找不到"或编造替代方案。尝试用 nodes 工具读取 `instances/xiaodazi/skills/{skill-name}/SKILL.md`（将 skill-name 替换为用户提到的名称）。如果文件存在，按其中的指引执行；如果文件不存在，用 hitl 工具告知用户该 Skill 未安装，询问是否需要用其他方式完成任务。
+不要说"找不到"或编造替代方案。尝试用 nodes 工具读取 `{skills_path}/{{skill-name}}/SKILL.md`（将 skill-name 替换为用户提到的名称）。如果文件存在，按其中的指引执行；如果文件不存在，用 hitl 工具告知用户该 Skill 未安装，询问是否需要用其他方式完成任务。
 
 **重要：**
 - 不要在选择前读取多个 Skills
 - 高级用法参考完整 SKILL.md（Read `location` 路径）
 """.strip()
         else:
-            return """
+            return f"""
 ## Skills (mandatory)
 
 Scan `<available_skills>` `<description>` entries, choose the best match.
@@ -172,7 +181,7 @@ Scan `<available_skills>` `<description>` entries, choose the best match.
 Do NOT jump to alternatives immediately. First use hitl tool to inform user what dependency is missing and ask whether to install. Install and retry if approved, find alternatives only if declined.
 
 **User mentions a Skill not in `<available_skills>`:**
-Do NOT say "not found" or make up alternatives. Try reading `instances/xiaodazi/skills/{skill-name}/SKILL.md` via nodes tool (replace skill-name with what user mentioned). If the file exists, follow its instructions; if not, use hitl to inform user the Skill is not installed and ask if they want to use an alternative approach.
+Do NOT say "not found" or make up alternatives. Try reading `{skills_path}/{{skill-name}}/SKILL.md` via nodes tool (replace skill-name with what user mentioned). If the file exists, follow its instructions; if not, use hitl to inform user the Skill is not installed and ask if they want to use an alternative approach.
 
 **Constraints:**
 - Never read more than one skill up front
@@ -441,14 +450,18 @@ def build_skills_prompt(
     return SkillPromptBuilder.build_from_skill_dir(skills_dir, mode, language)
 
 
-def build_skills_instructions(language: str = "zh") -> str:
+def build_skills_instructions(
+    language: str = "zh",
+    instance_name: str = "",
+) -> str:
     """
     构建 Skills 使用指令（便捷函数）
 
     Args:
         language: 语言（zh/en）
+        instance_name: 实例名称（用于 Skill 路径）
 
     Returns:
         系统指令文本
     """
-    return SkillPromptBuilder.build_lazy_instructions(language)
+    return SkillPromptBuilder.build_lazy_instructions(language, instance_name=instance_name)

@@ -38,9 +38,11 @@ _MEMORY_TEMPLATE = """# 小搭子的记忆
 
 > 这是小搭子对你的了解。你可以直接编辑这个文件，小搭子会自动学习更新。
 
-## 关于你
+## 基本信息
 
 - （小搭子还不了解你，多聊聊吧~）
+
+## 关于你
 
 ## 偏好
 
@@ -128,17 +130,18 @@ class MarkdownMemoryLayer:
         self, section: str, content: str
     ) -> bool:
         """
-        向 MEMORY.md 的指定段落追加内容
+        向 MEMORY.md 的指定段落追加内容（写入时精确去重）
 
         通过解析 Markdown 标题定位插入位置。
         如果段落不存在，在文件末尾新建段落。
+        如果完全相同的内容已存在于该段落中，跳过写入。
 
         Args:
             section: 段落标题（如 "偏好"、"偏好/写作风格"、"历史经验/成功案例"）
             content: 要追加的内容（如 "- 喜欢简洁风格"）
 
         Returns:
-            是否成功追加
+            True if written, False if skipped (duplicate)
         """
         full_text = await self.read_global_memory()
         lines = full_text.split("\n")
@@ -150,9 +153,21 @@ class MarkdownMemoryLayer:
         # 查找目标标题行
         insert_idx = self._find_section_end(lines, target_title)
 
+        # Normalize entry text for comparison
+        entry = content if content.startswith("-") else f"- {content}"
+        entry_stripped = entry.strip()
+
         if insert_idx is not None:
-            # 在段落末尾插入
-            entry = content if content.startswith("-") else f"- {content}"
+            # Exact dedup: check if identical content already exists in section
+            section_start = self._find_section_start(lines, target_title)
+            if section_start is not None:
+                for i in range(section_start, insert_idx):
+                    if lines[i].strip() == entry_stripped:
+                        logger.debug(
+                            f"去重跳过 [{section}]: {content[:50]}..."
+                        )
+                        return False
+
             lines.insert(insert_idx, entry)
         else:
             # 段落不存在，在文件末尾新建
@@ -160,7 +175,6 @@ class MarkdownMemoryLayer:
             lines.append("")
             lines.append(f"{level} {target_title}")
             lines.append("")
-            entry = content if content.startswith("-") else f"- {content}"
             lines.append(entry)
 
         new_text = "\n".join(lines)
@@ -297,6 +311,27 @@ class MarkdownMemoryLayer:
         return self._parse_memory_entries(text, "MEMORY.md")
 
     # ==================== 内部方法 ====================
+
+    def _find_section_start(
+        self, lines: List[str], target_title: str
+    ) -> Optional[int]:
+        """
+        Find the line index right after the heading of target section.
+
+        Args:
+            lines: file lines
+            target_title: section heading text (without # marks)
+
+        Returns:
+            Line index of first content line in section, or None.
+        """
+        pattern = re.compile(
+            r"^(#{1,6})\s+" + re.escape(target_title) + r"\s*$"
+        )
+        for i, line in enumerate(lines):
+            if pattern.match(line):
+                return i + 1
+        return None
 
     def _find_section_end(
         self, lines: List[str], target_title: str

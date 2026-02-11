@@ -415,7 +415,9 @@ class SkillsLoader:
         if not summaries and not unavailable:
             return ""
 
-        instructions = SkillPromptBuilder.build_lazy_instructions(language)
+        instructions = SkillPromptBuilder.build_lazy_instructions(
+            language, instance_name=self._instance_name,
+        )
         xml_available = SkillPromptBuilder.build_lazy_prompt(summaries, language)
 
         parts = [instructions, "", xml_available] if xml_available else []

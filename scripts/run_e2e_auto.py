@@ -90,28 +90,80 @@ def is_port_in_use(port: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Memory reset for E2E (ensures clean slate for B1/G1 memory tests)
+# ---------------------------------------------------------------------------
+
+_MEMORY_TEMPLATE = """# 小搭子的记忆
+
+> 这是小搭子对你的了解。你可以直接编辑这个文件，小搭子会自动学习更新。
+
+## 基本信息
+
+- （小搭子还不了解你，多聊聊吧~）
+
+## 关于你
+
+## 偏好
+
+### 写作风格
+
+### 工作习惯
+
+## 常用工具
+
+## 历史经验
+
+### 成功案例
+
+### 需要改进
+
+"""
+
+
+def _reset_memory_for_e2e():
+    """Reset MEMORY.md to blank template for clean E2E memory testing."""
+    instance = os.environ.get("AGENT_INSTANCE", "xiaodazi")
+    memory_file = PROJECT_ROOT / "data" / "instances" / instance / "memory" / "MEMORY.md"
+    if memory_file.exists():
+        memory_file.write_text(_MEMORY_TEMPLATE, encoding="utf-8")
+        _ok(f"MEMORY.md reset for clean E2E ({memory_file})")
+    else:
+        _log("⏭", f"MEMORY.md not found, skip reset ({memory_file})")
+
+
+# ---------------------------------------------------------------------------
 # Server lifecycle
 # ---------------------------------------------------------------------------
 
-def _detect_python() -> Path:
-    """Detect project Python: conda zeno > .venv > current interpreter."""
-    # 1. conda env "zeno"
-    conda_zeno = Path.home() / "miniconda3" / "envs" / "zeno" / "bin" / "python3"
-    if conda_zeno.exists():
-        return conda_zeno
-    # Also check anaconda3
-    conda_zeno_alt = Path.home() / "anaconda3" / "envs" / "zeno" / "bin" / "python3"
-    if conda_zeno_alt.exists():
-        return conda_zeno_alt
-    # 2. Project local .venv
-    local_venv = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python3"
+def _find_venv_python() -> Path:
+    """Resolve Python interpreter dynamically (no hardcoded paths).
+
+    Search order:
+    1. VIRTUAL_ENV env var (active venv — works in any environment)
+    2. conda env "zeno" (miniconda3 / anaconda3)
+    3. .venv/ in project root
+    4. Current interpreter (sys.executable)
+    """
+    # 1. Active venv
+    venv = os.environ.get("VIRTUAL_ENV")
+    if venv:
+        candidate = Path(venv) / "bin" / "python3"
+        if candidate.exists():
+            return candidate
+
+    # 2. conda env "zeno"
+    for conda_root in ("miniconda3", "anaconda3"):
+        conda_py = Path.home() / conda_root / "envs" / "zeno" / "bin" / "python3"
+        if conda_py.exists():
+            return conda_py
+
+    # 3. Project-local .venv
+    local_venv = PROJECT_ROOT / ".venv" / "bin" / "python3"
     if local_venv.exists():
         return local_venv
-    # 3. Current interpreter
+
+    # 4. Current interpreter
     return Path(sys.executable)
-
-
-VENV_PYTHON = _detect_python()
 
 
 def start_server(port: int, provider: str = None) -> subprocess.Popen:
@@ -126,8 +178,8 @@ def start_server(port: int, provider: str = None) -> subprocess.Popen:
         port: Server port.
         provider: Override model provider ("qwen" / "claude") via AGENT_PROVIDER env var.
     """
-    # Use project venv python; fall back to current interpreter
-    python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
+    venv_python = _find_venv_python()
+    python = str(venv_python)
     env = os.environ.copy()
     env.setdefault("AGENT_INSTANCE", "xiaodazi")
     if provider:
@@ -493,6 +545,19 @@ async def run_e2e(
         _warn("No cases run (filter/checkpoint may have skipped all)")
         return 0
 
+    # Aggregate token usage from all trials
+    from models.usage import TokenUsage
+    total_token_usage = TokenUsage()
+    for tr in task_results:
+        for trial in tr.trials:
+            if trial.transcript and trial.transcript.token_usage:
+                usage = trial.transcript.token_usage
+                total_token_usage.input_tokens += usage.input_tokens
+                total_token_usage.output_tokens += usage.output_tokens
+                total_token_usage.thinking_tokens += usage.thinking_tokens
+                total_token_usage.cache_read_tokens += usage.cache_read_tokens
+                total_token_usage.cache_write_tokens += usage.cache_write_tokens
+
     # Build report
     report = EvaluationReport(
         report_id=f"e2e_{suite_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
@@ -503,6 +568,7 @@ async def run_e2e(
         passed_tasks=sum(1 for tr in task_results if tr.pass_rate >= 1.0),
         failed_tasks=sum(1 for tr in task_results if tr.pass_rate < 1.0),
         unstable_tasks=0,
+        total_token_usage=total_token_usage,
         total_duration_seconds=0.0,
     )
 
@@ -681,6 +747,12 @@ async def async_main() -> int:
                     # Print server log for debugging
                     _print_server_log(server_proc)
                     return 1
+
+        # --- Phase 0.5: Reset MEMORY.md for memory tests ---
+        # B1/G1 test cross-session memory; stale test data in MEMORY.md
+        # causes false-positive results (noise drowns new extractions).
+        if args.clean:
+            _reset_memory_for_e2e()
 
         # --- Phase 0: State management verification (B9/B10 rollback) ---
         # Only run when the suite actually contains B9/B10 cases

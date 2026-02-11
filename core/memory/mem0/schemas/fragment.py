@@ -148,6 +148,18 @@ class ToolHint:
 
 
 @dataclass
+class IdentityHint:
+    """User self-identification hints (name, role, company, etc.)"""
+
+    name: Optional[str] = None  # e.g. "良哥", "李良"
+    nickname: Optional[str] = None  # preferred way to be addressed
+    role: Optional[str] = None  # e.g. "产品经理", "CEO"
+    company: Optional[str] = None  # e.g. "焗基律动"
+    other: List[str] = field(default_factory=list)  # any other identity info
+    confidence: float = 0.0
+
+
+@dataclass
 class GoalHint:
     """目标与风险信号线索"""
 
@@ -197,12 +209,12 @@ class FragmentMemory:
     todo_hint: Optional[TodoHint] = None
 
     # 扩展线索维度
+    identity_hint: Optional[IdentityHint] = None
     preference_hint: Optional[PreferenceHint] = None
     topic_hint: Optional[TopicHint] = None
     constraint_hint: Optional[ConstraintHint] = None
     tool_hint: Optional[ToolHint] = None
     goal_hint: Optional[GoalHint] = None
-    identity_hint: Optional[IdentityHint] = None
 
     # 记忆元数据（新增）
     memory_type: MemoryType = MemoryType.IMPLICIT  # 记忆类型

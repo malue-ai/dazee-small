@@ -21,6 +21,7 @@ tool_classification:
     - nodes
     - knowledge_search
     - hitl
+    - memory_recall
 
   # 工具类别（简写展开）
   categories:

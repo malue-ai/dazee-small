@@ -25,6 +25,7 @@ DeepSeek LLM 服务实现
 
 import json
 import os
+import re
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 
 import httpx
@@ -90,6 +91,55 @@ class DeepSeekModelCapability:
         if DeepSeekModelCapability.is_reasoner(model):
             return DEEPSEEK_MAX_TOKENS_REASONER
         return DEEPSEEK_MAX_TOKENS_CHAT
+
+
+# ============================================================
+# Thinking marker cleanup
+# ============================================================
+
+# DeepSeek thinking markers (full-width pipe U+FF5C)
+_THINKING_END_RE = re.compile(r"<\uff5c?end\u2581of\u2581thinking\uff5c?>")
+_THINKING_BEGIN_RE = re.compile(r"<\uff5c?begin\u2581of\u2581thinking\uff5c?>")
+# <think>...</think> wrapper used by some DeepSeek model variants
+_THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def _strip_thinking_markers(text: str) -> tuple[str, str]:
+    """
+    Strip leaked thinking content from DeepSeek response text.
+
+    deepseek-chat with thinking enabled may embed thinking tokens
+    directly in the content field using markers like:
+      <｜end▁of▁thinking｜>  (full-width pipes)
+      <think>...</think>
+
+    Returns:
+        (cleaned_content, extracted_thinking)
+    """
+    if not text:
+        return text, ""
+
+    extracted = ""
+
+    # Pattern 1: <｜end▁of▁thinking｜> splits thinking from content
+    m = _THINKING_END_RE.search(text)
+    if m:
+        extracted = text[: m.start()].strip()
+        text = text[m.end() :].strip()
+
+    # Pattern 2: <｜begin▁of▁thinking｜> ... <｜end▁of▁thinking｜> wrapper
+    # (already handled above for end marker; strip residual begin marker)
+    text = _THINKING_BEGIN_RE.sub("", text).strip()
+
+    # Pattern 3: <think>...</think> blocks
+    think_matches = _THINK_TAG_RE.findall(text)
+    if think_matches:
+        extracted_parts = [extracted] if extracted else []
+        extracted_parts.extend(think_matches)
+        extracted = "\n".join(p.strip() for p in extracted_parts if p.strip())
+        text = _THINK_TAG_RE.sub("", text).strip()
+
+    return text, extracted
 
 
 # ============================================================
@@ -751,6 +801,18 @@ class DeepSeekLLMService(BaseLLMService):
                                 f"{tc['arguments'][:200] if tc.get('arguments') else 'None'}"
                             )
 
+            # Strip thinking markers leaked into accumulated content
+            accumulated_content, leaked = _strip_thinking_markers(accumulated_content)
+            if leaked:
+                accumulated_thinking = (
+                    (leaked + "\n" + accumulated_thinking)
+                    if accumulated_thinking
+                    else leaked
+                )
+                logger.debug(
+                    f"[stream] Stripped {len(leaked)} chars of leaked thinking"
+                )
+
             # Build raw_content
             raw_content = []
             if accumulated_thinking:
@@ -913,6 +975,17 @@ class DeepSeekLLMService(BaseLLMService):
         # Extract content
         content_text = message.content or ""
         thinking_text = getattr(message, "reasoning_content", None)
+
+        # Strip thinking markers leaked into content.
+        # deepseek-chat with thinking enabled may embed thinking tokens
+        # directly in the content field with markers like <｜end▁of▁thinking｜>.
+        content_text, leaked = _strip_thinking_markers(content_text)
+        if leaked:
+            # Prepend leaked thinking to reasoning_content so nothing is lost
+            thinking_text = (leaked + "\n" + thinking_text) if thinking_text else leaked
+            logger.debug(
+                f"Stripped {len(leaked)} chars of leaked thinking from content"
+            )
 
         # Extract tool calls
         tool_calls = []

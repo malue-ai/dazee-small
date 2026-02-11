@@ -43,6 +43,12 @@ class ToolSystemRoleProvider(BaseInjector):
     ```
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # 缓存上一轮有效的 skill_groups，用于 is_follow_up 时继承
+        # 避免用户追问"继续"时 LLM 返回空 groups 导致技能丢失
+        self._last_skill_groups: List[str] | None = None
+
     @property
     def name(self) -> str:
         return "tool_provider"
@@ -202,8 +208,22 @@ class ToolSystemRoleProvider(BaseInjector):
                 relevant_groups = None  # None = Fallback 全量
                 if context.intent and hasattr(context.intent, "relevant_skill_groups"):
                     groups = context.intent.relevant_skill_groups
-                    if isinstance(groups, list):
-                        relevant_groups = groups  # 空列表 = 只注入 _always
+                    if isinstance(groups, list) and len(groups) > 0:
+                        # 有明确动作：使用 LLM 返回的 groups，并缓存
+                        relevant_groups = groups
+                        self._last_skill_groups = groups
+                    elif isinstance(groups, list) and len(groups) == 0:
+                        # 空数组（追问"继续"/"好的"等无明确动作）
+                        # is_follow_up 时继承上一轮的 groups，避免技能丢失
+                        is_follow_up = getattr(context.intent, "is_follow_up", False)
+                        if is_follow_up and self._last_skill_groups:
+                            relevant_groups = self._last_skill_groups
+                            logger.info(
+                                f"Skills follow-up 继承: {self._last_skill_groups}"
+                            )
+                        else:
+                            relevant_groups = groups  # 保持空数组语义
+                    # groups is None → relevant_groups stays None → 全量 Fallback
 
                 # V12.1: Plan-Aware 补偿 — 合并 plan.required_skills
                 relevant_groups = self._merge_plan_skills(

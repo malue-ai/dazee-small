@@ -64,6 +64,7 @@ class Mem0MemoryPool:
         self.config = config or get_mem0_config()
         self._memory: Optional[Any] = None  # Mem0 Memory 实例（懒加载）
         self._memory_lock = threading.Lock()
+        self._memory_unavailable = False  # True = 创建失败，不再重试
         self._initialized = True
 
         logger.info("[Mem0Pool] 缓存池初始化完成")
@@ -73,15 +74,29 @@ class Mem0MemoryPool:
         """
         获取 Mem0 Memory 实例（懒加载）
 
-        Mem0 Memory 是用户无关的，user_id 在调用时传入
+        Mem0 Memory 是用户无关的，user_id 在调用时传入。
+        创建失败时标记 _memory_unavailable，避免每次调用都重试并产生噪音日志。
 
         Returns:
             Mem0 Memory 实例
+
+        Raises:
+            RuntimeError: 当向量记忆不可用时
         """
+        if self._memory_unavailable:
+            raise RuntimeError("[Mem0Pool] 向量记忆不可用（已在初始化时失败，跳过重试）")
+
         if self._memory is None:
             with self._memory_lock:
                 if self._memory is None:
-                    self._memory = self._create_memory()
+                    try:
+                        self._memory = self._create_memory()
+                    except Exception as e:
+                        self._memory_unavailable = True
+                        logger.warning(
+                            f"[Mem0Pool] Memory 创建失败，向量记忆已禁用（本会话不再重试）: {e}"
+                        )
+                        raise
         return self._memory
 
     @staticmethod
@@ -281,6 +296,10 @@ class Mem0MemoryPool:
             logger.warning("[Mem0Pool] search: user_id 或 query 为空")
             return []
 
+        # 向量记忆不可用时静默降级（仅首次已 WARNING，后续不再刷屏）
+        if self._memory_unavailable:
+            return []
+
         try:
             search_limit = limit or self.config.default_search_limit
 
@@ -448,6 +467,10 @@ class Mem0MemoryPool:
             logger.warning("[Mem0Pool] add: user_id 或 messages 为空")
             return {"results": []}
 
+        # 向量记忆不可用时静默降级（仅首次已 WARNING，后续不再刷屏）
+        if self._memory_unavailable:
+            return {"results": []}
+
         try:
             # 构建增强的元数据
             enhanced_metadata = metadata or {}
@@ -496,6 +519,8 @@ class Mem0MemoryPool:
         """
         if not user_id:
             return []
+        if self._memory_unavailable:
+            return []
 
         try:
             result = self.memory.get_all(user_id=user_id, limit=limit or 100)
@@ -530,6 +555,9 @@ class Mem0MemoryPool:
         Returns:
             更新结果
         """
+        if self._memory_unavailable:
+            return {"error": "vector memory unavailable"}
+
         try:
             result = self.memory.update(memory_id=memory_id, data=data)
             logger.info(
@@ -551,6 +579,9 @@ class Mem0MemoryPool:
         Returns:
             是否成功
         """
+        if self._memory_unavailable:
+            return False
+
         try:
             self.memory.delete(memory_id=memory_id)
             logger.info(
@@ -571,6 +602,9 @@ class Mem0MemoryPool:
         Returns:
             是否成功
         """
+        if self._memory_unavailable:
+            return False
+
         try:
             self.memory.delete_all(user_id=user_id)
             logger.info(f"[Mem0Pool] 重置用户记忆: user_id={user_id}")

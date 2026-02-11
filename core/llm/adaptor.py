@@ -34,6 +34,46 @@ from .base import LLMResponse, Message, ToolType
 
 logger = get_logger("adaptor")
 
+
+# ============================================================
+# 公共安全函数
+# ============================================================
+
+
+def _ensure_user_last(
+    messages: List[Dict[str, Any]], provider: str = ""
+) -> List[Dict[str, Any]]:
+    """
+    Ensure messages end with a user message.
+
+    Multiple LLM providers (Claude, OpenAI-compatible, Gemini) require the
+    conversation to end with a user message.  After tool-pair cleanup and
+    consecutive-role merging, the tail may accidentally become an assistant
+    message.  This guard appends a minimal user message when needed.
+
+    Args:
+        messages: provider-formatted message list (mutated in place)
+        provider: label for log messages
+
+    Returns:
+        The (possibly appended) message list.
+    """
+    if not messages:
+        return messages
+
+    assistant_roles = {"assistant", "model"}  # Claude/OpenAI + Gemini
+    last_role = messages[-1].get("role", "")
+
+    if last_role in assistant_roles:
+        logger.warning(
+            f"⚠️ [{provider}] 消息链以 {last_role} 结尾（共 {len(messages)} 条），"
+            f"追加 user 消息以满足 API 要求"
+        )
+        messages.append({"role": "user", "content": "请继续。"})
+
+    return messages
+
+
 # ============================================================
 # 格式转换器基类
 # ============================================================
@@ -591,6 +631,14 @@ class ClaudeAdaptor(BaseAdaptor):
         # _merge_consecutive_same_role 可能改变消息邻接关系，需要二次验证
         converted_messages = ClaudeAdaptor.ensure_tool_pairs(converted_messages)
 
+        # 🛡️ 最终安全检查：确保消息以 user 结尾
+        # Claude API 要求 messages 必须以 user 消息结尾，否则返回 400:
+        # "This model does not support assistant message prefill.
+        #  The conversation must end with a user message."
+        # ensure_tool_pairs 移除孤立 tool_use/tool_result 后，
+        # 可能导致尾部 user 消息被清空，使最后一条变为 assistant。
+        converted_messages = _ensure_user_last(converted_messages, "Claude")
+
         result: Dict[str, Any] = {"messages": converted_messages}
         if system:
             result["system"] = system
@@ -698,6 +746,9 @@ class OpenAIAdaptor(BaseAdaptor):
 
         # 🔧 关键：确保 tool_calls 和 tool 消息配对
         openai_messages = self._ensure_tool_pairs(openai_messages)
+
+        # 🛡️ 安全检查：确保消息不以 assistant 结尾（部分 OpenAI 兼容模型同样要求）
+        openai_messages = _ensure_user_last(openai_messages, "OpenAI")
 
         return {"messages": openai_messages}
 
@@ -1079,6 +1130,13 @@ class DeepSeekAdaptor(OpenAIAdaptor):
 
     Extends OpenAI adaptor with thinking/reasoning_content support.
 
+    Response handling:
+    - ``convert_response_to_claude`` strips leaked thinking markers
+      from the content field (see ``deepseek._strip_thinking_markers``).
+      The actual response parsing lives in ``DeepSeekLLMService._parse_response``
+      which calls the cleanup directly; the adaptor only handles the
+      message *sending* direction.
+
     Key difference from plain OpenAI:
     - Converts Claude-format thinking blocks to the ``reasoning_content``
       field on assistant messages.
@@ -1178,6 +1236,16 @@ class GeminiAdaptor(BaseAdaptor):
             parts = self._convert_content_to_parts(msg.content)
 
             gemini_contents.append({"role": role, "parts": parts})
+
+        # 🛡️ 安全检查：确保消息不以 model 结尾
+        # Gemini 使用 "model" 而非 "assistant"，但同样要求最后一条是 user
+        if gemini_contents and gemini_contents[-1].get("role") == "model":
+            logger.warning(
+                "⚠️ [Gemini] 消息链以 model 结尾，追加 user 消息以满足 API 要求"
+            )
+            gemini_contents.append(
+                {"role": "user", "parts": [{"text": "请继续。"}]}
+            )
 
         result: Dict[str, Any] = {"contents": gemini_contents}
 

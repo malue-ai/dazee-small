@@ -45,13 +45,12 @@ _CATEGORY_MAP = {
     "fact": "fact",
     "workflow": "preference",  # 工作习惯归入偏好
     "style": "preference",  # 风格归入偏好
-    "tool": "preference",  # 工具偏好归入偏好
-    "success": "fact",  # 成功案例归入事实
     "general": "other",
 }
 
 # 记忆分类 → MEMORY.md 段落映射
 _SECTION_MAP = {
+    "identity": "基本信息",
     "preference": "偏好",
     "fact": "关于你",
     "workflow": "偏好/工作习惯",
@@ -178,30 +177,11 @@ class InstanceMemoryManager:
 
     # ==================== remember（双写）====================
 
-    # ---------- P0: 显式身份/偏好检测 ----------
-    # 用户"我是…""我用…""我喜欢…"等 identity statements 应高优先级写入。
-    _IDENTITY_PATTERNS = [
-        re.compile(r"^我是.{2,}", re.I),
-        re.compile(r"^我(常|经常|平时|主要)用", re.I),
-        re.compile(r"^我(喜欢|偏好|习惯)", re.I),
-        re.compile(r"^我的(职业|角色|岗位|工作)是", re.I),
-    ]
-
-    @staticmethod
-    def _is_identity_statement(content: str) -> bool:
-        """Check if content is an explicit identity/preference statement."""
-        stripped = content.strip()
-        return any(
-            p.search(stripped)
-            for p in InstanceMemoryManager._IDENTITY_PATTERNS
-        )
-
     async def remember(
         self,
         content: str,
         category: str = "general",
         project_id: Optional[str] = None,
-        priority: str = "normal",
     ) -> None:
         """
         Remember new information (dual-write strategy).
@@ -211,11 +191,13 @@ class InstanceMemoryManager:
         3. Update FTS5 index (Layer 2)
         4. Write to Mem0 vector store (Layer 3)
 
+        Identity detection is handled upstream by FragmentExtractor's
+        identity_hint dimension (LLM-driven), not by keyword patterns here.
+
         Args:
             content: Memory content
-            category: Category (preference/fact/workflow/style/general)
+            category: Category (identity/preference/fact/workflow/style/general)
             project_id: Project ID (optional)
-            priority: "high" for identity statements, "normal" otherwise
         """
         if not self._enabled:
             return
@@ -227,14 +209,6 @@ class InstanceMemoryManager:
         if _is_ephemeral(content):
             logger.debug(f"跳过临时指令: {content[:50]}")
             return
-
-        # Auto-detect high-priority identity statements
-        if priority == "normal" and self._is_identity_statement(content):
-            priority = "high"
-            # Auto-categorize identity statements
-            if category == "general":
-                category = "fact" if "我是" in content or "职业" in content else "preference"
-            logger.info(f"🏷️ 检测到身份声明，提升优先级: [{category}] {content[:50]}")
 
         # Layer 3: 冲突检测（如果 Mem0 启用）+ last-write-wins
         if self._mem0_enabled:
@@ -781,171 +755,33 @@ class InstanceMemoryManager:
             if not fragment:
                 return []
 
-            # Convert FragmentMemory hints → flat (content, category)
+            # ── LLM-driven memory persistence ──
+            # The LLM decides what's worth remembering long-term via the
+            # `long_term_memories` field. No hardcoded dimension filtering
+            # in code — the semantic judgment of "is this worth keeping
+            # across sessions?" is made by the LLM at extraction time.
+            #
+            # This avoids the noise problem where session-scoped data
+            # (task descriptions, goals, emotions) floods MEMORY.md.
+
             extracted: List[Dict[str, Any]] = []
+            long_term = fragment.metadata.get("long_term_memories", [])
 
-            # --- identity_hint: 用户身份信息 → 关于你 ---
-            if fragment.identity_hint:
-                ih = fragment.identity_hint
-                if ih.name:
-                    extracted.append({
-                        "content": f"用户称呼: {ih.name}",
-                        "category": "fact",
-                    })
-                if ih.role:
-                    extracted.append({
-                        "content": f"职业角色: {ih.role}",
-                        "category": "fact",
-                    })
-                if ih.company:
-                    extracted.append({
-                        "content": f"所在公司/团队: {ih.company}",
-                        "category": "fact",
-                    })
-                if ih.location:
-                    extracted.append({
-                        "content": f"所在地: {ih.location}",
-                        "category": "fact",
-                    })
-                if ih.expertise_level:
-                    extracted.append({
-                        "content": f"专业水平: {ih.expertise_level}",
-                        "category": "fact",
-                    })
-                for trait in ih.other_traits or []:
-                    extracted.append({
-                        "content": f"身份特征: {trait}",
-                        "category": "fact",
-                    })
-
-            # --- task_hint: 任务信息 → 关于你 ---
-            if fragment.task_hint and fragment.task_hint.content:
+            valid_categories = set(_SECTION_MAP.keys())
+            for mem in long_term:
+                if not isinstance(mem, dict):
+                    continue
+                content = mem.get("content", "").strip()
+                category = mem.get("category", "general")
+                if not content:
+                    continue
+                # Normalize unknown categories to "general"
+                if category not in valid_categories:
+                    category = "general"
                 extracted.append({
-                    "content": fragment.task_hint.content,
-                    "category": "fact",
+                    "content": content,
+                    "category": category,
                 })
-
-            # --- preference_hint: 偏好 → 偏好/写作风格 ---
-            if fragment.preference_hint:
-                ph = fragment.preference_hint
-                if ph.response_format:
-                    extracted.append({
-                        "content": f"偏好输出格式: {ph.response_format}",
-                        "category": "preference",
-                    })
-                if ph.communication_style:
-                    extracted.append({
-                        "content": f"沟通风格: {ph.communication_style}",
-                        "category": "style",
-                    })
-                for tool in ph.preferred_tools or []:
-                    extracted.append({
-                        "content": f"偏好工具: {tool}",
-                        "category": "preference",
-                    })
-                # Verbatim preferences: preserve user's exact words
-                for vp in ph.verbatim_preferences or []:
-                    extracted.append({
-                        "content": vp,
-                        "category": "preference",
-                    })
-
-            # --- tool_hint: 工具 → 常用工具 ---
-            if fragment.tool_hint:
-                for tool in fragment.tool_hint.tools_mentioned or []:
-                    extracted.append({
-                        "content": f"使用工具: {tool}",
-                        "category": "tool",
-                    })
-                for platform in fragment.tool_hint.platforms_mentioned or []:
-                    extracted.append({
-                        "content": f"使用平台: {platform}",
-                        "category": "tool",
-                    })
-
-            # --- emotion_hint: 情绪 → 历史经验 ---
-            if fragment.emotion_hint and fragment.emotion_hint.signal != "neutral":
-                extracted.append({
-                    "content": f"情绪状态: {fragment.emotion_hint.signal}",
-                    "category": "general",
-                })
-
-            # --- relation_hint: 关系 → 关于你 ---
-            if fragment.relation_hint and fragment.relation_hint.mentioned:
-                for person in fragment.relation_hint.mentioned:
-                    rtype = fragment.relation_hint.relationship_type
-                    label = f"提到人物: {person}"
-                    if rtype:
-                        label += f" ({rtype})"
-                    extracted.append({
-                        "content": label,
-                        "category": "fact",
-                    })
-
-            # --- time_hint: 时间规律 → 偏好/工作习惯 ---
-            if fragment.time_hint and fragment.time_hint.pattern:
-                label = f"时间模式: {fragment.time_hint.pattern}"
-                if fragment.time_hint.inferred_schedule:
-                    label += f" ({fragment.time_hint.inferred_schedule})"
-                extracted.append({
-                    "content": label,
-                    "category": "workflow",
-                })
-
-            # --- todo_hint: 待办 → 历史经验 ---
-            if fragment.todo_hint and fragment.todo_hint.content:
-                label = f"待办: {fragment.todo_hint.content}"
-                if fragment.todo_hint.priority in ("high", "urgent"):
-                    label += f" [优先级: {fragment.todo_hint.priority}]"
-                extracted.append({
-                    "content": label,
-                    "category": "general",
-                })
-
-            # --- topic_hint: 主题/项目 → 关于你 ---
-            if fragment.topic_hint:
-                for project in fragment.topic_hint.projects or []:
-                    extracted.append({
-                        "content": f"涉及项目: {project}",
-                        "category": "fact",
-                    })
-                # Only record significant topics (skip if only keywords)
-                for topic in fragment.topic_hint.topics or []:
-                    extracted.append({
-                        "content": f"讨论主题: {topic}",
-                        "category": "fact",
-                    })
-
-            # --- constraint_hint: 约束/禁忌 → 偏好 ---
-            if fragment.constraint_hint:
-                for c in fragment.constraint_hint.constraints or []:
-                    extracted.append({
-                        "content": f"约束: {c}",
-                        "category": "preference",
-                    })
-                for t in fragment.constraint_hint.taboos or []:
-                    extracted.append({
-                        "content": f"禁忌: {t}",
-                        "category": "preference",
-                    })
-
-            # --- goal_hint: 目标/成就/风险 ---
-            if fragment.goal_hint:
-                for goal in fragment.goal_hint.goals or []:
-                    extracted.append({
-                        "content": f"目标: {goal}",
-                        "category": "fact",
-                    })
-                for achievement in fragment.goal_hint.achievements or []:
-                    extracted.append({
-                        "content": f"成果: {achievement}",
-                        "category": "success",
-                    })
-                for risk in fragment.goal_hint.risks or []:
-                    extracted.append({
-                        "content": f"风险: {risk}",
-                        "category": "general",
-                    })
 
             logger.info(
                 f"会话级记忆提取: {len(extracted)} 条碎片, "

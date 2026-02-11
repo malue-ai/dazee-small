@@ -18,6 +18,7 @@ UserMemoryInjector - 用户记忆注入器
 """
 
 import asyncio
+import re
 from typing import List, Optional
 
 from logger import get_logger
@@ -245,6 +246,9 @@ class UserMemoryInjector(BaseInjector):
 
         返回纯文本列表（不含格式化指令），格式化由融合层统一处理。
         使用 asyncio.to_thread 包装同步 Mem0 调用，避免阻塞事件循环。
+
+        搜索 query 增强：长任务中 user_query 可能是"继续"等短追问，
+        拼接第一条用户消息（原始任务描述）提升召回准确性。
         """
         if not context.user_id or not context.user_query:
             return None
@@ -254,12 +258,28 @@ class UserMemoryInjector(BaseInjector):
 
             pool = get_mem0_pool()
 
+            # 增强搜索 query：拼接原始任务描述
+            # 长任务中 user_query 可能是"继续"/"好的"等短追问，
+            # 导致 Mem0 语义搜索召回不相关的记忆。
+            # 第一条 user 消息（原始任务）在 preserve_first_messages 保护区内，始终可用。
+            search_query = context.user_query
+            if context.history_messages and len(context.user_query) < 20:
+                first_user_text = self._extract_first_user_text(
+                    context.history_messages
+                )
+                if first_user_text and first_user_text != context.user_query:
+                    search_query = f"{first_user_text} {context.user_query}"
+                    logger.debug(
+                        f"Memory Recall query 增强: "
+                        f"'{context.user_query}' → '{search_query[:80]}...'"
+                    )
+
             # 同步 Mem0 混合搜索放入线程池，不阻塞事件循环
             # 内部自动执行：向量搜索 + FTS5 关键词搜索 → 加权合并 → min_score 过滤
             memories = await asyncio.to_thread(
                 pool.search,
                 user_id=context.user_id,
-                query=context.user_query,
+                query=search_query,
                 limit=_MEM0_SEARCH_LIMIT,
                 min_score=_MEM0_MIN_SCORE,
             )
@@ -326,33 +346,104 @@ class UserMemoryInjector(BaseInjector):
     # ================================================================
 
     @staticmethod
+    def _extract_first_user_text(
+        history_messages: list[dict],
+    ) -> Optional[str]:
+        """
+        Extract text from the first user message in history.
+
+        Used to enrich short follow-up queries ("继续") with the
+        original task description for better memory recall.
+
+        Args:
+            history_messages: conversation history (list of dicts)
+
+        Returns:
+            First user message text (truncated to 200 chars), or None.
+        """
+        for msg in history_messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str) and content.strip():
+                text = content.strip()
+                return text[:200] if len(text) > 200 else text
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "").strip()
+                        if text:
+                            return text[:200] if len(text) > 200 else text
+            break  # Only check the first user message
+        return None
+
+    # Sections that must survive budget trimming (identity > preferences).
+    # Order matters: first section listed gets highest priority.
+    _PRIORITY_SECTIONS = ["基本信息", "关于你"]
+
+    @staticmethod
     def _trim_markdown_memory(content: str, max_chars: int) -> str:
         """
-        Trim MEMORY.md content intelligently.
+        Trim MEMORY.md content intelligently with priority ordering.
 
-        Keeps section headers and non-placeholder entries.
-        Skips template placeholder lines like （小搭子还不了解你...）.
+        Strategy:
+        1. Always keep priority sections first (基本信息, 关于你)
+        2. Fill remaining budget with other sections in document order
+        3. Skip template placeholders and blockquote instructions
         """
         if len(content) <= max_chars:
             return content
 
         lines = content.split("\n")
-        result = []
-        total = 0
+
+        # Parse into sections: [(section_name, [lines]), ...]
+        sections: list[tuple[str, list[str]]] = []
+        current_name = ""
+        current_lines: list[str] = []
 
         for line in lines:
             stripped = line.strip()
-            # Skip template placeholders
+            # Skip template placeholders and blockquotes
             if stripped.startswith("（") and stripped.endswith("）"):
                 continue
-            # Skip blockquote instructions
             if stripped.startswith(">"):
                 continue
 
-            line_len = len(line) + 1  # +1 for newline
-            if total + line_len > max_chars:
-                break
-            result.append(line)
-            total += line_len
+            heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+            if heading:
+                if current_lines:
+                    sections.append((current_name, current_lines))
+                current_name = heading.group(2).strip()
+                current_lines = [line]
+            else:
+                current_lines.append(line)
+
+        if current_lines:
+            sections.append((current_name, current_lines))
+
+        # Reorder: priority sections first, then rest in original order
+        priority = []
+        rest = []
+        priority_names = set(
+            UserMemoryInjector._PRIORITY_SECTIONS
+        )
+        for name, sec_lines in sections:
+            if name in priority_names:
+                priority.append((name, sec_lines))
+            else:
+                rest.append((name, sec_lines))
+
+        ordered = priority + rest
+
+        # Fill budget
+        result = []
+        total = 0
+        for _name, sec_lines in ordered:
+            for line in sec_lines:
+                line_len = len(line) + 1
+                if total + line_len > max_chars:
+                    return "\n".join(result)
+                result.append(line)
+                total += line_len
 
         return "\n".join(result)

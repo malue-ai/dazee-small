@@ -79,6 +79,7 @@ from .plan import (
 __all__ = [
     # Fragment
     "FragmentMemory",
+    "IdentityHint",
     "TaskHint",
     "TimeHint",
     "EmotionHint",

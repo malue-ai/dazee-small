@@ -335,12 +335,17 @@ def _compress_tool_result_content(content: Any) -> Any:
     压缩单个 tool_result 的 content 字段
 
     策略：
+    - 已被 ToolResultCompressor 即时压缩的内容（带 COMPRESSED 标记）→ 跳过，防止二次截断
     - 字符串超长 → 保留头 200 + 尾 100 字符 + 截断标记
     - list of blocks → 递归压缩每个 text block
     - 其他 → 不变
     """
     if isinstance(content, str):
         if len(content) <= _TOOL_RESULT_TRUNCATE_THRESHOLD:
+            return content
+        # 防止二次压缩：已被 ToolResultCompressor 压缩的结果包含文件路径引用，
+        # 截断会丢失路径，导致 Agent 无法通过 cat 查看完整内容
+        if content.startswith("[COMPRESSED:"):
             return content
         return (
             content[:_TOOL_RESULT_KEEP_HEAD]
@@ -355,7 +360,10 @@ def _compress_tool_result_content(content: Any) -> Any:
                 block_type = block.get("type", "")
                 if block_type == "text":
                     text = block.get("text", "")
-                    if len(text) > _TOOL_RESULT_TRUNCATE_THRESHOLD:
+                    # 防止二次压缩
+                    if text.startswith("[COMPRESSED:"):
+                        compressed.append(block)
+                    elif len(text) > _TOOL_RESULT_TRUNCATE_THRESHOLD:
                         compressed.append({
                             **block,
                             "text": (
@@ -414,7 +422,8 @@ def _try_fold_plan_tool_result(content: Any) -> Optional[str]:
         parts = []
         for t in todos:
             icon = status_icons.get(t.get("status", "pending"), "○")
-            title = (t.get("title") or t.get("content", ""))[:15]
+            # 优先使用 content（完整步骤描述），fallback 到 title
+            title = (t.get("content") or t.get("title", ""))[:30]
             parts.append(f"{icon}{title}")
 
         return f"[plan] {name}（{completed}/{total}）: {', '.join(parts)}"
@@ -452,6 +461,76 @@ def compress_fresh_tool_result(content: str) -> str:
     )
 
 
+def _build_tool_name_map(messages: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Build a mapping from tool_use_id to tool name.
+
+    Scans all assistant messages for tool_use blocks and records id -> name.
+    Used by _compress_old_tool_results to check skip_tools whitelist.
+
+    Args:
+        messages: full message list
+
+    Returns:
+        Dict mapping tool_use_id to tool name
+    """
+    mapping: Dict[str, str] = {}
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_id = block.get("id")
+                tool_name = block.get("name", "")
+                if tool_id and tool_name:
+                    mapping[tool_id] = tool_name
+    return mapping
+
+
+def _load_skip_tools() -> set:
+    """
+    Load skip_tools whitelist from context_compaction.yaml.
+
+    Returns:
+        Set of tool names that should not be compressed.
+    """
+    try:
+        import yaml
+        from pathlib import Path
+
+        config_paths = [
+            Path("config/context_compaction.yaml"),
+            Path(__file__).resolve().parents[3] / "config" / "context_compaction.yaml",
+        ]
+        for path in config_paths:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                tools = config.get("tool_result_compressor", {}).get("skip_tools", [])
+                if tools:
+                    return set(tools)
+    except Exception as e:
+        logger.debug(f"加载 skip_tools 配置失败: {e}")
+    return set()
+
+
+# Module-level cache (loaded once)
+_SKIP_TOOLS: Optional[set] = None
+
+
+def _get_skip_tools() -> set:
+    """Get skip_tools whitelist (cached after first load)."""
+    global _SKIP_TOOLS
+    if _SKIP_TOOLS is None:
+        _SKIP_TOOLS = _load_skip_tools()
+        if _SKIP_TOOLS:
+            logger.info(f"📋 skip_tools 白名单已加载: {sorted(_SKIP_TOOLS)}")
+    return _SKIP_TOOLS
+
+
 def _compress_old_tool_results(
     messages: List[Dict[str, Any]],
     preserve_recent_n: int = 4,
@@ -461,6 +540,9 @@ def _compress_old_tool_results(
 
     保留最近 N 条消息的 tool_result 原文不动，
     更早的消息中超长的 tool_result 内容截断为头+尾。
+
+    白名单工具（config/context_compaction.yaml skip_tools）的结果不被压缩，
+    因为 plan、memory、hitl 等工具的结果影响流程控制。
 
     Args:
         messages: 消息列表
@@ -476,7 +558,12 @@ def _compress_old_tool_results(
     if boundary <= 0:
         return messages
 
+    # 构建 tool_use_id → tool_name 映射 + 加载白名单
+    tool_name_map = _build_tool_name_map(messages)
+    skip_tools = _get_skip_tools()
+
     compressed_count = 0
+    skipped_count = 0
     result = []
 
     for i, msg in enumerate(messages):
@@ -503,6 +590,14 @@ def _compress_old_tool_results(
         changed = False
         for block in content:
             if isinstance(block, dict) and block.get("type") == "tool_result":
+                # 白名单检查：通过 tool_use_id 反查工具名
+                tool_use_id = block.get("tool_use_id", "")
+                tool_name = tool_name_map.get(tool_use_id, "")
+                if tool_name in skip_tools:
+                    new_content.append(block)
+                    skipped_count += 1
+                    continue
+
                 original = block.get("content", "")
                 # P1: Plan update 特殊折叠 — 旧 plan tool_result 折叠为一行摘要
                 folded = _try_fold_plan_tool_result(original)
@@ -525,8 +620,11 @@ def _compress_old_tool_results(
         else:
             result.append(msg)
 
-    if compressed_count > 0:
-        logger.info(f"📦 已压缩 {compressed_count} 条消息中的 tool_result 内容")
+    if compressed_count > 0 or skipped_count > 0:
+        logger.info(
+            f"📦 tool_result 压缩: {compressed_count} 条已压缩, "
+            f"{skipped_count} 条因白名单跳过"
+        )
 
     return result
 
@@ -599,6 +697,9 @@ def trim_by_token_budget(
         )
 
     # 1. 计算 system_prompt 的 token 数（基础开销）
+    # 注意：不含 tools 定义的 token（约 3000）。调用方（rvr.py）在判断
+    # 是否需要裁剪时已用 count_request_tokens() 完整估算（含 tools），
+    # 且 safe_threshold 有 8-20% buffer，tools 的 1.5% 开销在安全范围内。
     base_tokens = count_tokens(system_prompt) if system_prompt else 0
 
     # 2. 计算每条消息的 token 数

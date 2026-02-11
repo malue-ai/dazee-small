@@ -611,6 +611,14 @@ class ClaudeLLMService(BaseLLMService):
         # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
         converted = self._adaptor.convert_messages_to_provider(messages)
         formatted_messages = converted["messages"]
+
+        # 🛡️ 断言：adaptor 层已确保消息以 user 结尾，此处仅检测异常
+        if formatted_messages and formatted_messages[-1].get("role") == "assistant":
+            logger.error(
+                "🐛 [Async] adaptor 输出的消息仍以 assistant 结尾"
+                f"（共 {len(formatted_messages)} 条），请排查 adaptor 逻辑"
+            )
+
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -802,6 +810,14 @@ class ClaudeLLMService(BaseLLMService):
         # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
         converted = self._adaptor.convert_messages_to_provider(messages)
         formatted_messages = converted["messages"]
+
+        # 🛡️ 断言：adaptor 层已确保消息以 user 结尾，此处仅检测异常
+        if formatted_messages and formatted_messages[-1].get("role") == "assistant":
+            logger.error(
+                "🐛 [Stream] adaptor 输出的消息仍以 assistant 结尾"
+                f"（共 {len(formatted_messages)} 条），请排查 adaptor 逻辑"
+            )
+
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
