@@ -878,13 +878,6 @@ watch(showHistoryDropdown, (isOpen) => {
   }
 })
 
-watch(() => historyIds.value.length, (len) => {
-  const totalPages = Math.max(1, Math.ceil(len / historyPageSize))
-  if (historyPage.value > totalPages) {
-    historyPage.value = totalPages
-  }
-})
-
 // 监听路由中的 agentId 变化（通知卡片"打开"、浏览器前进/后退等外部路由跳转）
 watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
   // 导航到非聊天页面（设置、技能、知识库等）时，保留当前 Agent/会话状态，
@@ -1010,6 +1003,13 @@ const conversationMap = computed(() => {
 })
 
 const historyIds = computed(() => filteredConversations.value.map((c) => c.id))
+
+watch(() => historyIds.value.length, (len) => {
+  const totalPages = Math.max(1, Math.ceil(len / historyPageSize))
+  if (historyPage.value > totalPages) {
+    historyPage.value = totalPages
+  }
+})
 
 const historyTotalPages = computed(() => {
   return Math.max(1, Math.ceil(historyIds.value.length / historyPageSize))

@@ -786,19 +786,15 @@ def _validate_create_request(request: AgentCreateRequest):
     """
     registry = get_agent_registry()
 
-    # 0. Resolve model
+    # 0. Validate model is provided
     if not request.model:
-        activated = ModelRegistry.list_activated()
-        if not activated:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": "NO_ACTIVATED_MODEL",
-                    "message": "没有已激活的模型，请先在设置页面配置 API Key",
-                },
-            )
-        request.model = activated[0].model_name
-        logger.info(f"未指定模型，使用默认已激活模型: {request.model}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "MODEL_REQUIRED",
+                "message": "请选择一个模型",
+            },
+        )
 
     model_config = ModelRegistry.get(request.model)
     if not model_config:
