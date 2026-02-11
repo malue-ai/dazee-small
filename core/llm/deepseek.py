@@ -205,7 +205,7 @@ class DeepSeekLLMService(BaseLLMService):
         timeout = getattr(config, "timeout", 120.0)
         max_retries = getattr(config, "max_retries", 3)
 
-        self.client = AsyncOpenAI(
+        self.client = AsyncOpenAI(  # type: ignore[reportCallIssue]
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
