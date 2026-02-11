@@ -334,7 +334,7 @@
                   :value="form.dataDir"
                   type="text"
                   readonly
-                  placeholder="点击选择文件夹"
+                  :placeholder="defaultDataPath ? `默认: ${defaultDataPath}` : '点击选择文件夹'"
                   class="w-full pl-10 pr-4 py-3 text-sm bg-card border border-border rounded-xl cursor-pointer text-foreground placeholder:text-muted-foreground/50 transition-colors hover:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40"
                 />
               </div>
@@ -349,7 +349,7 @@
               </button>
             </div>
             <p class="text-xs text-muted-foreground">
-              自定义项目文件的存储位置。留空则自动存储到默认路径。
+              自定义项目文件的存储位置。留空则自动存储到默认路径{{ defaultDataPath ? `：${defaultDataPath}` : '' }}。
             </p>
           </div>
         </div>
@@ -456,7 +456,7 @@ import { useGuideStore } from '@/stores/guide'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
 import { modelApi, type ModelInfo } from '@/api/models'
 import { getAgentDetail } from '@/api/agent'
-import { runCommand, isTauriEnv } from '@/api/tauri'
+import { isTauriEnv } from '@/api/tauri'
 import api from '@/api/index'
 import type { ChatRequest } from '@/types'
 
@@ -535,6 +535,23 @@ const form = reactive({
   dataDir: ''
 })
 
+// ==================== 默认存储路径 ====================
+
+/** 后端返回的默认实例数据存储路径 */
+const defaultDataPath = ref('')
+
+/** 获取默认存储路径 */
+async function loadDefaultDataPath() {
+  try {
+    const { data } = await api.get('/v1/agents/default-data-path')
+    if (data?.default_path) {
+      defaultDataPath.value = data.default_path
+    }
+  } catch (e) {
+    console.warn('获取默认存储路径失败:', e)
+  }
+}
+
 // ==================== 文件夹选择 ====================
 
 /** 调用系统原生文件夹选择对话框 */
@@ -547,33 +564,16 @@ async function openFolderPicker() {
   }
 
   try {
-    // 检测平台，调用对应的系统文件夹选择器
-    const isWin = navigator.userAgent.includes('Windows') || navigator.platform.startsWith('Win')
+    // 使用 Tauri 原生 dialog 插件，无黑窗口
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择项目存储路径',
+    })
 
-    let result
-    if (isWin) {
-      // Windows：使用 PowerShell 弹出 FolderBrowserDialog
-      result = await runCommand([
-        'powershell', '-NoProfile', '-Command',
-        `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '选择项目存储路径'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }`
-      ], { timeout_ms: 120000 })
-    } else {
-      // macOS / Linux：使用 osascript / zenity
-      const isMac = navigator.userAgent.includes('Mac')
-      if (isMac) {
-        result = await runCommand([
-          'osascript', '-e',
-          'set theFolder to choose folder with prompt "选择项目存储路径"\nreturn POSIX path of theFolder'
-        ], { timeout_ms: 120000 })
-      } else {
-        result = await runCommand([
-          'zenity', '--file-selection', '--directory', '--title=选择项目存储路径'
-        ], { timeout_ms: 120000 })
-      }
-    }
-
-    if (result.success && result.stdout.trim()) {
-      form.dataDir = result.stdout.trim()
+    if (selected && typeof selected === 'string') {
+      form.dataDir = selected
     }
   } catch (e) {
     console.error('打开文件夹选择器失败:', e)
@@ -1193,8 +1193,9 @@ onMounted(() => {
   // 注册点击外部关闭下拉框
   document.addEventListener('click', handleClickOutside)
 
-  // Load available models
+  // Load available models & default data path
   loadModels()
+  loadDefaultDataPath()
 
   if (isEditMode.value) {
     // 编辑模式：加载已有数据，设置初始提示消息

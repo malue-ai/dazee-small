@@ -385,6 +385,24 @@ async def list_agents(
 
 
 @router.get(
+    "/default-data-path",
+    summary="获取默认实例数据存储路径",
+    description="返回项目实例数据的默认存储根目录，前端可用于展示",
+)
+async def get_default_data_path():
+    """
+    获取默认实例数据存储路径
+
+    返回 ``{user_data_dir}/data/instances/`` 的绝对路径字符串，
+    前端可在「存储路径」字段中作为提示信息展示。
+    """
+    from utils.app_paths import get_user_data_dir
+
+    default_path = get_user_data_dir() / "data" / "instances"
+    return {"default_path": str(default_path)}
+
+
+@router.get(
     "/templates",
     response_model=AgentTemplateListResponse,
     summary="获取 Agent 模板列表",
