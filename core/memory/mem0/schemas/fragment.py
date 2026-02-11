@@ -345,7 +345,7 @@ class FragmentMemory:
                     "company": self.identity_hint.company,
                     "location": self.identity_hint.location,
                     "expertise_level": self.identity_hint.expertise_level,
-                    "other": self.identity_hint.other,
+                    "other_traits": self.identity_hint.other_traits,
                     "confidence": self.identity_hint.confidence,
                 }
                 if self.identity_hint
