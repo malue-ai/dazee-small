@@ -378,18 +378,19 @@ class PlaybookManager:
             from core.memory.mem0 import get_mem0_pool
 
             pool = get_mem0_pool()
-            pool.add(
+            searchable_text = entry.get_searchable_text()
+            result = pool.memory.add(
+                messages=searchable_text,
                 user_id="playbook",
-                messages=[
-                    {"role": "user", "content": entry.get_searchable_text()}
-                ],
                 metadata={
                     "playbook_id": entry.id,
                     "source": "playbook_manager",
                     "task_types": ",".join(entry.trigger.get("task_types", [])),
                 },
+                infer=False,  # Store raw text as vector — skip LLM extraction
             )
-            logger.debug(f"Mem0 同步: playbook={entry.id}")
+            count = len(result.get("results", []))
+            logger.info(f"Mem0 同步: playbook={entry.id}, 写入={count}, text={searchable_text[:60]}...")
         except Exception as e:
             # WARNING not DEBUG: if add fails after delete, the entry
             # temporarily disappears from search until next sync.
@@ -844,16 +845,36 @@ class PlaybookManager:
         if not candidates:
             return []
 
-        # Layer 2: Mem0 语义搜索
+        # Layer 2: Mem0 语义搜索（直接用底层 API，不走混合搜索包装层）
+        # 混合搜索是给用户记忆设计的（向量+FTS5+合并），playbook 只需纯向量搜索
         try:
             from core.memory.mem0 import get_mem0_pool
 
             pool = get_mem0_pool()
-            search_results = pool.search(
-                user_id="playbook",
+            raw_results = pool.memory.search(
                 query=query,
+                user_id="playbook",
                 limit=top_k * 2,
             )
+            # Mem0 search returns dict or list
+            if isinstance(raw_results, dict):
+                search_results = raw_results.get("results", [])
+            else:
+                search_results = raw_results or []
+
+            logger.info(
+                f"Playbook Mem0 搜索: query={query[:40]}..., "
+                f"results={len(search_results)}, "
+                f"candidates={list(candidates.keys())}"
+            )
+            for sr in search_results[:3]:
+                sr_meta = sr.get("metadata") or {}
+                logger.info(
+                    f"  搜索结果: id={sr.get('id','?')[:12]}, "
+                    f"score={sr.get('score',0):.3f}, "
+                    f"playbook_id={sr_meta.get('playbook_id','?')}, "
+                    f"uid={sr.get('user_id','?')}"
+                )
 
             # 匹配搜索结果和候选 Playbook（按 playbook_id 去重）
             matched = []

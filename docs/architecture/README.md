@@ -14,7 +14,7 @@ It is a personal AI assistant that combines 150+ skills, three-layer memory, and
 - **Local-first** — Your data (conversations, memory, files) stays on your machine. SQLite + FTS5 + sqlite-vec, no cloud database required. LLM inference uses cloud APIs by default, with local model support (Ollama/LM Studio) for fully offline use.
 - **Persistent memory** — The agent remembers your preferences, habits, and past interactions via a user-editable memory file + semantic vector search.
 - **150+ plug-and-play skills with lazy allocation** — From Excel analysis to UI automation, classified on a 2D matrix (OS × dependency). Only intent-relevant skills are loaded per request (0-15 out of 150+), so the library scales without token overhead. Add new skills by writing a Markdown file.
-- **Multi-model flexibility** — Switch between Claude, OpenAI, Qwen, DeepSeek, Gemini, or local models (Ollama) by changing one config value.
+- **Multi-model flexibility** — Switch between Claude, OpenAI, Qwen, DeepSeek, Gemini, GLM (智谱), or local models (Ollama) by changing one config value.
 - **Smart error recovery** — The RVR-B execution loop classifies errors, backtracks from failed approaches, and degrades gracefully instead of crashing.
 
 ---
@@ -47,7 +47,7 @@ All data storage is local by default:
 - **User memory** — Plain Markdown file (`MEMORY.md`)
 - **File attachments** — Local filesystem, instance-isolated
 
-No cloud database, no external vector store, no third-party analytics. LLM inference requires a cloud API (Claude, OpenAI, Qwen, etc.) by default, but local models via Ollama or LM Studio are fully supported for users who need complete offline operation.
+No cloud database, no external vector store, no third-party analytics. LLM inference requires a cloud API (Claude, OpenAI, Qwen, GLM, etc.) by default, but local models via Ollama or LM Studio are fully supported for users who need complete offline operation.
 
 ### Skills-First
 
@@ -93,7 +93,7 @@ The system is organized into five layers, from user interface down to infrastruc
                  ▼                                    ▼
 ┌──────────────────────────────────────┐  ┌──────────────────────────────────┐
 │ Layer 4 — Capability                  │  │ Layer 5 — Infrastructure         │
-│   Tool System (2-layer, 3-level)      │  │   LLM Abstraction (5 providers)  │
+│   Tool System (2-layer, 3-level)      │  │   LLM Abstraction (6 providers)  │
 │   Skill Ecosystem (150+, 20 groups)   │  │   Local Storage (SQLite + FTS5)  │
 │   Memory System (MD + FTS5 + Mem0)    │  │   Instance System (isolation)    │
 │   Knowledge Base (FTS5 + embeddings)  │  │   Evaluation (3-layer grading)   │
@@ -131,7 +131,7 @@ The **Memory System** combines three layers: `MEMORY.md` (user-editable source o
 
 ### Layer 5 — Infrastructure
 
-The foundation. The **LLM Abstraction** provides a unified interface over 5 providers (Claude, OpenAI, Qwen, DeepSeek, Gemini) plus local models via Ollama. Format adapters handle protocol differences (Claude content blocks vs. OpenAI function calling vs. Gemini parts). A ModelRouter provides automatic failover with health tracking.
+The foundation. The **LLM Abstraction** provides a unified interface over 6 providers (Claude, OpenAI, Qwen, DeepSeek, Gemini, GLM) plus local models via Ollama. Format adapters handle protocol differences (Claude content blocks vs. OpenAI function calling vs. Gemini parts vs. GLM ChatGLM). A ModelRouter provides automatic failover with health tracking.
 
 **Local Storage** uses SQLite exclusively — WAL mode for concurrent access, FTS5 for full-text search, sqlite-vec for optional vector similarity. The **Instance System** isolates each agent's data (DB, memory, vectors, snapshots, files) and uses Prompt-Driven configuration: write a prompt, get a configured agent.
 
@@ -200,7 +200,7 @@ User → Frontend → Router (POST /api/v1/chat, SSE stream)
 | Backend | Python 3.12 + FastAPI + asyncio | Async API server |
 | Communication | SSE + WebSocket + REST | Real-time streaming + persistent connections |
 | Storage | SQLite (WAL) + FTS5 + sqlite-vec | Messages, full-text search, optional vectors |
-| LLM | Claude, OpenAI, Qwen, DeepSeek, Gemini, Ollama | Multi-provider with failover |
+| LLM | Claude, OpenAI, Qwen, DeepSeek, Gemini, GLM, Ollama | Multi-provider with failover |
 | Memory | MEMORY.md + FTS5 + Mem0 | User-editable + keyword + semantic |
 | Evaluation | Code graders + LLM-as-Judge + Human review | Three-layer quality assurance |
 
@@ -219,7 +219,7 @@ zenflux_agent/
 │   ├── skill/              # Skill loader, group registry
 │   ├── memory/             # Three-layer memory (Markdown + FTS5 + Mem0)
 │   ├── playbook/           # Online learning (strategy extraction + matching)
-│   ├── llm/                # LLM abstraction (5 providers + adapters)
+│   ├── llm/                # LLM abstraction (6 providers + adapters)
 │   ├── gateway/            # Multi-channel gateway (Telegram, Feishu)
 │   ├── planning/           # Task planning + progress tracking
 │   ├── termination/        # Adaptive termination strategies
@@ -259,7 +259,7 @@ Read in order, top-down from user interface to infrastructure:
 - **[08 — Memory System](08-memory-system.md)** — Three-layer memory, dual-write, fusion search, fragment extraction
 
 ### Infrastructure
-- **[09 — LLM Multi-Model Support](09-llm-multi-model.md)** — 5 providers, format adapters, ModelRouter failover, local model support
+- **[09 — LLM Multi-Model Support](09-llm-multi-model.md)** — 6 providers, format adapters, ModelRouter failover, local model support
 - **[10 — Instance & Configuration](10-instance-and-config.md)** — Instance isolation, Prompt-Driven schema, LLM Profiles, config priority
 - **[11 — Evaluation & Quality](11-evaluation.md)** — Three-layer grading, E2E pipeline, failure detection, token audit
 - **[12 — Playbook Online Learning](12-playbook-learning.md)** — Closed-loop strategy learning from successful sessions, user confirmation, semantic matching, context injection
@@ -469,14 +469,16 @@ xiaodazi is under active development. We are honest about the problems that stil
 - **External dependency fragility** — Skills that depend on CLI tools (e.g., `ffmpeg`, `pandoc`) or external apps can break silently when those tools update their CLI interface. Runtime status checking catches "not installed" but not "installed but incompatible version."
 - **Skill coverage gaps** — 150+ skills sounds like a lot, but many real-world workflows hit edge cases that no existing skill covers. Custom skill authoring is straightforward (write a `SKILL.md`), but the documentation and examples need improvement.
 
-### Infrastructure
+### Platform
 
+- **macOS is the primary tested platform** — Development and testing are primarily done on macOS. The majority of skills, file path handling, and Tauri integration have been thoroughly validated on macOS. Windows support exists but has not received the same level of testing — you may encounter path issues, permission edge cases, or platform-specific skill failures on Windows. We are actively improving Windows compatibility and welcome bug reports from Windows users.
 - **Single-machine only** — xiaodazi runs on one desktop. There is no remote access, no mobile app, no multi-device sync. If you need to use the agent from your phone, this is not yet possible.
 - **No voice interface** — Text-only. No speech-to-text or text-to-speech integration yet.
 - **Limited channel support** — Currently 3 channels (Web, Telegram, Feishu). Adding more channels (WhatsApp, Discord, Slack) is planned but not yet implemented.
 
 ### What We Are Working On
 
+- Windows platform hardening (path handling, permission model, platform-specific skill testing)
 - Sidecar auto-restart and health monitoring in the Tauri shell
 - More robust context decay with importance-aware compression
 - Skill dependency version checking
