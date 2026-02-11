@@ -157,7 +157,7 @@ class IdentityHint:
     company: Optional[str] = None  # 公司/团队/组织
     location: Optional[str] = None  # 所在地/时区
     expertise_level: Optional[str] = None  # 专业水平：beginner/intermediate/expert
-    other: List[str] = field(default_factory=list)  # 其他身份特征
+    other_traits: List[str] = field(default_factory=list)  # 其他身份特征
     confidence: float = 0.0
 
 

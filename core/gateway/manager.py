@@ -68,6 +68,11 @@ class ChannelManager:
                 await adapter.start(self._on_message)
                 started.append(channel_id)
                 logger.info("Channel started", extra={"channel": channel_id})
+            except ImportError as e:
+                logger.warning(
+                    "Channel unavailable (optional dependency missing)",
+                    extra={"channel": channel_id, "error": str(e)},
+                )
             except Exception as e:
                 logger.warning(
                     "Failed to start channel (missing dependency is non-fatal)",
