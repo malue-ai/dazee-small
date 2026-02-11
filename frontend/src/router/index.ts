@@ -39,6 +39,12 @@ const routes = [
     component: () => import('@/views/skills/SkillsView.vue'),
     meta: { layout: 'dashboard' }
   },
+  {
+    path: '/tasks',
+    name: 'tasks',
+    component: () => import('@/views/tasks/ScheduledTasksView.vue'),
+    meta: { layout: 'dashboard' }
+  },
   // ==================== 新建项目 ====================
   {
     path: '/create-project',

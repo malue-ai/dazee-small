@@ -69,6 +69,13 @@
             <span class="text-sm font-medium">技能</span>
           </button>
           <button 
+            @click="emit('navigate', '/tasks')" 
+            class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
+          >
+            <Clock class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
+            <span class="text-sm font-medium">定时任务</span>
+          </button>
+          <button 
             @click="openSearch"
             class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
           >
@@ -186,6 +193,7 @@ import {
   X,
   Plus,
   Bot,
+  Clock,
   Puzzle, 
   Trash2,
   Pencil,

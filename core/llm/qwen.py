@@ -1212,7 +1212,8 @@ class QwenLLMService(BaseLLMService):
 
         # 🔧 策略 7: 过滤框架注入字段（LLM 不应该传递这些）
         # 这些字段应该由框架在 ToolContext 中提供，而不是由 LLM 传递
-        FRAMEWORK_FIELDS = {"user_id", "session_id", "conversation_id", "task_id"}
+        # 注意：task_id 是 scheduled_task 等工具的业务参数，不是框架字段，不应过滤
+        FRAMEWORK_FIELDS = {"user_id", "session_id", "conversation_id"}
         filtered_fields = []
         for field in FRAMEWORK_FIELDS:
             if field in normalized:

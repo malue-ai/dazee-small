@@ -58,6 +58,7 @@ from routers import (
     gateway_router,
     human_confirmation_router,
     playbook_router,
+    scheduled_tasks_router,
     settings_router,
     skills_router,
     models_router,
@@ -458,6 +459,7 @@ app.include_router(skills_router)
 app.include_router(models_router)
 app.include_router(settings_router)
 app.include_router(playbook_router)
+app.include_router(scheduled_tasks_router)
 
 # 实时通信（WebSocket）
 app.include_router(websocket_router)

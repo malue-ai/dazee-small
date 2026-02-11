@@ -30,6 +30,10 @@ class UserTaskScheduler:
     每个用户任务注册为一个独立的 APScheduler Job，
     到 next_run_at 时刻精准触发，无需轮询。
 
+    Agent task execution is offloaded via asyncio.create_task with a
+    timeout guard, so long-running LLM loops do not starve Telegram
+    long-polling or Feishu WebSocket heartbeats on the main event loop.
+
     使用方式:
         scheduler = UserTaskScheduler()
         await scheduler.start()
@@ -37,10 +41,14 @@ class UserTaskScheduler:
         await scheduler.shutdown()
     """
 
+    # Maximum time a single agent_task execution is allowed (seconds)
+    AGENT_TASK_TIMEOUT = 300  # 5 minutes
+
     def __init__(self):
         self._running = False
         self._scheduler = None
         self._workspace = None
+        self._running_tasks: Dict[str, asyncio.Task] = {}  # task_id → asyncio.Task
 
     async def start(self):
         """启动调度器：创建 APScheduler 实例并加载活跃任务"""
@@ -106,6 +114,13 @@ class UserTaskScheduler:
         """关闭调度器"""
         if not self._running:
             return
+
+        # Cancel any in-flight agent task executions
+        for tid, t in list(self._running_tasks.items()):
+            if not t.done():
+                t.cancel()
+                logger.info(f"🛑 [Scheduler] 取消运行中的任务: task_id={tid}")
+        self._running_tasks.clear()
 
         if self._scheduler:
             self._scheduler.shutdown(wait=False)
@@ -335,10 +350,14 @@ class UserTaskScheduler:
         """
         执行任务，然后根据 trigger_type 决定是否重新调度。
 
-        关键设计：分段式 session 管理，避免 SQLite pool_size=1 的连接竞争。
-        1. Session A: 加载任务数据 → 关闭
-        2. 执行任务（可自由打开新 session）
-        3. Session B: 标记任务完成 → 关闭
+        关键设计：
+        1. 分段式 session 管理，避免 SQLite pool_size=1 的连接竞争
+        2. Agent task 执行通过 asyncio.create_task + wait_for 隔离，
+           不阻塞 Telegram/Feishu 长连接的心跳和消息接收
+
+        Phase 1: Session A: 加载任务数据 → 关闭
+        Phase 2: 执行任务（agent_task 会被 offload 到独立 Task）
+        Phase 3: Session B: 标记任务完成 → 关闭
         """
         logger.info(f"🔔 [Scheduler] 任务触发: task_id={task_id}")
 
@@ -402,7 +421,10 @@ class UserTaskScheduler:
             )
             return
 
-        # ---- Phase 2: 执行任务（无 session 持有，可自由操作数据库） ----
+        # ---- Phase 2: 执行任务 ----
+        # agent_task 可能跑 20+ 轮 LLM 调用，耗时数分钟。
+        # 用 asyncio.create_task + wait_for 隔离执行，让主循环能
+        # 继续处理 Telegram 长轮询和飞书 WebSocket 心跳。
         execution_success = True
         execution_error = None
         response_text = None
@@ -412,7 +434,23 @@ class UserTaskScheduler:
                 f"title={task_snapshot['title']}, trigger={task_snapshot['trigger_type']}"
             )
 
-            response_text = await self._execute_task(task_snapshot)
+            # Offload execution into a tracked Task with timeout
+            exec_task = asyncio.create_task(
+                self._execute_task(task_snapshot),
+                name=f"scheduled_task_{task_id}",
+            )
+            self._running_tasks[task_id] = exec_task
+            try:
+                response_text = await asyncio.wait_for(
+                    exec_task, timeout=self.AGENT_TASK_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                exec_task.cancel()
+                raise TimeoutError(
+                    f"Agent task exceeded {self.AGENT_TASK_TIMEOUT}s timeout"
+                )
+            finally:
+                self._running_tasks.pop(task_id, None)
 
         except Exception as e:
             execution_success = False

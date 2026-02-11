@@ -521,18 +521,29 @@ class ScheduledTaskTool(BaseTool):
                 updated_task = await update_task(session, task_id, **update_kwargs)
 
                 if updated_task:
-                    return {
-                        "success": True,
-                        "message": f"✅ 任务已更新: {updated_task.title}",
-                        "task_id": task_id,
-                        "next_run_at": (
-                            updated_task.next_run_at.strftime("%Y-%m-%d %H:%M:%S")
-                            if updated_task.next_run_at
-                            else None
-                        ),
-                    }
+                    next_run_str = (
+                        updated_task.next_run_at.strftime("%Y-%m-%d %H:%M:%S")
+                        if updated_task.next_run_at
+                        else None
+                    )
                 else:
                     return {"success": False, "error": "更新任务失败"}
+
+            # Re-sync APScheduler with the new schedule
+            if updated_task:
+                from services.user_task_scheduler import get_user_task_scheduler
+
+                scheduler = get_user_task_scheduler()
+                if scheduler.is_running():
+                    await scheduler.unregister_task(task_id)
+                    await scheduler.register_task_by_id(task_id)
+
+            return {
+                "success": True,
+                "message": f"✅ 任务已更新: {updated_task.title}",
+                "task_id": task_id,
+                "next_run_at": next_run_str,
+            }
 
         except Exception as e:
             logger.error(f"❌ 更新定时任务失败: {e}", exc_info=True)
