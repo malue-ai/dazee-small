@@ -2678,6 +2678,112 @@ Step 2: matplotlib 图表生成 → 可能因日文特殊字符失败
 
 ---
 
+## 维度 P：Playbook 在线学习（全生命周期验证）
+
+> **测试目标**：验证 Playbook 在线学习机制的完整 CRUD 生命周期——从策略自动提取、持久化、用户确认、语义索引匹配、上下文注入、相似任务执行，到拒绝隔离和删除清理。这是"越用越聪明"核心卖点的硬验证。
+
+### P1 — 策略提取 + 持久化
+
+| 项 | 内容 |
+|----|------|
+| **维度** | 提取触发 + JSON 落盘 + Mem0 索引 + WebSocket 推送 |
+| **Query** | 帮我分析这份产品反馈数据，找出用户最不满意的 3 个方面 |
+| **Data** | `playbook_test/product_feedback.xlsx`（150 行，5 类问题，界面卡顿占 35%） |
+| **Expected** | 策略提取触发、DRAFT 状态、JSON 持久化、tool_sequence 非空 |
+| **Grader 铁律** | 有工具调用但未提取 → <= 2 分；tool_sequence 为空 → <= 2 分；JSON 未落盘 → <= 2 分 |
+
+**技术验证点**：
+1. `playbook_extraction` 后台任务在 `message_stop` 后触发（fire-and-forget）
+2. 提取前置条件：助手回复 >= 100 字符、用户消息 >= 10 字符、工具调用 >= 1 次
+3. PlaybookEntry 的 `source_session_id` 非空（会话可溯源）
+4. `data/instances/xiaodazi/playbooks/{id}.json` 文件存在
+5. `index.json` 包含新 ID
+
+### P2 — 确认 + 索引匹配 + 策略注入
+
+| 项 | 内容 |
+|----|------|
+| **维度** | approve 确认 → Mem0 语义匹配 → `<playbook_hint>` 注入 → 相似执行 |
+| **前置** | 预先创建 APPROVED 数据分析类策略 |
+| **Query** | 分析这份客户满意度调查数据，找出满意度最低的服务类别 |
+| **Data** | `playbook_test/customer_survey.xlsx`（200 行，6 类服务，售后服务最低） |
+| **Expected** | PlaybookHintInjector 触发、hint confidence >= 0.3、正确识别售后服务 |
+| **Grader 铁律** | 有 APPROVED 策略但未注入 → <= 2 分；语义相似但 score < 0.3 → <= 2 分 |
+
+**技术验证点**：
+1. 两层匹配：task_type 预筛（<1ms）+ Mem0 语义搜索（score >= 0.3）
+2. "产品反馈分析"与"客户满意度分析"应被 Mem0 判为语义相似
+3. `<playbook_hint>` 注入到 Phase 2 用户上下文
+4. Agent 工具调用序列与策略 tool_sequence 有交集
+5. 策略是建议非强制：Agent 可选择不完全遵循
+
+### P3 — 完整闭环（跨会话）
+
+| 项 | 内容 |
+|----|------|
+| **维度** | 提取 → 确认 → 新会话注入 → 相似执行（端到端闭环） |
+| **流程** | 会话 1 分析反馈 → 自动提取 → API approve → 会话 2 分析满意度 → 策略注入 |
+| **Data** | 会话 1 用 product_feedback.xlsx，会话 2 用 customer_survey.xlsx |
+| **Expected** | 8 项验证：会话 1 正确、提取成功、approve 成功、持久化、会话 2 注入、工具相似、结果正确、usage_count 递增 |
+| **Grader 铁律** | 跨会话策略未注入 → <= 2 分（闭环断裂）；会话 2 质量显著低于会话 1 → <= 2 分 |
+
+**技术验证点**：
+1. 跨会话状态传递：会话 1 的学习结果持久化后，会话 2 能读取
+2. 状态机：DRAFT → submit_for_review → PENDING_REVIEW → approve → APPROVED
+3. WebSocket `playbook_suggestion` 事件先于 API 调用
+4. Mem0 sync 延迟：创建后需等待向量索引完成才能被搜索到
+5. `record_usage()` 在注入后被调用，usage_count 递增
+
+### P4 — 拒绝流程验证
+
+| 项 | 内容 |
+|----|------|
+| **维度** | reject → 状态变更 → 后续不注入（负向隔离） |
+| **场景** | Agent 学了个不好的策略，用户拒绝后不希望它再出现 |
+| **流程** | 会话 1 完成 → 提取 → API reject → 会话 2 相似任务 → 验证无注入 |
+| **Expected** | REJECTED 状态、会话 2 无 hint、approved 列表为空、任务仍能完成 |
+| **Grader 铁律** | 被拒绝策略仍注入 → <= 2 分（拒绝机制失效） |
+
+**技术验证点**：
+1. `find_matching_async(only_approved=True)` 应过滤掉 REJECTED 状态的策略
+2. 拒绝后 Agent 不受已拒策略影响，正常完成任务
+3. `GET /api/v1/playbook?status=approved` 返回空列表
+
+### P5 — 删除 + 清理验证
+
+| 项 | 内容 |
+|----|------|
+| **维度** | DELETE → JSON 清除 → index 清除 → 后续不命中 |
+| **场景** | 用户删除策略后，彻底从系统中移除 |
+| **流程** | 预置 APPROVED 策略 → DELETE API → 验证文件删除 → 新查询无注入 |
+| **Expected** | JSON 文件删除、index.json 清理、API 列表不含、后续无 hint |
+| **Grader 铁律** | 删除后 JSON 仍存在 → <= 2 分；删除后仍注入 → <= 2 分 |
+
+**技术验证点**：
+1. `manager.delete()` 删除内存缓存 + JSON 文件 + index.json 更新
+2. **已知风险**：`delete()` 未调用 Mem0 向量清理，P5 可能暴露此 bug
+3. 如果 Mem0 残留导致删除后仍匹配，需修复 `delete()` 增加 `_remove_from_mem0()`
+
+### P1-P5 核心差异总结
+
+```
+传统 AI 助手：
+  → 每次对话从零开始，不记得上次怎么做的
+  → 用户每次都要重复解释偏好和流程
+
+Playbook 在线学习（小搭子）：
+  → 成功完成任务 → 自动提取策略模式
+  → 用户确认"记住" → 持久化为可复用策略
+  → 下次相似任务 → 语义匹配 → 自动参考历史经验
+  → 不好的策略可以拒绝/删除，不会再出现
+  → 越用越聪明，但用户始终有控制权
+
+这就是"在线学习"的真正验证——不是看能不能记住，
+是看 (1) 能不能自动学 (2) 学了有没有用 (3) 学错了能不能改。
+```
+
+---
+
 ## 测试结果汇总模板
 
 ### 总体对比
@@ -2693,6 +2799,7 @@ Step 2: matplotlib 图表生成 → 可能因日文特殊字符失败
 | G. 垂直场景 | 5 | | | |
 | H. 产品健壮性 | 4 | | | |
 | I. RVR-B 回溯 | 4 | | | |
+| P. Playbook 学习 | 5 | | | |
 
 ### Token 消耗实测
 

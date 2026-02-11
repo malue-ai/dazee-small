@@ -25,6 +25,7 @@
 | **F. 开发者体验** | 4 | Skill 扩展 / 多模型 / 实例隔离 / 上下文工程 | **Phase 2** |
 | **G. 垂直场景** | 5 | 写稿 / 表格 / 研究 / 办公 / 隐私 | **Phase 2** |
 | **H. 产品健壮性** | 4 | 降级 / 大文件 / 多语言 / 中断恢复 | **Phase 2** |
+| **P. Playbook 学习** | 5 | 策略提取 / 确认 / 匹配注入 / 拒绝 / 删除清理 | **Phase 2** |
 
 详见 [test_cases.md](test_cases.md)
 
@@ -73,10 +74,14 @@ docs/benchmark/
     │   ├── report_q2.txt              #   Q2 报告 (~18KB)
     │   ├── competitor_analysis.md     #   竞品分析 (~20KB)
     │   └── expected_result.json       #   Q1=¥120万 精确引用验证
-    └── stress_test/                   # H2: 大文件压力测试
-        ├── large_doc_100kb.txt        #   100KB 文本
-        ├── large_data_500kb.csv       #   500KB CSV (~12000 行)
-        └── expected_result.json       #   处理策略验证
+    ├── stress_test/                   # H2: 大文件压力测试
+    │   ├── large_doc_100kb.txt        #   100KB 文本
+    │   ├── large_data_500kb.csv       #   500KB CSV (~12000 行)
+    │   └── expected_result.json       #   处理策略验证
+    └── playbook_test/                 # P1-P5: Playbook 在线学习
+        ├── product_feedback.xlsx      #   150 行用户反馈 (5 类问题)
+        ├── customer_survey.xlsx       #   200 行客户满意度 (6 类服务)
+        └── expected_result.json       #   全生命周期验证规则
 ```
 
 ## 快速开始
@@ -107,6 +112,15 @@ python scripts/run_e2e_auto.py --case G4   # 办公搭子
 python scripts/run_e2e_auto.py --case G1   # 写稿搭子（跨会话）
 python scripts/run_e2e_auto.py --case F4   # 上下文工程
 
+# ── Playbook 在线学习验证（P1-P5） ──
+
+# 逐个验证（推荐，playbook 有状态依赖）
+python scripts/run_e2e_auto.py --case P1 --provider qwen   # 提取 + 持久化
+python scripts/run_e2e_auto.py --case P2 --provider qwen   # 确认 + 匹配 + 注入
+python scripts/run_e2e_auto.py --case P3 --provider qwen   # 完整闭环（跨会话）
+python scripts/run_e2e_auto.py --case P4 --provider qwen   # 拒绝流程
+python scripts/run_e2e_auto.py --case P5 --provider qwen   # 删除 + 清理
+
 # 后台运行
 PYTHONUNBUFFERED=1 nohup python scripts/run_e2e_auto.py --clean --suite phase2_scenarios > /tmp/e2e_p2.log 2>&1 &
 ```
@@ -134,6 +148,10 @@ Agent 执行任务 → Code Grader (PASS/FAIL) + LLM Judge (诊断报告)
 | `grade_research_quality` | G3 | 润色改变原意 → ≤ 2 分 |
 | `grade_style_memory` | G1 | 跨会话风格丢失 → ≤ 2 分 |
 | `grade_context_engineering` | F4 | Q1 收入引用错误（非 ¥120 万）→ ≤ 2 分 |
+| `grade_playbook_extraction` | P1 | 有工具调用但未提取 → ≤ 2 分 |
+| `grade_playbook_application` | P2 | 有 APPROVED 策略但未注入 → ≤ 2 分 |
+| `grade_playbook_lifecycle` | P3 | 跨会话策略未注入（闭环断裂）→ ≤ 2 分 |
+| `grade_playbook_crud` | P4/P5 | 被拒绝/删除策略仍注入 → ≤ 2 分 |
 
 **设计原则**：每个 Grader 都有"铁律"——触犯即低分，不妥协。
 
@@ -192,6 +210,49 @@ Agent 执行任务 → Code Grader (PASS/FAIL) + LLM Judge (诊断报告)
 | **Data** | 无文件 |
 | **Expected** | 翻译内容与分析一致（上下文完整） |
 | **Grader** | 通用 `grade_response_quality` |
+
+### P1 — Playbook 策略提取
+
+| 项 | 内容 |
+|----|------|
+| **Query** | 分析产品反馈数据，找出 TOP3 问题 |
+| **Data** | `playbook_test/product_feedback.xlsx` (150 行, 5 类问题, 界面卡顿 35%) |
+| **Expected** | 提取触发、DRAFT 状态、JSON 落盘、tool_sequence 非空 |
+| **Grader 铁律** | 有工具调用但未提取 → ≤ 2 分 |
+
+### P2 — 策略匹配 + 注入
+
+| 项 | 内容 |
+|----|------|
+| **Query** | 分析客户满意度数据，找出最差类别 |
+| **Data** | `playbook_test/customer_survey.xlsx` (200 行, 6 类服务, 售后服务最低) |
+| **前置** | 已有 APPROVED 数据分析策略 |
+| **Expected** | Mem0 语义匹配 score >= 0.3、`<playbook_hint>` 注入 |
+| **Grader 铁律** | 有 APPROVED 策略但未注入 → ≤ 2 分 |
+
+### P3 — 完整闭环（跨会话）
+
+| 项 | 内容 |
+|----|------|
+| **流程** | 会话 1 分析反馈 → 提取 → approve → 会话 2 分析满意度 → 策略注入 |
+| **Expected** | 8 项验证：提取、确认、持久化、跨会话注入、工具相似、质量持平 |
+| **Grader 铁律** | 跨会话策略未注入 → ≤ 2 分（闭环断裂） |
+
+### P4 — 拒绝流程
+
+| 项 | 内容 |
+|----|------|
+| **流程** | 提取 → reject → 会话 2 验证不注入 |
+| **Expected** | REJECTED 状态、后续无 hint、任务仍能完成 |
+| **Grader 铁律** | 被拒绝策略仍注入 → ≤ 2 分 |
+
+### P5 — 删除 + 清理
+
+| 项 | 内容 |
+|----|------|
+| **流程** | APPROVED 策略 → DELETE → 验证 JSON 删除 + 后续无注入 |
+| **Expected** | JSON 删除、index 清理、后续无 hint |
+| **Grader 铁律** | 删除后 JSON 仍存在 → ≤ 2 分；删除后仍注入 → ≤ 2 分 |
 
 ## 合成数据生成
 

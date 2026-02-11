@@ -14,32 +14,28 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph tauri["Tauri Shell (Rust)"]
-    Window["Window Manager (1200x800)"]
-    IPC["IPC Bridge"]
-    Backend["Bundled Python Backend"]
-  end
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Tauri Shell (Rust)                                                    │
+│   Window Manager (1200x800) ──→ IPC Bridge ──→ Bundled Python Backend │
+└──────────────────────────────────────────────────────────────────────┘
 
-  subgraph vue["Vue 3 Application"]
-    Views["Views (Chat / Skills / Settings / Knowledge)"]
-    Stores["Pinia Stores (chat / conversation / agent / skill)"]
-    Composables["Composables (useChat / useSSE / useWebSocketChat / useHITL)"]
-    API["API Layer (Axios)"]
-  end
+┌──────────────────────────────────────────────────────────────────────┐
+│ Vue 3 Application                                                     │
+│                                                                       │
+│   Views (Chat / Skills / Settings / Knowledge)                        │
+│     └─→ Pinia Stores (chat / conversation / agent / skill)            │
+│           └─→ Composables (useChat / useSSE / useWebSocketChat)       │
+│                 └─→ API Layer (Axios)                                  │
+│                       ├─→ POST /api/v1/chat (SSE)                     │
+│                       ├─→ WS /api/v1/ws/chat                          │
+│                       └─→ REST endpoints                               │
+└──────────────────────────────────────────────────────────────────────┘
 
-  subgraph backend["FastAPI Backend"]
-    SSEEndpoint["POST /api/v1/chat (SSE)"]
-    WSEndpoint["WS /api/v1/ws/chat"]
-    REST["REST endpoints"]
-  end
-
-  Views --> Stores --> Composables --> API
-  API --> SSEEndpoint
-  API --> WSEndpoint
-  API --> REST
-  Window --> IPC --> Backend
+┌──────────────────────────────────────────────────────────────────────┐
+│ FastAPI Backend                                                       │
+│   SSE endpoint  ·  WebSocket endpoint  ·  REST endpoints              │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Tech Stack

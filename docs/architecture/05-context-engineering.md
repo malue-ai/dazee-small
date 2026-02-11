@@ -14,42 +14,36 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph phase1["Phase 1: System (STABLE cache)"]
-    SysRole["SystemRoleInjector — agent persona + rules"]
-    ToolDef["ToolSystemRoleProvider — tool definitions"]
-    SkillPrompt["SkillPromptInjector — active skill instructions"]
-  end
-
-  subgraph phase2["Phase 2: User Context (SESSION cache)"]
-    Memory["UserMemoryInjector — user preferences + history"]
-    Knowledge["KnowledgeInjector — relevant documents"]
-    Playbook["PlaybookInjector — strategy guidance"]
-  end
-
-  subgraph phase3["Phase 3: Runtime (DYNAMIC, no cache)"]
-    Plan["PlanInjector — current plan status"]
-    ErrorHistory["ErrorRetention — past failure lessons"]
-    TodoRewrite["TodoRewriter — goal injection at end"]
-  end
-
-  subgraph compression["Compression"]
-    ToolComp["ToolResultCompressor"]
-    HistoryDecay["Progressive History Decay"]
-    ImageStrip["Old Image Stripping"]
-  end
-
-  subgraph optimization["Optimization"]
-    CacheOpt["CacheOptimizer — KV-Cache stability"]
-    StructVar["StructuralVariation — anti-pattern-matching"]
-  end
-
-  phase1 --> LLM["LLM Context Window"]
-  phase2 --> LLM
-  phase3 --> LLM
-  compression --> LLM
-  optimization --> LLM
+```
+┌─ Phase 1: System (STABLE cache) ──────────────────────────────────┐
+│  SystemRoleInjector        — agent persona + rules                 │
+│  ToolSystemRoleProvider    — tool definitions                      │
+│  SkillPromptInjector       — active skill instructions             │
+└─────────────────────────────────┬─────────────────────────────────┘
+                                  │
+┌─ Phase 2: User Context (SESSION cache) ───────────────────────────┐
+│  UserMemoryInjector        — user preferences + history            │
+│  KnowledgeInjector         — relevant documents                    │
+│  PlaybookHintInjector      — strategy guidance                     │
+└─────────────────────────────────┬─────────────────────────────────┘
+                                  │
+┌─ Phase 3: Runtime (DYNAMIC, no cache) ────────────────────────────┐
+│  PlanInjector              — current plan status                   │
+│  ErrorRetention            — past failure lessons                  │
+│  TodoRewriter              — goal injection at end                 │
+└─────────────────────────────────┬─────────────────────────────────┘
+                                  │
+                                  ▼
+                     ┌──────────────────────┐
+                     │  LLM Context Window   │
+                     └──────────────────────┘
+                              ▲     ▲
+              ┌───────────────┘     └───────────────┐
+┌─ Compression ────────────────┐  ┌─ Optimization ─────────────────┐
+│  ToolResultCompressor         │  │  CacheOptimizer (KV-Cache)     │
+│  Progressive History Decay    │  │  StructuralVariation (anti-    │
+│  Old Image Stripping          │  │    pattern-matching)           │
+└───────────────────────────────┘  └────────────────────────────────┘
 ```
 
 ## Three-Phase Injection

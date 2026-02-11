@@ -2,7 +2,7 @@
 
 > Three-layer grading (code + model + human), automated E2E pipeline, runtime failure detection, and token audit — ensuring agent quality is measurable and improvable.
 
-[< Prev: Instance & Config](10-instance-and-config.md) | [Back to Overview](README.md)
+[< Prev: Instance & Config](10-instance-and-config.md) | [Back to Overview](README.md) | [Next: Playbook Online Learning >](12-playbook-learning.md)
 
 ---
 
@@ -14,34 +14,29 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph grading["Three-Layer Grading"]
-    Code["Code Grader (deterministic)"]
-    Model["Model Grader (LLM-as-Judge)"]
-    Human["Human Review"]
-  end
+```
+┌─ Three-Layer Grading ─────────────────────────────────────────────┐
+│  Code Grader (deterministic)    — PASS/FAIL authority              │
+│  Model Grader (LLM-as-Judge)    — quality scores, advisory         │
+│  Human Review                   — final judgment on edge cases     │
+└───────────────────────────────────────────────────────────────────┘
 
-  subgraph pipeline["E2E Pipeline"]
-    Runner["run_e2e_auto.py"]
-    Suites["Test Suites (phase1/2/3)"]
-    Reports["JSON + Markdown Reports"]
-  end
-
-  subgraph runtime["Runtime Monitoring"]
-    FailureDetector["FailureDetector (12 types)"]
-    TokenAuditor["TokenAuditor"]
-    QualityScanner["QualityScanner"]
-  end
-
-  subgraph feedback["Feedback Loop"]
-    Regression["Auto-generated Regression Tests"]
-    Optimization["Prompt / Strategy Optimization"]
-  end
-
-  Runner --> Suites --> grading --> Reports
-  runtime --> feedback
-  Reports --> feedback
+┌─ E2E Pipeline ────────────────────────────────────────────────────┐
+│  run_e2e_auto.py ──→ Test Suites (phase1/2/3)                     │
+│       └──→ Code + Model Grading ──→ JSON + Markdown Reports       │
+└──────────────────────────────────────┬────────────────────────────┘
+                                       │
+┌─ Runtime Monitoring ─────────────────┼────────────────────────────┐
+│  FailureDetector (12 types)          │                             │
+│  TokenAuditor (multi-level)          │                             │
+│  QualityScanner                      │                             │
+└──────────────────────┬───────────────┘                             │
+                       │                                             │
+                       ▼                                             ▼
+              ┌─ Feedback Loop ─────────────────────────────────────┐
+              │  Auto-generated Regression Tests                     │
+              │  Prompt / Strategy Optimization                      │
+              └─────────────────────────────────────────────────────┘
 ```
 
 ## Three-Layer Grading
@@ -250,4 +245,4 @@ Each failure type maps to an optimization direction:
 
 ---
 
-[< Prev: Instance & Config](10-instance-and-config.md) | [Back to Overview](README.md)
+[< Prev: Instance & Config](10-instance-and-config.md) | [Back to Overview](README.md) | [Next: Playbook Online Learning >](12-playbook-learning.md)

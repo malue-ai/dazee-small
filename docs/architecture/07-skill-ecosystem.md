@@ -9,43 +9,36 @@
 ## Design Goals
 
 1. **Skills-First** — Capabilities are skills, not hard-coded features. Adding a new capability means writing a `SKILL.md` file, not modifying agent code.
-2. **Progressive unlock** — Zero-config skills work out of the box. More powerful skills unlock as users install dependencies or add API keys.
-3. **Cross-platform** — Skills declare OS compatibility. The system automatically filters based on the current platform.
+2. **Lazy allocation** — 150+ skills are registered but **zero are loaded by default**. Each request activates only the skill groups matching the user's intent — typically 0-15 skills out of 150+. This keeps token overhead proportional to what's actually needed, not to the total skill library size.
+3. **Progressive unlock** — Zero-config skills work out of the box. More powerful skills unlock as users install dependencies or add API keys.
+4. **Cross-platform** — Skills declare OS compatibility. The system automatically filters based on the current platform.
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph discovery["Discovery"]
-    InstanceSkills["Instance Skills (90+)"]
-    LibrarySkills["Library Skills (78+)"]
-    SkillRegistry["skill_registry.yaml"]
-  end
+```
+━━━ Discovery ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  subgraph loading["Loading & Status"]
-    Loader["SkillsLoader"]
-    StatusCheck["Dependency Checker"]
-  end
+  Instance Skills (90+) ──┐
+  Library Skills (78+)  ──┼──→ SkillsLoader ──→ Dependency Checker
+  skill_registry.yaml   ──┘
 
-  subgraph classification["2D Classification"]
-    OS["OS: common | darwin | win32 | linux"]
-    Dep["Dependency: builtin | lightweight | external | cloud_api"]
-  end
+━━━ 2D Classification ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  subgraph injection["Intent-Driven Injection"]
-    Intent["IntentAnalyzer.relevant_skill_groups"]
-    GroupReg["SkillGroupRegistry (20 groups)"]
-    Filter["Dynamic Filter"]
-    Prompt["Skill Prompt Builder"]
-  end
+  OS:         common | darwin | win32 | linux
+  Dependency: builtin | lightweight | external | cloud_api
 
-  InstanceSkills --> Loader
-  LibrarySkills --> Loader
-  SkillRegistry --> Loader
-  Loader --> StatusCheck
-  StatusCheck --> classification
-  classification --> GroupReg
-  Intent --> GroupReg --> Filter --> Prompt
+━━━ Intent-Driven Injection ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  IntentAnalyzer.relevant_skill_groups
+      │
+      ▼
+  SkillGroupRegistry (20 groups)
+      │
+      ▼
+  Dynamic Filter (READY + OS match)
+      │
+      ▼
+  Skill Prompt Builder ──→ injected into Phase 1 system message
 ```
 
 ## 2D Classification Matrix
@@ -77,18 +70,28 @@ This matrix serves two purposes:
 
 ## Skill Lifecycle
 
-```mermaid
-stateDiagram-v2
-  [*] --> Discovered: Scan directories
-  Discovered --> Parsed: Read SKILL.md frontmatter
-  Parsed --> StatusChecked: Check dependencies
-  StatusChecked --> READY: All deps met
-  StatusChecked --> NEED_SETUP: Missing binary/package
-  StatusChecked --> NEED_AUTH: Missing API key
-  StatusChecked --> UNAVAILABLE: Wrong OS / critical dep
-  READY --> Injected: Intent matches skill group
-  NEED_SETUP --> READY: User installs dep + refresh
-  NEED_AUTH --> READY: User adds API key + refresh
+```
+  [Scan directories]
+       │
+       ▼
+  Discovered ──→ Parsed (read SKILL.md frontmatter)
+                    │
+                    ▼
+               StatusChecked (check dependencies)
+                    │
+          ┌─────────┼──────────┬──────────────┐
+          ▼         ▼          ▼              ▼
+      ┌───────┐ ┌──────────┐ ┌──────────┐ ┌─────────────┐
+      │ READY │ │NEED_SETUP│ │NEED_AUTH │ │ UNAVAILABLE  │
+      └───┬───┘ └────┬─────┘ └────┬─────┘ │(wrong OS)   │
+          │          │            │        └─────────────┘
+          │    install dep   add API key
+          │     + refresh     + refresh
+          │          │            │
+          │          └──→ READY ←─┘
+          │
+          ▼
+      Injected (intent matches skill group)
 ```
 
 ### Status Checking
@@ -176,6 +179,66 @@ The skill injection pipeline:
 
 This means: for a simple "what's the weather" query, zero skill prompts are injected. For "analyze this Excel and make a presentation", the `data_analysis` and `writing` skill groups are injected (~1000 tokens).
 
+## Lazy Allocation — 150+ Skills, Near-Zero Overhead
+
+The key insight: **having 150+ skills costs nothing until they are needed.** Unlike systems that load all capabilities upfront, the skill ecosystem uses intent-driven lazy allocation:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Total Registered Skills: 150+                                       │
+│ Skills Loaded per Request: 0 ~ 15 (depending on intent)             │
+│ Token Cost When Idle: 0                                             │
+└─────────────────────────────────────────────────────────────────────┘
+
+Request: "1 + 1 = ?"
+  → Intent: simple, skill_groups = []
+  → Skills injected: 0
+  → Skill token cost: 0 tokens
+  → Total context cost: ~500 tokens (core tools only)
+
+Request: "帮我翻译这篇文章"
+  → Intent: medium, skill_groups = ["translation"]
+  → Skills injected: 3 (translation group)
+  → Skill token cost: ~300 tokens
+  → 147 other skills: not loaded, zero cost
+
+Request: "分析这个 Excel 数据，生成图表，然后做成 PPT"
+  → Intent: complex, skill_groups = ["data_analysis", "writing"]
+  → Skills injected: ~14 (2 groups)
+  → Skill token cost: ~1000 tokens
+  → 136 other skills: not loaded, zero cost
+
+Request: "打开飞书，帮我填写日报"
+  → Intent: complex, skill_groups = ["app_automation", "productivity"]
+  → Skills injected: ~20 (2 groups, largest groups)
+  → Skill token cost: ~1200 tokens
+  → 130 other skills: not loaded, zero cost
+```
+
+### Why This Matters
+
+| Approach | 10 skills | 50 skills | 150+ skills |
+|---|---|---|---|
+| **Load all upfront** | ~1500 tokens | ~7500 tokens | ~22000+ tokens (context overflow) |
+| **Lazy allocation** | 0-1000 tokens | 0-1000 tokens | 0-1200 tokens (same cost) |
+
+With lazy allocation, the skill library can grow to 500+ skills without any impact on simple queries. The token cost scales with **task complexity**, not library size.
+
+### Three-Layer Filtering Pipeline
+
+```
+150+ registered skills
+    │
+    ├─ OS filter ──────────→ exclude wrong-platform skills (e.g. darwin-only on Windows)
+    │
+    ├─ Intent filter ──────→ only load skill groups matching user intent
+    │
+    ├─ Status filter ──────→ only inject READY skills (deps met)
+    │                        (NEED_SETUP/NEED_AUTH listed as hints, not full prompt)
+    │
+    └─→ Final injected: 0 ~ 20 skills, ~0 ~ 1200 tokens
+```
+
 ## Developer Extension
 
 Adding a new skill:
@@ -225,8 +288,10 @@ mkdir instances/xiaodazi/skills/my-skill/tools/
 
 ## Highlights
 
+- **Lazy allocation** — 150+ skills registered, 0 loaded by default. Token cost scales with task complexity (~0-1200 tokens), not library size. The library can grow to 500+ skills without impacting simple queries.
+- **2D classification** — Every skill classified along OS compatibility (4 values) × dependency complexity (4 values). Enables platform-aware filtering and progressive unlock in a single taxonomy.
 - **Zero-code extension** — Writing a `SKILL.md` is enough to add a new capability. No Python code required for prompt-only skills.
-- **Progressive unlock** — The system works with zero config (`builtin` skills), and unlocks more as users invest in setup.
+- **Progressive unlock** — The system works with zero config (`builtin` skills), and unlocks more as users invest in setup. Users see a clear upgrade path from "instant" to "powerful."
 - **Intent-aware injection** — Only relevant skills are injected, keeping the context lean. A "translate" request doesn't load PPT-generation instructions.
 - **Runtime refresh** — Users can install a dependency, click "refresh" in the Skills UI, and the skill becomes available immediately.
 

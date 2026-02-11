@@ -14,36 +14,29 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph registration["Registration"]
-    CapYAML["capabilities.yaml"]
-    SkillScan["Skill Scanner (SKILL.md)"]
-    RuntimeAPI["Runtime REST API Registration"]
-  end
+```
+━━━ Registration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  subgraph registry["Two-Layer Registry"]
-    Global["CapabilityRegistry (global, singleton)"]
-    Instance["InstanceRegistry (per-instance)"]
-  end
-
-  subgraph selection["Three-Level Selection"]
-    L1Core["Level 1: Core Tools (always available)"]
-    L2Cap["Level 2: Capability Tag Matching"]
-    L3White["Level 3: Whitelist Filtering"]
-  end
-
-  subgraph execution["Execution"]
-    Executor["ToolExecutor"]
-    Compressor["ToolResultCompressor"]
-  end
-
-  CapYAML --> Global
-  SkillScan --> Global
-  RuntimeAPI --> Instance
-  Global --> selection
-  Instance --> selection
-  selection --> Executor --> Compressor
+  capabilities.yaml ──┐
+  Skill Scanner ──────┼──→ CapabilityRegistry (global, singleton)
+                      │
+  Runtime REST API ───┼──→ InstanceRegistry (per-instance)
+                      │
+━━━ Three-Level Selection ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                      │
+                      ▼
+  Level 1: Core Tools (always available)
+      │
+      ▼
+  Level 2: Capability Tag Matching (intent-driven)
+      │
+      ▼
+  Level 3: Whitelist Filtering (allowed_tools ∩ matched)
+      │
+━━━ Execution ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      │
+      ▼
+  ToolExecutor ──→ ToolResultCompressor (if > 1500 chars)
 ```
 
 ## Capability Model

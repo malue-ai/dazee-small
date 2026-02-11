@@ -19,11 +19,14 @@ Usage:
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -101,16 +104,116 @@ async def run_single_turn(
     return await adapter.chat(user_query=user_query, conversation_history=[], files=files or [])
 
 
+async def _execute_inter_session_steps(
+    steps: List[Dict[str, Any]],
+    base_url: str,
+) -> Dict[str, Any]:
+    """Execute inter-session steps (wait, API calls) between multi-session turns.
+
+    Supports:
+    - wait_seconds: N  → asyncio.sleep(N)
+    - api_call: "GET /api/v1/playbook?status=draft"  → HTTP GET, store response
+    - api_call: "POST /api/v1/playbook/{id}/action body={...}"  → HTTP POST with path substitution
+
+    Returns a context dict with extracted values (e.g. playbook_id) for path substitution.
+    """
+    import httpx
+    import json as _json
+
+    context: Dict[str, Any] = {}
+
+    for step in steps:
+        desc = step.get("description", "")
+
+        # Wait step
+        if "wait_seconds" in step:
+            wait = step["wait_seconds"]
+            logger.info(f"  [inter_session] wait {wait}s: {desc}")
+            await asyncio.sleep(wait)
+            continue
+
+        # API call step
+        api_call = step.get("api_call", "")
+        if not api_call:
+            continue
+
+        # Parse: "METHOD /path" or "METHOD /path body={...}"
+        parts = api_call.split(" body=", 1)
+        method_path = parts[0].strip()
+        body_str = parts[1].strip() if len(parts) > 1 else None
+
+        method, path = method_path.split(" ", 1)
+        method = method.upper()
+
+        # Substitute {id} with stored playbook_id from context
+        if "{id}" in path and context.get("playbook_id"):
+            path = path.replace("{id}", context["playbook_id"])
+        if "{extracted_id}" in path and context.get("playbook_id"):
+            path = path.replace("{extracted_id}", context["playbook_id"])
+
+        url = f"{base_url}{path}"
+
+        # Parse body
+        body = None
+        if body_str:
+            # Handle simplified format: {key:value,key2:value2}
+            body_str = body_str.strip()
+            if body_str.startswith("{") and not body_str.startswith('{"'):
+                # Convert {action:approve,reviewer:e2e_test} to proper JSON
+                body_str = body_str.replace("'", '"')
+                # Add quotes around keys and simple values
+                import re
+                body_str = re.sub(r'(\w+):', r'"\1":', body_str)
+                body_str = re.sub(r':(\w[\w_]*)', r':"\1"', body_str)
+            try:
+                body = _json.loads(body_str)
+            except _json.JSONDecodeError:
+                logger.warning(f"  [inter_session] invalid body: {body_str}")
+                body = None
+
+        logger.info(f"  [inter_session] {method} {path}: {desc}")
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if method == "GET":
+                    resp = await client.get(url)
+                elif method == "POST":
+                    resp = await client.post(url, json=body or {})
+                elif method == "DELETE":
+                    resp = await client.delete(url)
+                else:
+                    logger.warning(f"  [inter_session] unsupported method: {method}")
+                    continue
+
+            resp_data = resp.json() if resp.status_code == 200 else {}
+            logger.info(f"  [inter_session] → {resp.status_code}")
+
+            # Extract playbook_id from list responses for path substitution
+            if "playbook" in path and method == "GET":
+                entries = resp_data.get("entries", [])
+                if entries:
+                    # Use the most recent entry
+                    context["playbook_id"] = entries[0].get("id", "")
+                    logger.info(f"  [inter_session] extracted playbook_id={context['playbook_id']}")
+
+        except Exception as e:
+            logger.warning(f"  [inter_session] API call failed: {e}")
+
+    return context
+
+
 async def run_multi_turn(
     sequence: List[Dict[str, Any]],
     base_url: str,
     user_id: str,
     files: Optional[List[Dict[str, Any]]] = None,
+    inter_session_steps: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Run multiple turns; new_conversation=true starts a new conversation.
 
     Args:
         files: File refs (from resolve_files) to attach to the FIRST turn only.
+        inter_session_steps: API calls to execute between sessions (e.g. approve playbook).
     """
     from evaluation.adapters.http_agent import HttpAgentAdapter
     from evaluation.models import Message, TokenUsage, ToolCall
@@ -122,12 +225,33 @@ async def run_multi_turn(
     conversation_id: Optional[str] = None
     last_conv_id: Optional[str] = None
     is_first_turn = True
+    inter_steps_executed = False
 
     for step in sequence:
         new_conv = step.get("new_conversation", True)
         query = step.get("user_query", "")
         if not query:
             continue
+
+        # Execute inter_session_steps between conversations (after first session ends)
+        if new_conv and not is_first_turn and inter_session_steps and not inter_steps_executed:
+            logger.info(f"  [inter_session] executing {len(inter_session_steps)} steps...")
+            await _execute_inter_session_steps(inter_session_steps, base_url)
+            inter_steps_executed = True
+
+        # Resolve per-step files if specified
+        step_files = step.get("files")
+        if step_files and is_first_turn:
+            # First turn uses pre-resolved files
+            turn_files = files
+        elif step_files and not is_first_turn:
+            # Subsequent turns with files: resolve them
+            turn_files = resolve_files(
+                PROJECT_ROOT, step_files, base_url=base_url, user_id=user_id
+            )
+        else:
+            turn_files = files if is_first_turn and files else None
+
         conv_id = None if new_conv else conversation_id
         adapter = HttpAgentAdapter(
             base_url=base_url,
@@ -288,12 +412,14 @@ async def run_case(
     ) if (task.input.files) else []
 
     sequence = (task.metadata or {}).get("multi_turn_sequence")
+    inter_steps = (task.metadata or {}).get("inter_session_steps")
     if sequence:
         result = await run_multi_turn(
             sequence,
             base_url=base_url,
             user_id=user_id,
             files=files_refs if files_refs else None,
+            inter_session_steps=inter_steps,
         )
     else:
         result = await run_single_turn(

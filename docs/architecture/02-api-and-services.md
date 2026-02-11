@@ -14,50 +14,36 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph clients["Clients"]
-    Browser["Browser (SSE / WS)"]
-    Telegram["Telegram Bot"]
-    Feishu["Feishu Bot"]
-  end
-
-  subgraph routers["Routers (Protocol Layer)"]
-    ChatRouter["chat.py — POST /api/v1/chat"]
-    WSRouter["websocket.py — WS /api/v1/ws/chat"]
-    ConvRouter["conversation.py — CRUD"]
-    SkillRouter["skills.py — Skill management"]
-    SettingsRouter["settings.py — Config management"]
-    GatewayRouter["gateway.py — Gateway status"]
-  end
-
-  subgraph services["Services (Business Logic)"]
-    ChatService["ChatService"]
-    SessionService["SessionService"]
-    ConvService["ConversationService"]
-    SettingsService["SettingsService"]
-    AgentRegistry["AgentRegistry"]
-  end
-
-  subgraph gateway["Gateway"]
-    ChannelManager["ChannelManager"]
-    Bridge["GatewayBridge"]
-    SessionMapper["SessionMapper"]
-  end
-
-  subgraph core["Core Engine"]
-    Agent["Agent (RVR-B)"]
-  end
-
-  Browser --> ChatRouter --> ChatService
-  Browser --> WSRouter --> ChatService
-  Telegram --> ChannelManager --> Bridge --> ChatService
-  Feishu --> ChannelManager
-  ChatService --> SessionService
-  ChatService --> AgentRegistry --> Agent
-  ConvRouter --> ConvService
-  SkillRouter --> ChatService
-  SettingsRouter --> SettingsService
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Clients                                                             │
+│   Browser (SSE / WS)    Telegram Bot    Feishu Bot                  │
+└──────┬──────────┬───────────┬──────────────┬────────────────────────┘
+       │          │           │              │
+       ▼          ▼           ▼              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Routers (Protocol Layer)                                            │
+│                                                                     │
+│   chat.py ─── POST /api/v1/chat          conversation.py ── CRUD   │
+│   websocket.py ── WS /api/v1/ws/chat     skills.py ── Skill mgmt  │
+│   gateway.py ── Gateway status            settings.py ── Config    │
+└──────┬──────────┬─────────────────────┬─────────────┬──────────────┘
+       │          │                     │             │
+       ▼          ▼                     ▼             ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Services (Business Logic)                                           │
+│                                                                     │
+│   ChatService ──→ SessionService      ConversationService           │
+│       │                               SettingsService               │
+│       └──→ AgentRegistry                                            │
+│                 │                                                    │
+└─────────────────┼───────────────────────────────────────────────────┘
+                  ▼
+┌─────────────────────────┐    ┌──────────────────────────────────────┐
+│ Core Engine              │    │ Gateway                              │
+│   Agent (RVR-B)          │◄───│   ChannelManager → GatewayBridge     │
+└──────────────────────────┘    │       → SessionMapper → ChatService  │
+                                └──────────────────────────────────────┘
 ```
 
 ## Three-Layer Architecture
@@ -77,24 +63,20 @@ This separation means:
 
 Every chat request passes through a preprocessing pipeline before reaching the agent:
 
-```mermaid
-sequenceDiagram
-  participant Router
-  participant ChatService
-  participant PreprocessingHandler
-  participant IntentAnalyzer
-  participant SessionService
-  participant Agent
-
-  Router->>ChatService: chat(request)
-  ChatService->>PreprocessingHandler: process(messages)
-  PreprocessingHandler->>IntentAnalyzer: analyze(messages)
-  IntentAnalyzer-->>PreprocessingHandler: IntentResult
-  PreprocessingHandler-->>ChatService: intent + preface
-
-  ChatService->>SessionService: get_or_create_session()
-  ChatService->>Agent: execute(messages, intent)
-  Agent-->>ChatService: Stream events
+```
+Router → ChatService.chat(request)
+           │
+           ├─→ PreprocessingHandler.process(messages)
+           │       │
+           │       ├─→ IntentAnalyzer.analyze(messages)
+           │       │       └──→ IntentResult
+           │       │
+           │       └──→ intent + preface
+           │
+           ├─→ SessionService.get_or_create_session()
+           │
+           └─→ Agent.execute(messages, intent)
+                   └──→ Stream events back to ChatService
 ```
 
 The `PreprocessingHandler` performs:
@@ -169,28 +151,13 @@ Key behaviors:
 
 The gateway system bridges external messaging platforms to the internal `ChatService`:
 
-```mermaid
-graph LR
-  subgraph channels["Channel Adapters"]
-    TG["Telegram (long polling)"]
-    FS["Feishu (WebSocket)"]
-  end
-
-  subgraph gateway["Gateway Core"]
-    CM["ChannelManager"]
-    Bridge["GatewayBridge"]
-    SM["SessionMapper"]
-  end
-
-  subgraph internal["Internal"]
-    CS["ChatService"]
-  end
-
-  TG --> CM
-  FS --> CM
-  CM --> Bridge
-  Bridge --> SM
-  SM --> CS
+```
+┌─────────────────────┐     ┌───────────────────────────────┐     ┌─────────────┐
+│ Channel Adapters     │     │ Gateway Core                  │     │ Internal    │
+│                     │     │                               │     │             │
+│  Telegram (polling) ─┼──→  ChannelManager ──→ GatewayBridge ──→  │ ChatService │
+│  Feishu (WebSocket) ─┤     │       └──→ SessionMapper ────┼──→  │             │
+└─────────────────────┘     └───────────────────────────────┘     └─────────────┘
 ```
 
 ### Flow

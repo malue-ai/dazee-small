@@ -14,40 +14,28 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph agent["Agent (base.py)"]
-    Orchestrator["Orchestrator"]
-    ToolSelect["Tool Selection"]
-    ContextInject["Context Injection"]
-  end
-
-  subgraph executor["RVR-B Executor"]
-    React["React: LLM generates response + tool calls"]
-    Validate["Validate: Check tool results"]
-    Reflect["Reflect: Classify errors, decide next action"]
-    Backtrack["Backtrack: Revert context, try alternative"]
-  end
-
-  subgraph support["Support Systems"]
-    Terminator["AdaptiveTerminator"]
-    CircuitBreaker["Two-Level Circuit Breaker"]
-    StateManager["StateConsistencyManager"]
-    ErrorClassifier["ErrorClassifier"]
-  end
-
-  Orchestrator --> ToolSelect
-  Orchestrator --> ContextInject
-  Orchestrator --> React
-  React --> Validate
-  Validate -->|success| React
-  Validate -->|error| Reflect
-  Reflect -->|CONTINUE| React
-  Reflect -->|BACKTRACK| Backtrack --> React
-  Reflect -->|FAIL_GRACEFULLY| Terminator
-  Reflect -->|ESCALATE| Terminator
-  CircuitBreaker --> Reflect
-  StateManager --> Backtrack
+```
+┌─ Agent (base.py) ──────────────────────────────────────────────────┐
+│  Orchestrator ──→ Tool Selection                                    │
+│       │      ──→ Context Injection                                  │
+│       ▼                                                             │
+│  ┌─ RVR-B Executor ───────────────────────────────────────────┐    │
+│  │                                                             │    │
+│  │  ┌──→ REACT ──→ VALIDATE ──┐                                │    │
+│  │  │     (LLM)    (tools)    │                                │    │
+│  │  │                         │                                │    │
+│  │  │    success ─────────────┘ (loop back to REACT)           │    │
+│  │  │                                                          │    │
+│  │  │    error ──→ REFLECT ──┬─ CONTINUE ──→ (back to REACT)  │    │
+│  │  │              (classify) ├─ BACKTRACK ──→ clean context ──┘    │
+│  │  │                        ├─ FAIL_GRACEFULLY ──→ Terminator │    │
+│  │  │                        └─ ESCALATE ─────────→ Terminator │    │
+│  │  └────────────────────────────────────────────────────────  │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│  Support: AdaptiveTerminator · CircuitBreaker · StateManager        │
+│           ErrorClassifier                                           │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Strategy Pattern

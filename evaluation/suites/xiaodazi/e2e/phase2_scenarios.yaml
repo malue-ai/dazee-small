@@ -375,3 +375,243 @@ tasks:
         PARAM_ADJUST → 仍失败 → TOOL_REPLACE → 仍失败 → PLAN_REPLAN →
         最终列出可解析配置项 或 优雅失败。
         关键：至少 2 次回溯（升级链），不超过 5 次（死循环防护）。
+
+  # ================================================================
+  # P1-P5 — Playbook 在线学习全生命周期验证
+  # 亮点："越用越聪明" — Agent 从成功经验中学习可复用策略
+  # ================================================================
+
+  # ================================================================
+  # P1 — 策略提取 + 持久化验证
+  # 验证：提取触发 → JSON 落盘 → Mem0 索引 → WebSocket 推送
+  # ================================================================
+  - id: P1
+    description: "Playbook 提取 — 成功会话自动提取策略并持久化"
+    category: e2e_playbook_learning
+    input:
+      user_query: >
+        帮我分析这份产品反馈数据，找出用户最不满意的 3 个方面，
+        按问题类别统计数量和占比，给出改进建议。
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/playbook_test/product_feedback.xlsx"
+    expected_outcome:
+      extraction_triggered: true
+      playbook_status: "draft"
+      tool_sequence_not_empty: true
+      json_persisted: true
+      top_issue: "界面卡顿"
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_playbook_extraction
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "playbook", "extraction", "persistence"]
+    metadata:
+      expected_behavior: >
+        Agent 读取 product_feedback.xlsx → 使用数据分析工具 → 输出分析报告。
+        会话完成后：
+        1. playbook_extraction 后台任务触发（助手回复 >= 100 字符 + 工具调用 >= 1）
+        2. 新 PlaybookEntry 创建（status=draft, source=auto）
+        3. JSON 文件写入 data/instances/xiaodazi/playbooks/{id}.json
+        4. index.json 更新包含新 ID
+        5. playbook_suggestion 事件通过 WebSocket 推送
+        6. tool_sequence 包含实际使用的工具名
+        7. 分析结果正确：界面卡顿是 TOP1 问题（占比 ~35%）
+
+  # ================================================================
+  # P2 — 确认 + 索引匹配 + 策略注入
+  # 验证：approve → Mem0 语义匹配 → <playbook_hint> 注入 → 相似执行
+  # ================================================================
+  - id: P2
+    description: "Playbook 应用 — APPROVED 策略语义匹配并注入相似任务"
+    category: e2e_playbook_learning
+    input:
+      user_query: >
+        分析这份客户满意度调查数据，找出满意度最低的服务类别，
+        给出优先改进排序和具体建议。
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先创建并 approve 一个数据分析类策略（或复用 P1 提取的）"
+      files:
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      playbook_hint_injected: true
+      match_score_gte: 0.3
+      lowest_category: "售后服务"
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_playbook_application
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "playbook", "matching", "injection", "application"]
+    metadata:
+      setup_steps:
+        - description: "创建 APPROVED 策略（数据分析类）"
+          api_calls:
+            - note: "通过 P1 提取或直接 API 创建 APPROVED PlaybookEntry"
+            - note: "等待 Mem0 sync 完成"
+            - note: "验证 GET /api/v1/playbook?status=approved 返回 >= 1 条"
+      expected_behavior: >
+        前置：已有 APPROVED 的数据分析策略（包含 tool_sequence）。
+        1. PlaybookHintInjector 触发（Phase 2, priority 80）
+        2. Mem0 语义搜索："客户满意度分析" vs "产品反馈分析" → score >= 0.3
+        3. <playbook_hint> 注入 Agent 上下文
+        4. Agent 参考策略执行（工具序列有交集）
+        5. 正确识别"售后服务"为满意度最低类别
+        6. 分析质量不因策略注入而下降
+
+  # ================================================================
+  # P3 — 完整闭环（跨会话提取 → 确认 → 注入 → 相似执行）
+  # 最严格的端到端验证
+  # ================================================================
+  - id: P3
+    description: "Playbook 闭环 — 跨会话：提取→确认→注入→相似执行"
+    category: e2e_playbook_learning
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/playbook_test/product_feedback.xlsx"
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      session1_top_issue: "界面卡顿"
+      extraction_success: true
+      approve_success: true
+      session2_hint_injected: true
+      session2_lowest_category: "售后服务"
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_playbook_lifecycle
+        min_score: 3
+    trials: 1
+    timeout_seconds: 900
+    tags: ["e2e", "playbook", "lifecycle", "cross_session", "demo"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "帮我分析这份产品反馈数据，按问题类别统计数量，给出 TOP3 问题和改进建议"
+          files: ["docs/benchmark/data/playbook_test/product_feedback.xlsx"]
+        - new_conversation: true
+          user_query: "分析这份客户满意度数据，找出最差的服务类别和改进优先级"
+          files: ["docs/benchmark/data/playbook_test/customer_survey.xlsx"]
+      inter_session_steps:
+        - description: "会话 1 完成后等待 playbook_extraction 后台任务"
+          wait_seconds: 10
+        - description: "获取提取的 playbook ID"
+          api_call: "GET /api/v1/playbook?status=draft&source=auto"
+        - description: "确认策略"
+          api_call: "POST /api/v1/playbook/{id}/action body={action:approve,reviewer:e2e_test}"
+        - description: "验证 APPROVED 状态"
+          api_call: "GET /api/v1/playbook?status=approved"
+      expected_behavior: >
+        会话 1：分析 product_feedback.xlsx → 正确识别 TOP1=界面卡顿 →
+        playbook_extraction 触发 → DRAFT 条目创建。
+        中间步骤：等待提取完成 → API approve → APPROVED。
+        会话 2：分析 customer_survey.xlsx → PlaybookHintInjector 匹配注入 →
+        <playbook_hint> 出现在上下文 → Agent 参考策略 →
+        正确识别"售后服务"为最低 → 工具调用与会话 1 相似。
+        关键：跨会话策略注入是闭环核心，未注入 = 闭环断裂。
+
+  # ================================================================
+  # P4 — 拒绝 / 忽略流程验证
+  # 验证：reject → 状态变更 → 后续不注入
+  # ================================================================
+  - id: P4
+    description: "Playbook 拒绝 — 被拒绝的策略不应注入到未来会话"
+    category: e2e_playbook_learning
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/playbook_test/product_feedback.xlsx"
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      reject_status: "rejected"
+      session2_hint_absent: true
+      session2_task_completed: true
+    graders:
+      - type: model
+        rubric: grade_playbook_crud
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "playbook", "reject", "negative_test"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "帮我分析这份产品反馈数据的问题分布"
+          files: ["docs/benchmark/data/playbook_test/product_feedback.xlsx"]
+        - new_conversation: true
+          user_query: "分析这份客户满意度数据，找出最差的类别"
+          files: ["docs/benchmark/data/playbook_test/customer_survey.xlsx"]
+      inter_session_steps:
+        - description: "等待提取"
+          wait_seconds: 10
+        - description: "拒绝策略"
+          api_call: "POST /api/v1/playbook/{id}/action body={action:reject,reviewer:e2e_test,notes:策略不适用}"
+        - description: "验证 REJECTED 状态"
+          api_call: "GET /api/v1/playbook/{id}"
+      expected_behavior: >
+        会话 1：正常完成 → 策略提取。
+        中间步骤：API reject → REJECTED。
+        会话 2：相似任务 → 验证无 <playbook_hint> 注入（REJECTED 策略不应被匹配）。
+        会话 2 仍能正常完成分析（不依赖策略）。
+        铁律：被拒绝策略仍注入 → 拒绝机制失效。
+
+  # ================================================================
+  # P5 — 删除 + 清理验证
+  # 验证：delete → JSON 清除 → index 清除 → 后续不命中
+  # ================================================================
+  - id: P5
+    description: "Playbook 删除 — 删除后 JSON 清除且不再匹配注入"
+    category: e2e_playbook_learning
+    input:
+      user_query: "分析这份客户满意度数据，找出改进方向"
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先创建并 approve 一个策略，然后 DELETE 它"
+      files:
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      delete_success: true
+      json_file_absent: true
+      index_cleaned: true
+      hint_absent: true
+    graders:
+      - type: model
+        rubric: grade_playbook_crud
+        min_score: 3
+    trials: 1
+    timeout_seconds: 300
+    tags: ["e2e", "playbook", "delete", "cleanup", "negative_test"]
+    metadata:
+      setup_steps:
+        - description: "创建 APPROVED 策略（复用 P3 流程或 API 预置）"
+        - description: "DELETE /api/v1/playbook/{id}"
+        - description: "验证 JSON 文件已删除"
+        - description: "验证 index.json 不含该 ID"
+        - description: "验证 GET /api/v1/playbook 列表不含该条目"
+      expected_behavior: >
+        前置：已有 APPROVED 策略 → DELETE → 验证清理。
+        1. DELETE 返回 200 success
+        2. JSON 文件从 playbooks/ 目录消失
+        3. index.json 不含该 ID
+        4. API 列表不含该条目
+        5. 后续查询无 <playbook_hint> 注入
+        manager.delete() 已同步清理 Mem0 向量索引（_delete_from_mem0），
+        删除后 Mem0 搜索不应命中该条目。

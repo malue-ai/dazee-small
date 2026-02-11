@@ -14,51 +14,37 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph write["Write Path (Dual-Write)"]
-    Remember["remember()"]
-    MD["MEMORY.md (Source of Truth)"]
-    FTS["FTS5 Index (Keywords)"]
-    Mem0["Mem0 Pool (Semantic Vectors)"]
-  end
+```
+━━━ Write Path (Dual-Write) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  subgraph read["Read Path (Fusion Search)"]
-    Recall["recall(query)"]
-    FTSSearch["FTS5 Keyword Search"]
-    Mem0Search["Mem0 Semantic Search"]
-    MDRead["MEMORY.md Full Read"]
-    Fusion["Weighted Merge + Dedup"]
-  end
+  remember(content, category)
+      ├──→ MEMORY.md  (Source of Truth, user-visible)
+      ├──→ FTS5 Index (keyword search)
+      └──→ Mem0 Pool  (semantic vectors)
 
-  subgraph injection["Injection"]
-    Injector["UserMemoryInjector"]
-    MDFetch["Markdown Fetch (60% budget)"]
-    Mem0Fetch["Mem0 Fetch (40% budget)"]
-    FTSCategory["FTS5 Category Recall"]
-  end
+━━━ Read Path (Fusion Search) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  subgraph extraction["Automatic Extraction"]
-    Flush["flush() — session end"]
-    Extractor["FragmentExtractor"]
-    DailyLog["Daily Log"]
-  end
+  recall(query)
+      ├──→ FTS5 Keyword Search (BM25) ──┐
+      └──→ Mem0 Semantic Search ─────────┼──→ Weighted Merge + Dedup
+                                         │
+                                         ▼
+                                    Top-K results
 
-  Remember --> MD
-  Remember --> FTS
-  Remember --> Mem0
+━━━ Injection (Phase 2) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Recall --> FTSSearch
-  Recall --> Mem0Search
-  FTSSearch --> Fusion
-  Mem0Search --> Fusion
+  UserMemoryInjector (asyncio.gather, 3 parallel fetches)
+      ├──→ MEMORY.md full read       (60% budget, ~900 chars)
+      ├──→ Mem0 semantic search      (40% budget)
+      └──→ FTS5 category recall      ("style" + "preference")
 
-  Injector --> MDFetch
-  Injector --> Mem0Fetch
-  Injector --> FTSCategory
+  Total budget: ~1500 chars (~500 tokens)
 
-  Flush --> Extractor --> Remember
-  Flush --> DailyLog
+━━━ Automatic Extraction ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  flush() — session end
+      ├──→ FragmentExtractor ──→ remember() (writes to all 3 layers)
+      └──→ Daily Log
 ```
 
 ## Three Layers

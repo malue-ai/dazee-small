@@ -14,42 +14,38 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph instance["Instance Directory"]
-    Prompt["prompt.md (persona definition)"]
-    Config["config.yaml (explicit overrides)"]
-    SkillsYAML["config/skills.yaml"]
-    LLMProfiles["config/llm_profiles.yaml"]
-    MemoryYAML["config/memory.yaml"]
-    Skills["skills/ (150+ skill directories)"]
-  end
-
-  subgraph generation["Schema Generation (one-time)"]
-    LLMAnalyzer["LLM Analyzer"]
-    Schema["agent_schema.yaml (cached)"]
-    GradedPrompts["simple/medium/complex_prompt.md"]
-  end
-
-  subgraph loading["Instance Loading"]
-    Loader["create_agent_from_instance()"]
-    Merge["Config Priority Merge"]
-    Agent["Configured Agent"]
-  end
-
-  subgraph storage["Isolated Storage"]
-    DB["data/instances/{name}/db/"]
-    Memory["data/instances/{name}/memory/"]
-    Store["data/instances/{name}/store/"]
-    Snapshots["data/instances/{name}/snapshots/"]
-  end
-
-  Prompt --> LLMAnalyzer --> Schema
-  LLMAnalyzer --> GradedPrompts
-  Config --> Merge
-  Schema --> Merge
-  Merge --> Loader --> Agent
-  Agent --> storage
+```
+┌─ Instance Directory ──────────────────────────────────────────────┐
+│  prompt.md              (persona definition)                       │
+│  config.yaml            (explicit overrides)                       │
+│  config/skills.yaml     (skill groups)                             │
+│  config/llm_profiles.yaml (provider templates)                     │
+│  config/memory.yaml     (memory config)                            │
+│  skills/                (150+ skill directories)                   │
+└─────┬──────────────────────┬──────────────────────────────────────┘
+      │                      │
+      ▼                      ▼
+┌─ Schema Generation ──┐   ┌─ Instance Loading ────────────────────┐
+│ (one-time)            │   │                                       │
+│  prompt.md            │   │  Config Priority Merge:               │
+│    │                  │   │    Tier 1: Framework defaults          │
+│    ▼                  │   │      ↓ overridden by                  │
+│  LLM Analyzer         │   │    Tier 2: agent_schema.yaml ◄────────┤
+│    ├──→ agent_schema  │───┤      ↓ overridden by                  │
+│    └──→ simple/medium/│   │    Tier 3: config.yaml                │
+│         complex_prompt│   │                                       │
+└───────────────────────┘   │  create_agent_from_instance()         │
+                            │    └──→ Configured Agent              │
+                            └──────────────┬────────────────────────┘
+                                           │
+                                           ▼
+                            ┌─ Isolated Storage ────────────────────┐
+                            │  data/instances/{name}/db/             │
+                            │  data/instances/{name}/memory/         │
+                            │  data/instances/{name}/store/          │
+                            │  data/instances/{name}/snapshots/      │
+                            │  data/instances/{name}/playbooks/      │
+                            └───────────────────────────────────────┘
 ```
 
 ## Prompt-Driven Schema

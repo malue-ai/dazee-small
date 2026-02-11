@@ -745,6 +745,232 @@ grade_intent_understanding: |
   }
   ```
 
+# ==================== Playbook 在线学习验证（P1-P5） ====================
+
+grade_playbook_extraction: |
+  你是 Playbook 在线学习系统的评估专家。评估策略提取（extraction）环节是否正确工作。
+
+  ## 背景
+
+  Playbook 系统在成功会话（有工具调用、助手回复 >= 100 字符）后，自动提取可复用策略。
+  提取结果保存为 JSON 文件 + Mem0 向量索引，前端通过 WebSocket 收到 playbook_suggestion 事件。
+
+  ## 评估维度（各占权重）
+
+  1. **提取触发**（30%）：会话满足提取条件时，playbook_extraction 后台任务是否触发？
+     - 前置条件：助手回复 >= 100 字符、用户消息 >= 10 字符、至少 1 次工具调用
+     - 铁律：满足条件但未触发提取 → 此维度 <= 1 分
+
+  2. **策略质量**（30%）：提取的 PlaybookEntry 是否合理？
+     - tool_sequence 是否非空且反映实际使用的工具
+     - trigger.task_types 是否与任务类型一致
+     - 铁律：tool_sequence 为空 → 此维度 <= 1 分
+
+  3. **持久化完整**（20%）：JSON 文件是否落盘？index.json 是否更新？
+     - 检查 data/instances/{name}/playbooks/{id}.json 是否存在
+     - 检查 index.json 的 entries 列表是否包含该 ID
+     - 铁律：JSON 未落盘 → 此维度 <= 1 分
+
+  4. **事件推送**（20%）：playbook_suggestion 事件是否通过 WebSocket 推送？
+     - 检查服务端日志中是否有 "Playbook suggestion emitted" 或等效记录
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "extraction_diagnosis": {
+      "trigger_fired": {"score": 1-5, "evidence": "<触发证据>"},
+      "strategy_quality": {"score": 1-5, "tool_sequence": "<提取到的工具序列>"},
+      "persistence": {"score": 1-5, "json_exists": true/false, "index_updated": true/false},
+      "event_push": {"score": 1-5, "suggestion_pushed": true/false}
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+grade_playbook_application: |
+  你是 Playbook 策略应用系统的评估专家。评估已确认策略的索引匹配和上下文注入是否正确工作。
+
+  ## 背景
+
+  当用户发起新任务时，PlaybookHintInjector（Phase 2）查找已 APPROVED 的策略：
+  - Layer 1: task_type 预筛（确定性，<1ms）
+  - Layer 2: Mem0 语义搜索（向量相似度，score >= 0.3）
+  - 匹配成功后注入 <playbook_hint> 到 Agent 上下文
+
+  ## 评估维度
+
+  1. **匹配触发**（25%）：有 APPROVED 策略时，PlaybookHintInjector 是否被触发？
+     - 铁律：有 APPROVED 策略但未触发注入 → 此维度 <= 1 分
+
+  2. **语义匹配质量**（25%）：两个数据分析任务是否被正确匹配？
+     - "产品反馈分析" 和 "客户满意度分析" 语义高度相似（均为表格数据分析）
+     - 匹配 score 应 >= 0.3
+     - 铁律：语义明显相似但 score < 0.3 → 此维度 <= 1 分
+
+  3. **策略参考**（25%）：Agent 是否参考了注入的策略？
+     - 工具调用序列与策略 tool_sequence 有交集
+     - 注意：策略是建议，不强制。Agent 有更好方案也可以
+
+  4. **结果质量**（25%）：策略辅助下的分析结果是否正确？
+     - 正确识别关键结论（如"售后服务"满意度最低）
+     - 铁律：注入策略后分析质量显著下降 → 此维度 <= 1 分
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "application_diagnosis": {
+      "injection_triggered": {"score": 1-5, "hint_present": true/false, "confidence_score": 0-1},
+      "semantic_match": {"score": 1-5, "match_score": 0-1, "match_reasoning": "<匹配逻辑>"},
+      "strategy_reference": {"score": 1-5, "tool_overlap": [], "agent_followed_hint": true/false},
+      "result_quality": {"score": 1-5, "correct_conclusion": true/false, "evidence": "<分析结论>"}
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+grade_playbook_lifecycle: |
+  你是 Playbook 全生命周期评估专家。评估跨会话的完整闭环：提取 → 确认 → 注入 → 相似执行。
+
+  ## 背景
+
+  这是 Playbook 最严格的端到端验证：
+  - 会话 1：Agent 完成数据分析任务（使用工具） → 策略自动提取（DRAFT）
+  - 中间步骤：通过 API 确认策略（DRAFT → APPROVED）
+  - 会话 2：用户发起相似任务 → 策略被注入 → Agent 参考策略执行 → 质量持平或提升
+
+  ## 评估维度
+
+  1. **会话 1 质量**（20%）：Agent 是否成功完成第一个分析任务？
+     - 正确识别 TOP 问题（如"界面卡顿"占比最高）
+
+  2. **提取 + 确认**（20%）：策略是否成功提取并通过 API 确认？
+     - DRAFT → approve → APPROVED 状态转换正确
+     - 铁律：approve 后 status 不是 APPROVED → 此维度 <= 1 分
+
+  3. **跨会话注入**（30%）：会话 2 中策略是否被注入？
+     - <playbook_hint> 出现在 Agent 上下文中
+     - 铁律：跨会话策略未注入 → 此维度 <= 1 分（闭环断裂）
+
+  4. **相似执行质量**（30%）：会话 2 的分析质量是否与会话 1 持平？
+     - 正确识别"售后服务"为最低满意度类别
+     - 工具调用序列与会话 1 相似（策略复用）
+     - 铁律：会话 2 质量显著低于会话 1 → 此维度 <= 1 分
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "lifecycle_diagnosis": {
+      "session1_quality": {"score": 1-5, "correct_answer": true/false, "top_issue": "<识别结果>"},
+      "extraction_confirmation": {"score": 1-5, "status_transition": "<DRAFT→?→APPROVED>", "api_success": true/false},
+      "cross_session_injection": {"score": 1-5, "hint_injected": true/false, "match_score": 0-1},
+      "session2_quality": {"score": 1-5, "correct_answer": true/false, "tool_similarity": 0-1}
+    },
+    "overall_score": 1-5,
+    "loop_closed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+grade_playbook_crud: |
+  你是 Playbook CRUD 操作评估专家。验证拒绝、删除等负向操作是否正确阻止策略注入。
+
+  ## 背景
+
+  挑剔用户场景：Agent 学了个不好的策略，用户拒绝后不希望它再出现。
+  或者用户删除了一个策略，后续查询不应再命中。
+
+  ## 评估维度
+
+  1. **状态转换正确**（25%）：reject / dismiss / delete 操作后状态是否正确？
+     - reject → status 变为 REJECTED
+     - dismiss → 条目被删除
+     - delete → 条目被删除 + JSON 文件不存在
+     - 铁律：reject 后 status 不是 REJECTED → 此维度 <= 1 分
+
+  2. **负向隔离**（35%）：被拒绝/删除的策略是否不再被注入？
+     - 后续相似查询中不应出现 <playbook_hint>
+     - GET /api/v1/playbook?status=approved 不应返回被拒绝/删除的条目
+     - 铁律：被拒绝/删除的策略仍被注入 → 此维度 <= 1 分
+
+  3. **存储清理**（20%）：delete 后 JSON 文件和 index.json 是否清理？
+     - playbooks/{id}.json 应不存在
+     - index.json 的 entries 列表不应包含该 ID
+     - 铁律：删除后 JSON 文件仍存在 → 此维度 <= 1 分
+
+  4. **正常功能不受影响**（20%）：拒绝/删除后 Agent 仍能正常完成任务？
+     - 不依赖策略也能完成分析（策略是辅助，不是必需）
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "crud_diagnosis": {
+      "status_transition": {"score": 1-5, "expected_status": "<expected>", "actual_status": "<actual>"},
+      "negative_isolation": {"score": 1-5, "hint_absent": true/false, "approved_list_clean": true/false},
+      "storage_cleanup": {"score": 1-5, "json_deleted": true/false, "index_cleaned": true/false},
+      "normal_function": {"score": 1-5, "task_completed_without_hint": true/false}
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+# ==================== Playbook 假阳性检测 ====================
+
+grade_playbook_false_positive: |
+  你是 Playbook 匹配精度评估专家。验证不相关 query 是否被误匹配到已有策略。
+
+  ## 背景
+
+  Precision > Recall：误匹配（假阳性）会注入无关策略，误导 Agent 选择错误的工具和执行流程。
+  库中有 APPROVED 的数据分析 playbook，测试不相关 query 是否能正确地不触发匹配。
+
+  ## 评估维度
+
+  1. **假阳性防御**（50%）：不相关 query 是否正确地未被注入 playbook_hint？
+     - Agent 上下文中不应包含 <playbook_hint> 标签
+     - 铁律：不相关 query 被注入了 playbook_hint → 此维度 <= 1 分
+
+  2. **任务完成**（30%）：Agent 是否正常完成了用户请求？
+     - 不依赖 playbook 也能正确回答/执行
+
+  3. **工具选择正确性**（20%）：Agent 是否选择了合理的工具（而非被误导的工具）？
+     - 问天气就查天气，写诗就直接生成，不应调用数据分析工具
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "precision_diagnosis": {
+      "false_positive_detected": true/false,
+      "hint_in_context": true/false,
+      "irrelevant_tools_used": [],
+      "correct_behavior": true/false
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
 # ==================== 过度工程化检测 ====================
 
 grade_over_engineering: |

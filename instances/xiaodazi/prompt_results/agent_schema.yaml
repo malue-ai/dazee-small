@@ -7,7 +7,7 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_operation
+  - file_management
   - writing
   - data_analysis
   - translation
@@ -43,9 +43,8 @@ tool_selector:
   max_parallel_tools: 1
   base_tools:
   - nodes
-  - knowledge_search
-  - open_system_preferences
   - hitl
+  - open_system_preferences
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -70,22 +69,13 @@ output_formatter:
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills:
-- name: excel-generator
-  enabled: true
-  description: ''
-- name: pdf-generator
-  enabled: true
-  description: ''
-- name: multi-lang-ocr
-  enabled: true
-  description: ''
-- name: elegant-reports
-  enabled: true
-  description: ''
+skills: []
 tools:
 - web_search
-- api_calling
+- knowledge_search
+- nodes
+- hitl
+- open_system_preferences
 model: qwen3-max
 max_turns: null
 execution_strategy: rvr-b
@@ -100,4 +90,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、多步规划），强调主动性、记忆与安全。启用细粒度规划、用户级记忆、HITL确认机制，并集成常用文档技能。优先本地执行，支持不可用技能的引导与替代方案生成。
+reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好性。必须启用细粒度规划（plan_manager）以支持多步骤桌面操作；内存管理需长期保留用户偏好；工具选择聚焦本地能力（nodes为核心），敏感操作通过HITL确认；输出需通俗结构化，避免技术术语。虽然Skills未明确列出，但系统描述中隐含对多种技能的依赖（如OCR、PDF生成等），实际运行时由框架动态注入可用Skills，故Schema中skills留空以保持灵活性。

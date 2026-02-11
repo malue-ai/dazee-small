@@ -14,34 +14,32 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph input["Input"]
-    Messages["User Messages (filtered)"]
-  end
-
-  subgraph cache["Four-Layer Cache"]
-    L1["L1: Hash Cache (exact match)"]
-    L2["L2: Semantic Cache (similarity)"]
-    L3["L3: LLM Analysis (structured output)"]
-    L4["L4: Skill Name Match (deterministic fallback)"]
-  end
-
-  subgraph output["Output: IntentResult"]
-    Complexity["complexity: simple | medium | complex"]
-    SkipMemory["skip_memory: bool"]
-    FollowUp["is_follow_up: bool"]
-    Stop["wants_to_stop: bool"]
-    Rollback["wants_rollback: bool"]
-    SkillGroups["relevant_skill_groups: list"]
-  end
-
-  Messages --> L1
-  L1 -->|miss| L2
-  L2 -->|miss| L3
-  L3 --> L4
-  L3 --> output
-  L4 -->|augment| SkillGroups
+```
+User Messages (filtered)
+    │
+    ▼
+┌─ Four-Layer Cache ─────────────────────────────────────────────────┐
+│                                                                     │
+│  L1: Hash Cache (exact SHA-256 match)                               │
+│    │ miss                                                           │
+│    ▼                                                                │
+│  L2: Semantic Cache (embedding similarity)                          │
+│    │ miss                                                           │
+│    ▼                                                                │
+│  L3: LLM Analysis (structured output via tool_choice)               │
+│    │                                                                │
+│    ├──→ L4: Skill Name Match (deterministic, augments L3 result)    │
+│    │                                                                │
+└────┼────────────────────────────────────────────────────────────────┘
+     ▼
+┌─ Output: IntentResult ─────────────────────────────────────────────┐
+│  complexity:              simple | medium | complex                  │
+│  skip_memory:             bool                                      │
+│  is_follow_up:            bool                                      │
+│  wants_to_stop:           bool                                      │
+│  wants_rollback:          bool                                      │
+│  relevant_skill_groups:   list[str]  ← augmented by L4              │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Output Schema

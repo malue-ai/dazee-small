@@ -459,16 +459,18 @@ def test_b10_3_keep_completed(verbose: bool = False) -> SubResult:
     if verbose:
         _info("User chose 'keep completed' → committed")
 
-    # 4. Verify: files stay modified + snapshot cleaned
+    # 4. Verify: files stay modified + snapshot retained for grace period
+    # commit() retains the snapshot (retention_hours) so user can still
+    # say "恢复到之前的" in the next message. Only task_log is cleaned.
     about_modified = "星辰大海科技" in _read(Path(about_path))
     product_modified = "星辰大海科技" in _read(Path(product_path))
-    snapshot_gone = snapshot_id not in mgr._snapshots
+    snapshot_retained = snapshot_id in mgr._snapshots
     log_gone = task_id not in mgr._task_logs
 
-    passed = all([about_modified, product_modified, snapshot_gone, log_gone])
+    passed = all([about_modified, product_modified, snapshot_retained, log_gone])
     detail = (
         f"files_modified={about_modified and product_modified}, "
-        f"snapshot_cleaned={snapshot_gone}, log_cleaned={log_gone}"
+        f"snapshot_retained={snapshot_retained}, log_cleaned={log_gone}"
     )
     return SubResult("B10.3 keep_completed", passed, detail)
 

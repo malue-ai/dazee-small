@@ -14,39 +14,27 @@
 
 ## Architecture
 
-```mermaid
-graph TB
-  subgraph agent["Agent"]
-    AgentLLM["agent._llm (ModelRouter)"]
-  end
-
-  subgraph router["ModelRouter"]
-    Policy["RouterPolicy (max_failures, cooldown)"]
-    Health["LLMHealthMonitor"]
-    Targets["RouteTarget[]"]
-  end
-
-  subgraph providers["LLM Providers"]
-    Claude["ClaudeService"]
-    OpenAI["OpenAIService"]
-    Qwen["QwenService"]
-    DeepSeek["DeepSeekService"]
-    Gemini["GeminiService"]
-  end
-
-  subgraph adapters["Format Adapters"]
-    ClaudeAdaptor["ClaudeAdaptor (native)"]
-    OpenAIAdaptor["OpenAIAdaptor (function calling)"]
-    DeepSeekAdaptor["DeepSeekAdaptor (reasoning_content)"]
-    GeminiAdaptor["GeminiAdaptor (parts + function_call)"]
-  end
-
-  AgentLLM --> router
-  router --> Claude --> ClaudeAdaptor
-  router --> OpenAI --> OpenAIAdaptor
-  router --> Qwen --> OpenAIAdaptor
-  router --> DeepSeek --> DeepSeekAdaptor
-  router --> Gemini --> GeminiAdaptor
+```
+  Agent._llm
+      │
+      ▼
+┌─ ModelRouter ─────────────────────────────────────────────────────┐
+│  RouterPolicy (max_failures, cooldown)                             │
+│  LLMHealthMonitor (failure_count, cooldown_until, probe)           │
+│  RouteTarget[] (ordered by priority)                               │
+└──────┬────────────┬────────────┬────────────┬────────────┬────────┘
+       │            │            │            │            │
+       ▼            ▼            ▼            ▼            ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  Claude   │ │  OpenAI  │ │   Qwen   │ │ DeepSeek │ │  Gemini  │
+│  Service  │ │  Service │ │  Service │ │  Service │ │  Service │
+└─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘
+      ▼            ▼            ▼            ▼            ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  Claude   │ │  OpenAI  │ │  OpenAI  │ │ DeepSeek │ │  Gemini  │
+│  Adaptor  │ │  Adaptor │ │  Adaptor │ │  Adaptor │ │  Adaptor │
+│ (native)  │ │(func call)│ │(func call)│ │(reasoning)│ │ (parts) │
+└──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 ## Supported Providers
