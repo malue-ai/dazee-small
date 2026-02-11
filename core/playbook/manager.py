@@ -808,24 +808,25 @@ class PlaybookManager:
         query: str,
         task_type: str = "",
         top_k: int = 3,
-        min_score: float = 0.5,
+        min_score: float = 0.0,
         only_approved: bool = True,
     ) -> List[tuple["PlaybookEntry", float]]:
         """
-        语义匹配策略（LLM-First 设计，Precision-First）
+        语义匹配策略（LLM-First 设计）
 
         两层匹配：
         1. Layer 1: task_type 预筛（确定性规则，<1ms）
         2. Layer 2: Mem0 语义搜索（向量相似度，零额外 LLM 调用）
 
-        Precision > Recall：宁可不匹配（假阴），不能误匹配（假阳）。
-        误匹配会注入无关策略，误导 Agent 的工具选择和执行流程。
+        LLM-First 兜底：不依赖硬阈值做门控。
+        匹配结果始终返回（带 score），由调用方或 Agent 自行判断相关性。
+        score 作为 confidence 写入 <playbook_hint>，Agent 是最终的语义判断者。
 
         Args:
             query: 用户查询（自然语言）
             task_type: 意图识别输出的任务类型（可选）
             top_k: 返回前 k 个
-            min_score: 最低匹配分数（默认 0.5，宁缺毋滥）
+            min_score: 最低匹配分数（默认 0.0，不做硬门控）
             only_approved: 仅返回已审核通过的策略
 
         Returns:

@@ -29,11 +29,33 @@ export const useConnectionStore = defineStore('connection', () => {
     if (_notificationChannel) return
 
     _notificationChannel = useWebSocketChat({ handleNotifications: true })
+
+    // Register any pending playbook handler
+    if (_pendingPlaybookHandler) {
+      _notificationChannel.onPlaybookSuggestion(_pendingPlaybookHandler)
+      _pendingPlaybookHandler = null
+    }
     try {
       await _notificationChannel.ensureConnected()
     } catch {
       // 连接失败不阻塞应用启动，内部有自动重连机制
       _notificationChannel = null
+    }
+  }
+
+  // Playbook suggestion handler registration
+  let _pendingPlaybookHandler: ((data: any) => void) | null = null
+
+  /**
+   * Register a handler for playbook_suggestion events on the notification channel.
+   * If the channel is already initialized, registers immediately;
+   * otherwise queues until initNotificationChannel() is called.
+   */
+  function registerPlaybookHandler(handler: (data: any) => void): void {
+    if (_notificationChannel) {
+      _notificationChannel.onPlaybookSuggestion(handler)
+    } else {
+      _pendingPlaybookHandler = handler
     }
   }
 
@@ -83,6 +105,7 @@ export const useConnectionStore = defineStore('connection', () => {
     initNotificationChannel,
     getConnection,
     closeConnection,
-    closeAll
+    closeAll,
+    registerPlaybookHandler,
   }
 })

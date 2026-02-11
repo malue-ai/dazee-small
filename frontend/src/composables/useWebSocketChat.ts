@@ -122,6 +122,9 @@ export function useWebSocketChat(wsOptions?: UseWebSocketChatOptions) {
   let streamCompleteResolve: ((value: string) => void) | null = null
   let fullResponse = ''
 
+  // Playbook suggestion handler (persistent, survives stream end)
+  let playbookSuggestionHandler: ((data: any) => void) | null = null
+
   // ==================== WebSocket URL ====================
 
   function getWsUrl(): string {
@@ -269,6 +272,14 @@ export function useWebSocketChat(wsOptions?: UseWebSocketChatOptions) {
     if (eventName === 'notification' && payload) {
       if (wsOptions?.handleNotifications) {
         _handleNotificationEvent(payload)
+      }
+      return
+    }
+
+    // Playbook 策略建议（后台任务在 SSE 关闭后推送，需持久化 WebSocket 接收）
+    if (eventName === 'playbook_suggestion' && payload?.data) {
+      if (playbookSuggestionHandler) {
+        playbookSuggestionHandler(payload.data)
       }
       return
     }
@@ -575,6 +586,16 @@ export function useWebSocketChat(wsOptions?: UseWebSocketChatOptions) {
     }
   }
 
+  // ==================== Playbook 回调注册 ====================
+
+  /**
+   * Register a handler for playbook_suggestion events pushed via WebSocket.
+   * Called by useChat to bridge WS push → UI message injection.
+   */
+  function onPlaybookSuggestion(handler: (data: any) => void): void {
+    playbookSuggestionHandler = handler
+  }
+
   // ==================== 导出 ====================
 
   return {
@@ -594,5 +615,8 @@ export function useWebSocketChat(wsOptions?: UseWebSocketChatOptions) {
     close,
     ensureConnected,
     sendRequest,
+
+    // Playbook 回调
+    onPlaybookSuggestion,
   }
 }

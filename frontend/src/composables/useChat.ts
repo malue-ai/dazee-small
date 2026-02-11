@@ -133,6 +133,11 @@ export function useChat() {
   async function initialize(): Promise<boolean> {
     conversationStore.initUserId()
 
+    // Register playbook suggestion handler on the global WebSocket notification channel.
+    // When playbook_extraction finishes (after SSE stream closed), the backend pushes
+    // via WebSocket → this handler injects the suggestion into the last assistant message.
+    connectionStore.registerPlaybookHandler(injectPlaybookSuggestion)
+
     // 加载会话列表
     await conversationStore.fetchList()
 
@@ -705,15 +710,38 @@ export function useChat() {
 
     // Playbook 策略建议（内联卡片，非弹窗）
     if (type === 'playbook_suggestion') {
-      const suggestion: PlaybookSuggestion = {
-        playbook_id: data?.playbook_id ?? '',
-        name: data?.name ?? '',
-        description: data?.description ?? '',
-        strategy_summary: data?.strategy_summary ?? '',
-        user_action: null,
-      }
-      if (suggestion.playbook_id) {
-        msg.playbookSuggestion = suggestion
+      _attachPlaybookSuggestion(data, msg)
+    }
+  }
+
+  /**
+   * Attach a playbook suggestion to a message.
+   * Used by both SSE stream handler and WebSocket push handler.
+   */
+  function _attachPlaybookSuggestion(data: any, msg: UIMessage): void {
+    const suggestion: PlaybookSuggestion = {
+      playbook_id: data?.playbook_id ?? '',
+      name: data?.name ?? '',
+      description: data?.description ?? '',
+      strategy_summary: data?.strategy_summary ?? '',
+      user_action: null,
+    }
+    if (suggestion.playbook_id) {
+      msg.playbookSuggestion = suggestion
+    }
+  }
+
+  /**
+   * Inject a playbook suggestion from WebSocket push (after SSE stream closed).
+   * Finds the last assistant message in the current conversation and attaches the suggestion.
+   */
+  function injectPlaybookSuggestion(data: any): void {
+    const msgs = conversationStore.messages
+    // Find the last assistant message to attach the suggestion to
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant') {
+        _attachPlaybookSuggestion(data, msgs[i])
+        return
       }
     }
   }
@@ -1132,6 +1160,7 @@ export function useChat() {
     // Playbook
     acceptPlaybookSuggestion,
     dismissPlaybookSuggestion,
+    injectPlaybookSuggestion,
 
     // 方法
     initialize,

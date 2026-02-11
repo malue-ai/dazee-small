@@ -23,7 +23,12 @@ logger = get_logger("injectors.phase2.playbook_hint")
 
 
 def _format_playbook_hint(entry: Any, score: float) -> str:
-    """Format a single playbook entry as playbook_hint content."""
+    """Format a single playbook entry as playbook_hint content.
+
+    LLM-First: always inject the best match with confidence score.
+    The Agent decides whether to follow the hint based on relevance.
+    Low-confidence matches get an explicit disclaimer.
+    """
     parts = [f"类似任务的成功策略：{entry.description or entry.name}"]
     tools = entry.strategy.get("suggested_tools") or [
         t.get("tool") for t in (entry.tool_sequence or []) if t.get("tool")
@@ -41,6 +46,9 @@ def _format_playbook_hint(entry: Any, score: float) -> str:
             line_parts.append(f"成功率 {int(success_rate * 100)}%")
         parts.append("，".join(line_parts))
     confidence = min(1.0, max(0.0, score))
+    # Low-confidence: add disclaimer so the Agent knows to judge relevance itself
+    if confidence < 0.5:
+        parts.append("（低置信度匹配，请自行判断是否适用当前任务）")
     return f'<playbook_hint confidence="{confidence:.2f}">\n' + "\n".join(parts) + "\n</playbook_hint>"
 
 
@@ -88,13 +96,15 @@ class PlaybookHintInjector(BaseInjector):
 
             manager = create_playbook_manager()
             await manager.load_all_async()
+            # LLM-First: no hard threshold cutoff.
+            # Always retrieve the best match; the confidence score in the hint
+            # tells the Agent how confident the match is. The Agent decides.
             matched: List[tuple] = await manager.find_matching_async(
                 query=query,
                 task_type=task_type,
                 top_k=1,
+                min_score=0.1,  # Only filter noise; Agent judges relevance
                 only_approved=True,
-                # min_score 使用 manager 默认值 0.5（Precision-First）
-                # 修复了策略描述后（使用 user_query），真正相似的任务应 >= 0.6
             )
         except Exception as e:
             logger.info(f"PlaybookHintInjector: 匹配跳过 ({e})")
@@ -105,10 +115,11 @@ class PlaybookHintInjector(BaseInjector):
                 1 for e in manager._entries.values()
                 if e.status.value == "approved"
             )
-            logger.info(
-                f"PlaybookHintInjector: 无匹配策略 "
-                f"(approved={approved_count}, query={query[:50]}...)"
-            )
+            if approved_count > 0:
+                logger.info(
+                    f"PlaybookHintInjector: 有 {approved_count} 个策略但 Mem0 未返回结果 "
+                    f"(query={query[:50]}...)"
+                )
             return InjectionResult()
 
         entry, score = matched[0]
