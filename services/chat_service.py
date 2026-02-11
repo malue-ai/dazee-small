@@ -721,10 +721,15 @@ class ChatService:
                     available = [a["agent_id"] for a in self.agent_registry.list_agents()]
                     raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
 
+        effective_agent_id = agent_id or self.default_agent_key
+
         # 2. 创建/校验 Conversation
         try:
             conv, is_new_conversation = await self.conversation_service.get_or_create_conversation(
-                user_id=user_id, conversation_id=conversation_id, title="新对话"
+                user_id=user_id,
+                conversation_id=conversation_id,
+                title="新对话",
+                metadata={"agent_id": effective_agent_id},
             )
             conversation_id = conv.id
 
@@ -732,8 +737,29 @@ class ChatService:
             set_request_context(
                 user_id=user_id, conversation_id=conversation_id, message_id=message_id or ""
             )
+
+            # Ensure conversation metadata carries agent_id for non-web
+            # entry points (e.g., Feishu/Telegram gateway) so UI can
+            # consistently discover agent ownership.
+            conv_metadata = conv.metadata if isinstance(conv.metadata, dict) else {}
+            if conv_metadata.get("agent_id") != effective_agent_id:
+                updated_metadata = dict(conv_metadata)
+                updated_metadata["agent_id"] = effective_agent_id
+                await self.conversation_service.update_conversation(
+                    conversation_id=conversation_id,
+                    metadata=updated_metadata,
+                )
         except Exception as e:
             raise ValueError(f"对话创建/校验失败: {e}") from e
+
+        # Auto-enable title generation for:
+        # 1) brand-new conversations
+        # 2) existing conversations that still use the default placeholder title
+        background_tasks = list(background_tasks or [])
+        current_title = (conv.title or "").strip()
+        should_auto_generate_title = is_new_conversation or current_title in {"", "新对话"}
+        if should_auto_generate_title and "title_generation" not in background_tasks:
+            background_tasks.append("title_generation")
 
         # 3. 生成 assistant_message_id
         assistant_message_id = str(uuid4())
@@ -903,7 +929,7 @@ class ChatService:
             raise ValueError(f"消息保存失败: {e}") from e
 
         # 9. 获取 Agent
-        pool_key = agent_id or self.default_agent_key
+        pool_key = effective_agent_id
         agent = None
         agent_acquired = False
         session_pool_updated = False

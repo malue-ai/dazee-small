@@ -33,13 +33,25 @@ async def generate_title(ctx: "TaskContext", service: "BackgroundTaskService") -
 
     只对新对话生成标题
     """
-    # 只对新对话生成标题
-    if not ctx.is_new_conversation:
-        logger.debug("○ 跳过标题生成（非新对话）")
-        return
-
     if not ctx.user_message:
         logger.debug("○ 跳过标题生成（无用户消息）")
+        return
+
+    should_generate = ctx.is_new_conversation
+
+    # Non-new conversations can also need title generation when the title is
+    # still missing/default (e.g., external channel history migrated into local).
+    if not should_generate and ctx.conversation_service:
+        try:
+            conv = await ctx.conversation_service.get_conversation(ctx.conversation_id)
+            current_title = (conv.title or "").strip() if conv else ""
+            should_generate = current_title in {"", "新对话"}
+        except Exception as e:
+            logger.warning(f"⚠️ 读取会话标题失败，跳过标题生成判断: {e}")
+            should_generate = False
+
+    if not should_generate:
+        logger.debug("○ 跳过标题生成（已有有效标题）")
         return
 
     await _generate_conversation_title(
