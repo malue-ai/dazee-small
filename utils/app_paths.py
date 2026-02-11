@@ -245,6 +245,11 @@ def get_instance_playbooks_dir(instance_name: str) -> Path:
     return d
 
 
+def get_instance_playbook_vectors_path(instance_name: str) -> Path:
+    """Instance-scoped playbook vector DB path (independent from user memory vectors)."""
+    return get_instance_store_dir(instance_name) / "playbook_vectors.db"
+
+
 def get_instance_snapshots_dir(instance_name: str) -> Path:
     """Instance-scoped state snapshots directory."""
     d = get_instance_data_dir(instance_name) / "snapshots"

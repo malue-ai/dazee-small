@@ -3,23 +3,30 @@ PlaybookManager - 策略库管理器
 
 V8.0 新增
 V10.0 重构：统一走 Storage Backend，删除双重文件操作，修复实例隔离
+V10.1 重构：独立向量库，Playbook 向量与用户记忆物理隔离
 
 职责：
 - 从成功会话中提取策略模式
 - 管理策略的生命周期（草稿/待审核/已发布/已废弃）
-- 策略检索和匹配（两层：task_type 预筛 + Mem0 语义搜索）
+- 策略检索和匹配（两层：task_type 预筛 + 独立向量库语义搜索）
+
+向量存储架构：
+- Playbook 使用独立的 playbook_vectors.db（SqliteVecVectorStore）
+- 与用户记忆 mem0_vectors.db 物理隔离，KNN 搜索不受用户记忆数量影响
+- Embedding 复用全局 GGUF 单例（GGUFEmbeddingProvider），零额外内存
 """
 
 import hashlib
 import json
 import os
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from logger import get_logger
-from utils.app_paths import get_instance_playbooks_dir
+from utils.app_paths import get_instance_playbooks_dir, get_instance_playbook_vectors_path
 
 logger = get_logger(__name__)
 
@@ -139,6 +146,9 @@ class PlaybookEntry:
         Returns:
             是否属于同类型任务
         """
+        # 调用方未提供 task_type 时不做预筛（交给 Layer 2 语义判断）
+        if not task_type:
+            return True
         if "task_types" in self.trigger:
             return task_type in self.trigger["task_types"]
         # 无 task_types 限制的策略对所有类型适用
@@ -216,12 +226,17 @@ class PlaybookManager:
             storage_path = str(get_instance_playbooks_dir(instance_name))
 
         self._storage_path = storage_path
+        self._instance_name = os.getenv("AGENT_INSTANCE", "default")
         self.auto_save = auto_save
         self.min_reward_threshold = min_reward_threshold
         self._llm_service = llm_service
 
-        # 延迟初始化的存储后端
+        # 延迟初始化的存储后端（JSON 文件）
         self._storage = None
+
+        # 延迟初始化的向量存储（独立 playbook_vectors.db）
+        self._vector_store = None
+        self._embedding_model = None
 
         # 内存缓存
         self._entries: Dict[str, PlaybookEntry] = {}
@@ -260,6 +275,50 @@ class PlaybookManager:
 
             self._storage = create_storage_backend(storage_path=self._storage_path)
         return self._storage
+
+    def _get_vector_store(self):
+        """
+        获取 Playbook 专用的向量存储（延迟初始化）。
+
+        使用独立的 playbook_vectors.db，与用户记忆 mem0_vectors.db 物理隔离。
+        sqlite-vec KNN 查询不支持 WHERE 预过滤，共享表会导致 playbook
+        向量被大量用户记忆挤出结果集。独立表确保 KNN 100% 命中 playbook。
+        """
+        if self._vector_store is None:
+            from core.memory.mem0.sqlite_vec_store import SqliteVecVectorStore
+
+            embedding = self._get_embedding_model()
+            dims = embedding.config.embedding_dims if hasattr(embedding, "config") else 1024
+
+            db_path = str(get_instance_playbook_vectors_path(self._instance_name))
+            self._vector_store = SqliteVecVectorStore(
+                collection_name="playbook_vectors",
+                embedding_model_dims=dims,
+                db_path=db_path,
+            )
+            logger.info(f"✅ Playbook 独立向量库初始化: {db_path} (dims={dims})")
+        return self._vector_store
+
+    def _get_embedding_model(self):
+        """
+        获取 Embedding 模型（延迟初始化，复用全局 GGUF 单例）。
+
+        与 Mem0 Pool 共享同一个 GGUFEmbeddingProvider 实例（通过单例模式），
+        零额外内存开销。通过 _GGUFEmbedderAdapter 包装为同步接口。
+        """
+        if self._embedding_model is None:
+            from core.memory.mem0.pool import _GGUFEmbedderAdapter, Mem0MemoryPool
+
+            adapter = Mem0MemoryPool._create_local_embedder()
+            if adapter is not None:
+                self._embedding_model = adapter
+                logger.info("✅ Playbook embedding: 复用本地 GGUF (BGE-M3)")
+            else:
+                raise RuntimeError(
+                    "Playbook 向量搜索需要本地 GGUF embedding 模型，"
+                    "请确认 data/shared/models/bge-m3-Q4_K_M.gguf 存在"
+                )
+        return self._embedding_model
 
     async def load_all_async(self):
         """
@@ -325,76 +384,76 @@ class PlaybookManager:
         content = f"{name}:{session_id or ts}:{ts}"
         return hashlib.md5(content.encode()).hexdigest()[:12]
 
-    # ==================== Mem0 同步 ====================
+    # ==================== 向量存储同步 ====================
 
-    async def _delete_from_mem0(self, entry_id: str):
+    async def _delete_from_vector_store(self, entry_id: str):
         """
-        从 Mem0 删除指定 playbook 的所有向量记录。
+        从独立向量库删除指定 playbook 的向量记录。
 
-        通过 vector_store.list(filters) 按 metadata.playbook_id 查找，
+        通过 vector_store.list(filters={"playbook_id": id}) 查找，
         再逐条删除。Best-effort：失败时静默跳过。
         """
         try:
-            from core.memory.mem0 import get_mem0_pool
-
-            pool = get_mem0_pool()
-            vector_store = pool.memory.vector_store
-
-            # sqlite-vec list() 支持 json_extract 过滤
-            results_and_count = vector_store.list(
-                filters={"metadata.playbook_id": entry_id}
+            store = self._get_vector_store()
+            results_and_count = store.list(
+                filters={"playbook_id": entry_id}
             )
             results = results_and_count[0] if results_and_count else []
 
             deleted = 0
             for item in results:
                 try:
-                    vector_store.delete(item.id)
+                    store.delete(item.id)
                     deleted += 1
                 except Exception:
                     pass
 
             if deleted:
-                logger.debug(f"Mem0 删除: playbook={entry_id}, 删除 {deleted} 条记录")
+                logger.debug(f"向量删除: playbook={entry_id}, 删除 {deleted} 条")
         except Exception as e:
-            logger.debug(f"Mem0 删除跳过: {e}")
+            logger.debug(f"向量删除跳过: {e}")
 
-    async def _sync_to_mem0(self, entry: PlaybookEntry):
+    async def _sync_to_vector_store(self, entry: PlaybookEntry):
         """
-        将 Playbook 描述写入 Mem0（upsert 语义：先删后增）。
+        将 Playbook 描述写入独立向量库（upsert 语义：先删后增）。
 
         写入后 find_matching_async() 的 Layer 2 才能搜索到该条目。
-        先删旧记录避免重复，再写新记录。
-
-        如果 delete 成功但 add 失败，playbook 暂时从 Mem0 搜索中消失，
-        但 JSON 文件（source of truth）不受影响，下次 sync 会恢复。
-        Best-effort：Mem0 不可用时静默跳过。
+        JSON 文件是 source of truth，向量库是搜索索引。
+        Best-effort：向量库不可用时静默跳过。
         """
         try:
             # Step 1: 删除旧记录（避免重复条目）
-            await self._delete_from_mem0(entry.id)
+            await self._delete_from_vector_store(entry.id)
 
-            # Step 2: 写入新记录
-            from core.memory.mem0 import get_mem0_pool
+            # Step 2: embed + 写入
+            store = self._get_vector_store()
+            embedding = self._get_embedding_model()
 
-            pool = get_mem0_pool()
             searchable_text = entry.get_searchable_text()
-            result = pool.memory.add(
-                messages=searchable_text,
-                user_id="playbook",
-                metadata={
-                    "playbook_id": entry.id,
-                    "source": "playbook_manager",
-                    "task_types": ",".join(entry.trigger.get("task_types", [])),
-                },
-                infer=False,  # Store raw text as vector — skip LLM extraction
+            vec = embedding.embed(searchable_text)
+            if not isinstance(vec, list):
+                vec = vec.tolist() if hasattr(vec, "tolist") else list(vec)
+
+            vec_id = str(uuid.uuid4())
+            payload = {
+                "playbook_id": entry.id,
+                "data": searchable_text,
+                "source": "playbook_manager",
+                "task_types": ",".join(entry.trigger.get("task_types", [])),
+                "created_at": datetime.now().isoformat(),
+            }
+
+            store.insert(
+                vectors=[vec],
+                ids=[vec_id],
+                payloads=[payload],
             )
-            count = len(result.get("results", []))
-            logger.info(f"Mem0 同步: playbook={entry.id}, 写入={count}, text={searchable_text[:60]}...")
+            logger.info(
+                f"向量同步: playbook={entry.id}, "
+                f"text={searchable_text[:60]}..."
+            )
         except Exception as e:
-            # WARNING not DEBUG: if add fails after delete, the entry
-            # temporarily disappears from search until next sync.
-            logger.warning(f"Mem0 同步失败（playbook 暂时不可搜索）: {e}")
+            logger.warning(f"向量同步失败（playbook 暂时不可搜索）: {e}")
 
     # ==================== CRUD 操作 ====================
 
@@ -442,7 +501,7 @@ class PlaybookManager:
 
         self._entries[entry_id] = entry
         await self._save_entry(entry)
-        await self._sync_to_mem0(entry)
+        await self._sync_to_vector_store(entry)
 
         logger.info(f"📝 创建策略: {name} (id={entry_id})")
         return entry
@@ -473,7 +532,7 @@ class PlaybookManager:
         return sorted(entries, key=lambda e: e.created_at, reverse=True)
 
     async def update(self, entry_id: str, **updates) -> Optional[PlaybookEntry]:
-        """更新策略（同步 Mem0 索引以保持搜索数据一致）"""
+        """更新策略（同步向量索引以保持搜索数据一致）"""
         entry = self._entries.get(entry_id)
         if not entry:
             return None
@@ -485,14 +544,14 @@ class PlaybookManager:
         entry.updated_at = datetime.now().isoformat()
         await self._save_entry(entry)
 
-        # 已审核的条目更新后需要同步 Mem0 索引
+        # 已审核的条目更新后需要同步向量索引
         if entry.status == PlaybookStatus.APPROVED:
-            await self._sync_to_mem0(entry)
+            await self._sync_to_vector_store(entry)
 
         return entry
 
     async def delete(self, entry_id: str) -> bool:
-        """删除策略（同步清理 Mem0 索引）"""
+        """删除策略（同步清理向量索引）"""
         if entry_id not in self._entries:
             return False
 
@@ -504,7 +563,7 @@ class PlaybookManager:
         except Exception as e:
             logger.warning(f"⚠️ 删除策略文件失败: {e}")
 
-        await self._delete_from_mem0(entry_id)
+        await self._delete_from_vector_store(entry_id)
         await self._save_index()
         return True
 
@@ -551,7 +610,7 @@ class PlaybookManager:
         entry.review_notes = notes
         entry.updated_at = datetime.now().isoformat()
         await self._save_entry(entry)
-        await self._sync_to_mem0(entry)
+        await self._sync_to_vector_store(entry)
 
         logger.info(f"✅ 策略审核通过: {entry.name} (by {reviewer})")
         return True
@@ -625,7 +684,7 @@ class PlaybookManager:
         await self._save_entry(entry)
 
         # 废弃的策略不应出现在搜索结果中
-        await self._delete_from_mem0(entry_id)
+        await self._delete_from_vector_store(entry_id)
 
         logger.info(f"🗑️ 策略已废弃: {entry.name}")
         return True
@@ -817,11 +876,10 @@ class PlaybookManager:
 
         两层匹配：
         1. Layer 1: task_type 预筛（确定性规则，<1ms）
-        2. Layer 2: Mem0 语义搜索（向量相似度，零额外 LLM 调用）
+        2. Layer 2: 独立向量库语义搜索（向量相似度，零额外 LLM 调用）
 
-        LLM-First 兜底：不依赖硬阈值做门控。
-        匹配结果始终返回（带 score），由调用方或 Agent 自行判断相关性。
-        score 作为 confidence 写入 <playbook_hint>，Agent 是最终的语义判断者。
+        独立向量库：playbook_vectors.db 只包含 playbook 条目，
+        KNN 搜索 100% 命中 playbook，不受用户记忆数量影响。
 
         Args:
             query: 用户查询（自然语言）
@@ -845,46 +903,35 @@ class PlaybookManager:
         if not candidates:
             return []
 
-        # Layer 2: Mem0 语义搜索（直接用底层 API，不走混合搜索包装层）
-        # 混合搜索是给用户记忆设计的（向量+FTS5+合并），playbook 只需纯向量搜索
+        # Layer 2: 独立向量库搜索（表里只有 playbook，无需 user_id 过滤）
         try:
-            from core.memory.mem0 import get_mem0_pool
+            store = self._get_vector_store()
+            embedding = self._get_embedding_model()
 
-            pool = get_mem0_pool()
-            raw_results = pool.memory.search(
+            query_vector = embedding.embed(query)
+            if not isinstance(query_vector, list):
+                query_vector = query_vector.tolist() if hasattr(query_vector, "tolist") else list(query_vector)
+
+            search_results_raw = store.search(
                 query=query,
-                user_id="playbook",
-                limit=top_k * 2,
+                vectors=[query_vector],
+                limit=top_k * 3,
             )
-            # Mem0 search returns dict or list
-            if isinstance(raw_results, dict):
-                search_results = raw_results.get("results", [])
-            else:
-                search_results = raw_results or []
 
             logger.info(
-                f"Playbook Mem0 搜索: query={query[:40]}..., "
-                f"results={len(search_results)}, "
+                f"Playbook 向量搜索: query={query[:40]}..., "
+                f"results={len(search_results_raw)}, "
                 f"candidates={list(candidates.keys())}"
             )
-            for sr in search_results[:3]:
-                sr_meta = sr.get("metadata") or {}
-                logger.info(
-                    f"  搜索结果: id={sr.get('id','?')[:12]}, "
-                    f"score={sr.get('score',0):.3f}, "
-                    f"playbook_id={sr_meta.get('playbook_id','?')}, "
-                    f"uid={sr.get('user_id','?')}"
-                )
 
             # 匹配搜索结果和候选 Playbook（按 playbook_id 去重）
             matched = []
             seen_ids: set = set()
-            for result in search_results:
-                metadata = result.get("metadata") or {}
-                playbook_id = metadata.get("playbook_id", "")
-                score = result.get("score", 0.0)
+            for item in search_results_raw:
+                payload = item.payload if hasattr(item, "payload") else {}
+                playbook_id = payload.get("playbook_id", "")
+                score = item.score if hasattr(item, "score") else 0.0
 
-                # Log all candidate scores for observability
                 if playbook_id in candidates and playbook_id not in seen_ids:
                     logger.info(
                         f"Playbook 匹配候选: id={playbook_id[:8]}, "
@@ -905,8 +952,7 @@ class PlaybookManager:
                 return matched[:top_k]
 
         except Exception as e:
-            # Precision-first: Mem0 不可用时不做猜测性匹配
-            logger.warning(f"Mem0 语义匹配失败，跳过 playbook 匹配: {e}")
+            logger.warning(f"Playbook 向量搜索失败: {e}")
 
         return []
 

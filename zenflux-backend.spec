@@ -87,6 +87,7 @@ _native_packages = [
     'websockets',
     'yarl',
     'PIL',             # Pillow
+    'llama_cpp',       # GGUF 本地 Embedding（C 扩展）
     # 数据文件类（有 .py 时区数据 / JSON schema / 模板文件导致建目录）
     'pytz',
     'jsonschema',
@@ -118,12 +119,16 @@ hiddenimports = list(set(hiddenimports))  # 去重 collect_all 结果
 # --- 项目模块：自动递归收集所有子模块 ---
 _project_packages = [
     'routers', 'services', 'core', 'infra', 'utils', 'models', 'tools',
+    'prompts',  # 提示词模块（universal_agent_prompt、intent_recognition_prompt 等）
 ]
 for _pkg in _project_packages:
     hiddenimports += collect_submodules(_pkg)
 
 # 单文件模块（不属于任何包）
 hiddenimports += ['logger', 'main']
+
+# config.llm_config 命名空间包（config/ 目录无 __init__.py，需显式声明）
+hiddenimports += ['config.llm_config', 'config.llm_config.loader']
 
 # --- 第三方库：仅声明 PyInstaller 无法通过 import 链自动发现的 ---
 # uvicorn/anyio 使用动态导入选择后端，需要显式收集
@@ -145,6 +150,14 @@ hiddenimports += [
     'yaml',
     # tiktoken（编码数据通过 entry_points 插件发现，PyInstaller 需要显式声明）
     'tiktoken', 'tiktoken_ext', 'tiktoken_ext.openai_public',
+    # JSON 宽松解析（utils/json_utils.py 顶层导入）
+    'json5',
+    # Cron 表达式解析（infra/local_store/crud/scheduled_task.py 顶层导入）
+    'croniter',
+    # PDF 解析（core/knowledge/file_indexer.py 延迟导入）
+    'pypdf',
+    # .env 文件加载（utils/instance_loader.py、services/settings_service.py 延迟导入）
+    'dotenv',
 ]
 
 # --- 延迟导入 / 条件导入的第三方库 ---
@@ -167,6 +180,20 @@ hiddenimports += collect_submodules('apscheduler')
 # 文件处理（utils/file_handler.py try/except, core/knowledge/file_indexer.py lazy import）
 hiddenimports += ['PyPDF2', 'docx']
 
+# HuggingFace Hub（core/knowledge/embeddings.py 延迟导入 hf_hub_download）
+hiddenimports += collect_submodules('huggingface_hub')
+
+# 飞书 SDK（core/gateway/channels/feishu.py 延迟导入）
+try:
+    hiddenimports += collect_submodules('lark_oapi')
+except Exception:
+    pass  # 未安装时跳过
+
+# Telegram Bot SDK（core/gateway/channels/telegram.py 延迟导入）
+try:
+    hiddenimports += collect_submodules('telegram')
+except Exception:
+    pass  # 未安装时跳过
 
 # macOS 原生 OCR（tools/observe_screen.py 函数内 lazy import）
 if sys.platform == 'darwin':
