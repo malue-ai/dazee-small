@@ -521,6 +521,13 @@ pytest -v
   <img src="https://contrib.rocks/image?repo=malue-ai/dazee-small" />
 </a>
 
+## 作者
+
+- **刘屹** ([@ironliuyi](https://github.com/ironliuyi)) — liuyi@zenflux.cn
+- **汪康成** — wangkangcheng@zenflux.cn
+- **曾梦旗** — zengmengqi@zenflux.cn
+- **谢海鹏** — xiehaipeng@zenflux.cn
+
 ## 许可证
 
 [MIT](LICENSE) — Copyright (c) 2025-2026 ZenFlux
