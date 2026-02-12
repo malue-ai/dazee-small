@@ -13,8 +13,9 @@
 - 流式断连重试与降级
 
 模型系列：
-- GLM-4.7:   最新旗舰模型
-- GLM-4.6:   上一代旗舰模型
+- GLM-5:     744B MoE 旗舰（激活 40B），200K 上下文，128K 输出，Coding/Agent SOTA
+- GLM-4.7:   上一代旗舰模型
+- GLM-4.6:   旗舰模型
 - GLM-4.5:   355B MoE 旗舰，对标 claude-sonnet-4-5
 - GLM-4.5-Air: 106B MoE 轻量旗舰
 - GLM-4.5-X:  高性能加速版
@@ -22,8 +23,8 @@
 - GLM-4.5-Flash: 免费快速模型
 
 参考文档：
+- https://docs.bigmodel.cn/cn/guide/models/text/glm-5
 - https://docs.bigmodel.cn/cn/api/introduction
-- https://docs.z.ai/guides/llm/glm-4.5
 """
 
 import json
@@ -49,8 +50,9 @@ LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", 
 # GLM 常量与模型能力
 # ============================================================
 
-# GLM-4.5 系列最大输出 token 数
-GLM_MAX_TOKENS = 96000  # GLM-4.5 官方最大输出 96K
+# GLM-5 最大输出 token 数（128K），GLM-4.x 系列为 96K
+GLM5_MAX_TOKENS = 128000  # GLM-5 官方最大输出 128K
+GLM4_MAX_TOKENS = 96000   # GLM-4.5/4.6/4.7 系列最大输出 96K
 
 
 class GLMEndpoints:
@@ -75,6 +77,7 @@ class GLMModelCapability:
 
     # 支持思考模式的模型（thinking.type = enabled）
     THINKING_MODELS = {
+        "glm-5",
         "glm-4.7",
         "glm-4.6",
         "glm-4.5",
@@ -92,6 +95,7 @@ class GLMModelCapability:
 
     # 支持 Function Calling 的模型
     TOOL_CALLING_MODELS = {
+        "glm-5",
         "glm-4.7",
         "glm-4.6",
         "glm-4.5",
@@ -121,9 +125,12 @@ class GLMModelCapability:
     @staticmethod
     def get_max_tokens(model: str) -> int:
         """Get max output tokens for the model"""
-        # GLM-4.5 系列最大 96K，旧系列较小
+        # GLM-5: 128K max output
+        if "glm-5" in model:
+            return GLM5_MAX_TOKENS
+        # GLM-4.5/4.6/4.7 系列: 96K max output
         if "4.5" in model or "4.6" in model or "4.7" in model:
-            return GLM_MAX_TOKENS
+            return GLM4_MAX_TOKENS
         return 4096  # 旧模型默认
 
 
@@ -143,7 +150,7 @@ class GLMLLMService(BaseLLMService):
     ```python
     config = LLMConfig(
         provider=LLMProvider.GLM,
-        model="glm-4.5",
+        model="glm-5",
         api_key=os.getenv("ZHIPUAI_API_KEY"),
         enable_thinking=True
     )
@@ -338,7 +345,7 @@ class GLMLLMService(BaseLLMService):
 
         Thinking mode control:
         - GLM uses {"thinking": {"type": "enabled"}} to enable thinking
-        - Dynamic thinking is enabled by default for GLM-4.5+ models
+        - Dynamic thinking is enabled by default for GLM-5 / GLM-4.5+ models
         """
         extra = {}
 
@@ -1025,7 +1032,7 @@ class GLMLLMService(BaseLLMService):
 
 
 def create_glm_service(
-    model: str = "glm-4.5",
+    model: str = "glm-5",
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     enable_thinking: bool = True,
@@ -1035,7 +1042,7 @@ def create_glm_service(
     Create a GLM service (convenience function).
 
     Args:
-        model: Model name (glm-4.5, glm-4.5-air, glm-4.5-flash, etc.)
+        model: Model name (glm-5, glm-4.5, glm-4.5-air, glm-4.5-flash, etc.)
         api_key: API key (defaults to ZHIPUAI_API_KEY env var)
         base_url: Custom API endpoint
         enable_thinking: Enable thinking mode
@@ -1045,9 +1052,9 @@ def create_glm_service(
         GLMLLMService instance
 
     Examples:
-        # GLM-4.5: flagship model
+        # GLM-5: latest flagship model (200K context, 128K output)
         llm = create_glm_service(
-            model="glm-4.5",
+            model="glm-5",
             enable_thinking=True
         )
 
@@ -1059,7 +1066,7 @@ def create_glm_service(
 
         # International endpoint
         llm = create_glm_service(
-            model="glm-4.5",
+            model="glm-5",
             base_url="https://api.z.ai/api/paas/v4"
         )
     """
@@ -1096,7 +1103,7 @@ def _register_glm():
         name="glm",
         service_class=GLMLLMService,
         adaptor_class=OpenAIAdaptor,
-        default_model="glm-4.5",
+        default_model="glm-5",
         api_key_env="ZHIPUAI_API_KEY",
         display_name="GLM",
         description="智谱 GLM 系列模型",

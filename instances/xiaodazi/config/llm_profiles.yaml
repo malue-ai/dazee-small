@@ -7,13 +7,13 @@
 #
 # 模型分配：
 #
-#   ┌──────────┬───────────────────────────┬──────────────────────────┬──────────────────────────┐
-#   │ 角色     │ qwen                      │ claude                   │ deepseek                 │
-#   ├──────────┼───────────────────────────┼──────────────────────────┼──────────────────────────┤
-#   │ 主 Agent │ qwen3-max                 │ claude-opus-4-6          │ deepseek-reasoner        │
-#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │ deepseek-reasoner        │
-#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │ deepseek-chat            │
-#   └──────────┴───────────────────────────┴──────────────────────────┴──────────────────────────┘
+#   ┌──────────┬───────────────────────────┬──────────────────────────┬──────────────────────────┬──────────────────────────┐
+#   │ 角色     │ qwen                      │ claude                   │ deepseek                 │ glm                      │
+#   ├──────────┼───────────────────────────┼──────────────────────────┼──────────────────────────┼──────────────────────────┤
+#   │ 主 Agent │ qwen3-max                 │ claude-opus-4-6          │ deepseek-reasoner        │ glm-5                    │
+#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │ deepseek-reasoner        │ glm-5                    │
+#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │ deepseek-chat            │ glm-4.5-flash            │
+#   └──────────┴───────────────────────────┴──────────────────────────┴──────────────────────────┴──────────────────────────┘
 #
 
 # ==================== Provider 模板 ====================
@@ -75,6 +75,23 @@ provider_templates:
       provider: "deepseek"
       model: "deepseek-chat"
       api_key_env: "DEEPSEEK_API_KEY"
+
+  glm:
+    agent_model: "glm-5"                        # 主 Agent：GLM-5 旗舰（200K 上下文，128K 输出，Coding/Agent SOTA）
+    agent_llm:
+      max_tokens: 65536                         # 官方示例推荐 65536
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: false                     # GLM 上下文缓存独立控制
+      # temperature: thinking 开启时由框架自动设置（官方示例 1.0）
+    heavy:
+      provider: "glm"
+      model: "glm-5"
+      api_key_env: "ZHIPUAI_API_KEY"
+    light:
+      provider: "glm"
+      model: "glm-4.5-flash"
+      api_key_env: "ZHIPUAI_API_KEY"
 
 # ==================== 各调用点配置 ====================
 #

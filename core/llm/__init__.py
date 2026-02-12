@@ -215,7 +215,7 @@ def create_llm_service(
         LLMProvider.GEMINI: "gemini-pro",
         LLMProvider.QWEN: "qwen3-max",
         LLMProvider.DEEPSEEK: "deepseek-reasoner",
-        LLMProvider.GLM: "glm-4.5",
+        LLMProvider.GLM: "glm-5",
     }
 
     if model is None:

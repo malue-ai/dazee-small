@@ -1691,6 +1691,24 @@ def _register_preset_models() -> None:
         provider="glm",
     )
 
+    # --- GLM-5 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="glm-5",
+            model_type=ModelType.LLM,
+            display_name="GLM-5",
+            description="744B MoE 旗舰（激活 40B），200K 上下文，Coding/Agent 开源 SOTA",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=128000, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=2.00),
+            **_GLM_COMMON,
+        )
+    )
+
     # --- GLM-4.7 ---
 
     ModelRegistry.register(
@@ -1698,7 +1716,7 @@ def _register_preset_models() -> None:
             model_name="glm-4.7",
             model_type=ModelType.LLM,
             display_name="GLM-4.7",
-            description="智谱最新旗舰模型",
+            description="智谱上一代旗舰模型",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=True,
                 supports_streaming=True,

@@ -8,6 +8,7 @@
 |----------|---------|---------|------------|---------|---------|---------|--------|
 | **claude** (sonnet-4-5) | ✅ 4 轮 | ✅ 5 轮 | ✅ 多轮 | ✅ 2 轮 | ✅ | ✅ | **100%** |
 | **qwen** (qwen3-max) | ⚠️ 10+ | ✅ | ⏳ 23+ | ✅ | ✅ | ✅ | 83%+ |
+| **glm** (glm-5) | ⏳ | ⏳ | ⏳ | ⏳ | ✅ | ✅ | — |
 
 > B9/B10 为状态管理层验证，不依赖 LLM Provider，两端均 PASS。
 
@@ -91,6 +92,9 @@ docs/benchmark/
 
 # 全量 E2E
 python scripts/run_e2e_auto.py --clean --provider claude
+
+# GLM-5 全量 E2E
+python scripts/run_e2e_auto.py --clean --provider glm
 
 # 单用例调试
 python scripts/run_e2e_auto.py --case A1
@@ -290,6 +294,6 @@ cd docs/benchmark/data && python generate_benchmark_data.py
 | `evaluation/suites/xiaodazi/e2e/phase2_scenarios.yaml` | **Phase2 用例定义（6 个 — 新增）** |
 | `scripts/run_e2e_auto.py` | E2E 运行器（Phase 0 + 服务管理 + 报告） |
 | `scripts/verify_rollback_e2e.py` | B9/B10 回滚验证（6 个子场景） |
-| `instances/xiaodazi/config/llm_profiles.yaml` | Provider 模板 |
+| `instances/xiaodazi/config/llm_profiles.yaml` | Provider 模板（含 claude/qwen/deepseek/glm） |
 
 详见 [E2E_AUTOMATION_REPORT.md](E2E_AUTOMATION_REPORT.md)
