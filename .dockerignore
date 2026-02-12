@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.pytest_cache
+*.egg-info
+
+# Node / Frontend (backend Dockerfile doesn't need these)
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/src-tauri
+
+# IDE
+.cursor
+.vscode
+.idea
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Data (runtime generated, should be mounted as volume)
+data/
+workspace/
+
+# Build artifacts
+*.spec
+build/
+dist/
+
+# Docs (not needed in container)
+docs/
+*.md
+!README.md
+
+# Scripts (dev tools)
+scripts/
+
+# Tests
+tests/
+evaluation/reports/
