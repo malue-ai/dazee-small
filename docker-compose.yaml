@@ -1,0 +1,73 @@
+# ============================================================
+# ZenFlux Agent - Docker Compose (ComputeNest 部署)
+# ============================================================
+#
+# 使用方式：
+#   docker compose up -d
+#
+# 服务架构：
+#   frontend (Nginx:80) → backend (FastAPI:8000)
+#                        → data volume (SQLite + 文件存储)
+
+services:
+  # ==================== 后端服务 ====================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zenflux-backend
+    restart: unless-stopped
+    environment:
+      # LLM API Keys（从 .env 注入）
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-}
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY:-}
+      - ZHIPUAI_BASE_URL=${ZHIPUAI_BASE_URL:-}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - MINIMAX_BASE_URL=${MINIMAX_BASE_URL:-}
+      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      - MOONSHOT_BASE_URL=${MOONSHOT_BASE_URL:-}
+      # 搜索/工具 API Keys
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - EXA_API_KEY=${EXA_API_KEY:-}
+      # 应用配置
+      - AGENT_INSTANCE=${AGENT_INSTANCE:-xiaodazi}
+      - AGENT_PROVIDER=${AGENT_PROVIDER:-qwen}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ALLOWED_ORIGINS=*
+    volumes:
+      - zenflux-data:/app/data
+      - zenflux-workspace:/app/workspace
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  # ==================== 前端服务 ====================
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    container_name: zenflux-frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  zenflux-data:
+    driver: local
+  zenflux-workspace:
+    driver: local
