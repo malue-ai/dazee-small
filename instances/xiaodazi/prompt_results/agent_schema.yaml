@@ -1,0 +1,93 @@
+name: XiaoDazi
+description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，擅长本地桌面任务执行与个性化服务
+intent_analyzer:
+  enabled: true
+  complexity_levels:
+  - simple
+  - medium
+  - complex
+  task_types:
+  - file_management
+  - writing
+  - data_analysis
+  - translation
+  - ui_automation
+  - memory_recall
+  - preference_adaptation
+  output_formats:
+  - text
+  - markdown
+  - structured_list
+  - file_reference
+  use_llm: true
+  llm_model: claude-haiku-4-5-20251001
+  fast_mode: false
+  semantic_cache_threshold: null
+  simplified_output: true
+plan_manager:
+  enabled: true
+  trigger_condition: complexity == 'high' or step_count > 3
+  max_steps: 20
+  granularity: fine
+  allow_dynamic_adjustment: true
+  validation_interval: 3
+  replan_enabled: true
+  max_replan_attempts: 3
+  replan_strategy: incremental
+  failure_threshold: 0.4
+tool_selector:
+  enabled: true
+  available_tools: []
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools:
+  - nodes
+  - hitl
+  - open_system_preferences
+  tool_timeout: 300
+memory_manager:
+  enabled: true
+  retention_policy: user
+  episodic_memory: true
+  working_memory_limit: 50
+  auto_compress: true
+  compress_threshold: 15
+output_formatter:
+  enabled: true
+  default_format: markdown
+  supported_formats:
+  - text
+  - markdown
+  - json
+  - html
+  code_highlighting: false
+  max_output_length: 2000
+  json_model_name: null
+  json_schema: null
+  strict_json_validation: false
+  json_ensure_ascii: false
+  json_indent: 2
+  include_metadata: false
+skills: []
+tools:
+- web_search
+- knowledge_search
+- nodes
+- hitl
+- open_system_preferences
+model: qwen3-max
+max_turns: null
+execution_strategy: rvr-b
+allow_parallel_tools: false
+context_limits:
+  max_context_tokens: 200000
+  warning_threshold: 0.8
+  truncate_threshold: 0.9
+temperature: null
+max_tokens: null
+enable_thinking: null
+enable_caching: null
+thinking_mode: null
+prompts: null
+reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好性。必须启用细粒度规划（plan_manager）以支持多步骤桌面操作；内存管理需长期保留用户偏好；工具选择聚焦本地能力（nodes为核心），敏感操作通过HITL确认；输出需通俗结构化，避免技术术语。虽然Skills未明确列出，但系统描述中隐含对多种技能的依赖（如OCR、PDF生成等），实际运行时由框架动态注入可用Skills，故Schema中skills留空以保持灵活性。

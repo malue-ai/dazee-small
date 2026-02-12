@@ -1,0 +1,215 @@
+# 基础代码生成评估套件
+# 
+# 测试智能体生成代码的能力，包括：
+# - 简单函数生成
+# - 文件操作
+# - 代码语法正确性
+# - 代码功能完整性
+
+id: coding_basic_code_generation
+name: 基础代码生成评估套件
+description: 评估智能体生成基础代码的能力
+category: coding
+default_trials: 3
+
+metadata:
+  version: "1.0.0"
+  author: "ZenFlux Team"
+  created_at: "2026-01-20"
+  priority: P0
+  reference: "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
+
+tasks:
+  # ==================
+  # 简单函数生成
+  # ==================
+  
+  - id: coding_001
+    description: "代码生成 - 创建简单Python函数（斐波那契数列）"
+    category: coding
+    input:
+      user_query: "写一个计算斐波那契数列的函数"
+      conversation_history: []
+      context:
+        scenario: "code_generation"
+        workspace: "/tmp/test_workspace"
+    
+    checkpoints:
+      - name: "code_written"
+        check: "tool_calls_contain('write_file')"
+        description: "验证代码文件已创建"
+    
+    expected_outcome:
+      intent: "code_generation"
+      tool_calls: ["write_file"]
+      response_contains: ["def fibonacci", "return"]
+    
+    reference_answer: |
+      def fibonacci(n):
+          """计算斐波那契数列的第n项"""
+          if n <= 1:
+              return n
+          return fibonacci(n-1) + fibonacci(n-2)
+    
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('write_file')"
+      - type: code
+        name: check_code_syntax
+        check: "check_code_syntax('python')"
+      - type: code
+        name: check_response
+        check: "check_response_contains(['def fibonacci', 'return'])"
+      - type: model
+        rubric: grade_against_reference
+        min_score: 4
+    trials: 3
+    timeout_seconds: 60
+    tags: ["coding", "function", "python", "simple"]
+
+  - id: coding_002
+    description: "代码生成 - 创建排序函数"
+    category: coding
+    input:
+      user_query: "写一个快速排序函数，支持升序和降序"
+      conversation_history: []
+      context:
+        scenario: "code_generation"
+        workspace: "/tmp/test_workspace"
+    
+    checkpoints:
+      - name: "code_written"
+        check: "tool_calls_contain('write_file')"
+    
+    expected_outcome:
+      intent: "code_generation"
+      tool_calls: ["write_file"]
+      response_contains: ["def quicksort", "reverse"]
+    
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('write_file')"
+      - type: code
+        name: check_code_syntax
+        check: "check_code_syntax('python')"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 3
+    timeout_seconds: 90
+    tags: ["coding", "algorithm", "python", "medium"]
+
+  # ==================
+  # 文件操作
+  # ==================
+  
+  - id: coding_003
+    description: "文件操作 - 创建并写入文件"
+    category: coding
+    input:
+      user_query: "创建一个名为 hello.txt 的文件，内容是 'Hello, World!'"
+      conversation_history: []
+      context:
+        scenario: "file_operation"
+        workspace: "/tmp/test_workspace"
+    
+    expected_outcome:
+      tool_calls: ["write_file"]
+      response_contains: ["创建", "完成"]
+    
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('write_file')"
+      - type: code
+        name: check_response
+        check: "check_response_contains(['创建', '完成'])"
+    trials: 3
+    timeout_seconds: 30
+    tags: ["coding", "file_operation", "simple"]
+
+  - id: coding_004
+    description: "文件操作 - 读取并修改文件"
+    category: coding
+    input:
+      user_query: "读取 test.py 文件，在文件末尾添加一行注释 '# End of file'"
+      conversation_history: []
+      context:
+        scenario: "file_operation"
+        workspace: "/tmp/test_workspace"
+        setup_files:
+          - path: "test.py"
+            content: "print('Hello')\n"
+    
+    expected_outcome:
+      tool_calls: ["read_file", "write_file"]
+    
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('read_file')"
+      - type: code
+        name: check_tool_calls_write
+        check: "tool_calls_contain('write_file')"
+    trials: 3
+    timeout_seconds: 60
+    tags: ["coding", "file_operation", "medium"]
+
+  # ==================
+  # 代码语法检查
+  # ==================
+  
+  - id: coding_005
+    description: "代码语法 - 验证生成的代码语法正确"
+    category: coding
+    input:
+      user_query: "写一个计算阶乘的函数"
+      conversation_history: []
+      context:
+        scenario: "code_generation"
+        workspace: "/tmp/test_workspace"
+    
+    expected_outcome:
+      tool_calls: ["write_file"]
+    
+    graders:
+      - type: code
+        name: check_code_syntax
+        check: "check_code_syntax('python')"
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('write_file')"
+    trials: 3
+    timeout_seconds: 60
+    tags: ["coding", "syntax", "python"]
+
+  # ==================
+  # 多轮对话代码修改
+  # ==================
+  
+  - id: coding_006
+    description: "多轮对话 - 迭代修改代码"
+    category: multi_turn
+    input:
+      user_query: "写一个排序函数"
+      conversation_history: []
+      context:
+        scenario: "code_generation"
+        workspace: "/tmp/test_workspace"
+    
+    expected_outcome:
+      tool_calls: ["write_file"]
+      response_contains: ["def sort"]
+    
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('write_file')"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 3
+    timeout_seconds: 60
+    tags: ["coding", "multi_turn", "medium"]

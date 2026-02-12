@@ -1,0 +1,96 @@
+# E2: 步骤路径最优性 - 小搭子效率性测评
+# 验证：实际步骤数 vs 最优步骤数，路径效率
+
+id: xiaodazi_efficiency_path_optimality
+name: 步骤路径最优性（E2）
+description: 评估小搭子是否以最优步骤数完成任务，避免过度工程
+category: xiaodazi_efficiency
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: efficiency
+  capability: E2_path_optimality
+
+tasks:
+  - id: E2-01_simple_qa
+    description: "简单问答 - 应 1 步直接回答"
+    category: path_optimality
+    input:
+      user_query: "Python 是什么？"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_step_count: 1
+      max_acceptable_steps: 1
+    graders:
+      - type: code
+        name: check_step_count
+        check: "check_step_count(1, 1)"
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 4
+    trials: 2
+    timeout_seconds: 30
+    tags: ["efficiency", "path", "simple", "E2"]
+
+  - id: E2-02_search_summarize
+    description: "搜索+总结 - 最优 2 步，可接受 3 步"
+    category: path_optimality
+    input:
+      user_query: "搜索并总结 Python 3.13 的 3 个新特性"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_step_count: 2
+      max_acceptable_steps: 3
+    graders:
+      - type: code
+        name: check_step_count
+        check: "check_step_count(2, 3)"
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 3
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "path", "E2"]
+
+  - id: E2-03_multi_step_creation
+    description: "多步创作 - 最优 3-4 步，可接受 6 步"
+    category: path_optimality
+    input:
+      user_query: "写一篇关于远程办公的短文，先搜索最新数据再写"
+      conversation_history: []
+      context: {}
+    metadata:
+      optimal_step_count: 4
+      max_acceptable_steps: 6
+    graders:
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 3
+    trials: 2
+    timeout_seconds: 90
+    tags: ["efficiency", "path", "E2"]
+
+  - id: E2-04_file_convert
+    description: "文件转换 - 最优 2 步（read + convert），可接受 3 步"
+    category: path_optimality
+    input:
+      user_query: "把这个 CSV 转成 Excel"
+      conversation_history: []
+      context: {}
+      files: []
+    metadata:
+      optimal_step_count: 2
+      max_acceptable_steps: 3
+    graders:
+      - type: code
+        name: check_step_count
+        check: "check_step_count(2, 3)"
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 3
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "path", "E2"]

@@ -1,0 +1,136 @@
+skills:
+  # ========== common · builtin ==========
+  - { name: writing-assistant,    enabled: true,  status: ready }
+  - { name: translator,           enabled: true,  status: ready }
+  - { name: writing-analyzer,     enabled: true,  status: ready }
+  - { name: style-learner,        enabled: true,  status: ready }
+  - { name: content-reformatter,  enabled: true,  status: ready }
+  - { name: file-manager,         enabled: true,  status: ready }
+  - { name: local-search,         enabled: true,  status: ready }
+  - { name: app-recommender,      enabled: true,  status: ready }
+  - { name: literature-reviewer,  enabled: true,  status: ready }
+  - { name: paper-search,         enabled: true,  status: ready }
+  - { name: arxiv-search,         enabled: true,  status: ready }
+  - { name: nutrition-analyzer,   enabled: true,  status: ready }
+  - { name: medication-tracker,   enabled: true,  status: ready }
+  - { name: trend-spotter,        enabled: true,  status: ready }
+  - { name: competitive-intel,    enabled: true,  status: ready }
+  - { name: readwise-rival,       enabled: true,  status: ready }
+  - { name: weather,              enabled: true,  status: ready }
+  - { name: humanizer,            enabled: true,  status: ready }
+  - { name: brainstorming,        enabled: true,  status: ready }
+  - { name: meeting-insights-analyzer, enabled: true, status: ready }
+  - { name: meeting-notes-to-action-items, enabled: true, status: ready }
+  - { name: job-application-optimizer, enabled: true, status: ready }
+  - { name: skill-tutor,          enabled: true,  status: ready }
+  - { name: quiz-maker,           enabled: true,  status: ready }
+  - { name: smart-desktop-organizer, enabled: true, status: ready }
+  - { name: disk-health-monitor,  enabled: true,  status: ready }
+  - { name: scheduled-tasks,     enabled: true,  status: ready }
+  - { name: cross-app-workflow,   enabled: true,  status: ready }
+  - { name: social-media-creator, enabled: true, status: ready }
+  - { name: newsletter-writer,    enabled: true,  status: ready }
+  - { name: video-script-writer,  enabled: true,  status: ready }
+  - { name: smart-email-assistant, enabled: true, status: ready }
+  - { name: tailored-resume,      enabled: true,  status: ready }
+  - { name: deep-research,        enabled: true,  status: ready }
+  - { name: locale-aware-formatter, enabled: true, status: ready }
+  - { name: personal-finance,     enabled: true,  status: ready }
+  - { name: travel-planner,       enabled: true,  status: ready }
+  - { name: reading-companion,     enabled: true,  status: ready }
+  - { name: privacy-auditor,      enabled: true,  status: ready }
+
+  # ========== common · lightweight ==========
+  - { name: browser,              enabled: true,  status: ready }
+  - { name: video-frames,         enabled: true,  status: unavailable }
+  - { name: nano-pdf,             enabled: true,  status: ready }
+  - { name: excel-analyzer,       enabled: true,  status: ready }
+  - { name: excel-fixer,          enabled: true,  status: ready }
+  - { name: word-processor,       enabled: true,  status: ready }
+  - { name: invoice-organizer,    enabled: true,  status: ready }
+  - { name: elegant-reports,      enabled: true,  status: unavailable }
+  - { name: batch-file-converter, enabled: true,  status: ready }
+  - { name: pdf-toolkit,          enabled: true,  status: ready }
+  - { name: local-file-encrypt,   enabled: true,  status: ready }
+
+  # ========== common · external ==========
+  - { name: summarize,            enabled: true,  status: unavailable }
+  - { name: obsidian,             enabled: true,  status: unavailable }
+  - { name: openai-whisper,       enabled: true,  status: unavailable }
+  - { name: ppt-generator,        enabled: true,  status: ready }
+  - { name: gog,                  enabled: true,  status: unavailable }
+  - { name: blogwatcher,          enabled: true,  status: unavailable }
+  - { name: 1password,            enabled: true,  status: unavailable }
+  - { name: himalaya,             enabled: true,  status: unavailable }
+  - { name: sherpa-onnx-tts,      enabled: true,  status: unavailable }
+  - { name: gifgrep,              enabled: true,  status: unavailable }
+  - { name: github,               enabled: true,  status: unavailable }
+  - { name: draw-io,              enabled: true,  status: unavailable }
+  - { name: excalidraw,           enabled: true,  status: unavailable }
+  - { name: multi-lang-ocr,       enabled: true,  status: ready }
+  - { name: remotion,             enabled: true,  status: unavailable }
+
+  # ========== common · cloud_api ==========
+  - { name: notion,               enabled: true,  status: need_setup }
+  - { name: trello,               enabled: true,  status: need_setup }
+  - { name: nano-banana-pro,      enabled: true,  status: need_setup }
+  - { name: openai-image-gen,     enabled: true,  status: need_setup }
+  - { name: openai-whisper-api,   enabled: true,  status: need_setup }
+  - { name: goplaces,             enabled: true,  status: need_setup }
+  - { name: discord,              enabled: true,  status: ready }
+  - { name: slack,                enabled: true,  status: need_setup }
+  - { name: slidespeak-generator,  enabled: true,  status: need_setup }
+  - { name: slidespeak-editor,    enabled: true,  status: need_setup }
+  - { name: slidespeak-slide-editor, enabled: true, status: need_setup }
+  - { name: sag,                 enabled: true,  status: need_setup }
+  - { name: deep-doc-reader,      enabled: true,  status: need_setup }
+
+  # ========== common · external (library 新增) ==========
+  - { name: bird,                enabled: true,  status: unavailable }
+  - { name: wacli,               enabled: true,  status: unavailable }
+  - { name: gemini,              enabled: true,  status: unavailable }
+
+  # ========== darwin ==========
+  - { name: macos-screenshot,     enabled: true,  status: ready,       os: darwin }
+  - { name: macos-clipboard,      enabled: true,  status: ready,       os: darwin }
+  - { name: macos-notification,   enabled: true,  status: ready,       os: darwin }
+  - { name: macos-open,           enabled: true,  status: ready,       os: darwin }
+  - { name: macos-finder,         enabled: true,  status: ready,       os: darwin }
+  - { name: applescript,          enabled: true,  status: ready,       os: darwin }
+  - { name: app-scanner,          enabled: true,  status: ready,       os: darwin }
+  - { name: apple-notes,          enabled: true,  status: need_auth,   os: darwin }
+  - { name: apple-reminders,      enabled: true,  status: need_auth,   os: darwin }
+  - { name: apple-calendar,       enabled: true,  status: need_auth,   os: darwin }
+  - { name: peekaboo,             enabled: true,  status: ready,       os: darwin }
+  - { name: imsg,                 enabled: true,  status: unavailable, os: darwin }
+  - { name: bear-notes,           enabled: true,  status: unavailable, os: darwin }
+  - { name: things-mac,           enabled: true,  status: unavailable, os: darwin }
+  - { name: spotify-player,       enabled: true,  status: ready,       os: darwin }
+  - { name: openhue,              enabled: true,  status: unavailable, os: darwin }
+
+  # ========== win32 · builtin ==========
+  - { name: windows-screenshot,        enabled: true,  status: ready,       os: win32 }
+  - { name: windows-clipboard,         enabled: true,  status: ready,       os: win32 }
+  - { name: windows-notification,      enabled: true,  status: ready,       os: win32 }
+  - { name: powershell-basic,          enabled: true,  status: ready,       os: win32 }
+  - { name: windows-open,              enabled: true,  status: ready,       os: win32 }
+  - { name: windows-explorer-advanced, enabled: true,  status: ready,       os: win32 }
+  - { name: winget,                    enabled: true,  status: ready,       os: win32 }
+  - { name: windows-terminal,          enabled: true,  status: ready,       os: win32 }
+  - { name: microsoft-todo,            enabled: true,  status: ready,       os: win32 }
+  - { name: task-scheduler,            enabled: true,  status: ready,       os: win32 }
+
+  # ========== win32 · lightweight ==========
+  - { name: outlook-cli,               enabled: true,  status: unavailable, os: win32 }
+  - { name: onenote,                   enabled: true,  status: unavailable, os: win32 }
+  - { name: pywinauto,                 enabled: true,  status: ready,       os: win32 }
+  - { name: wsl,                       enabled: true,  status: ready,       os: win32 }
+
+  # ========== win32 · external ==========
+  - { name: everything-search,         enabled: true,  status: unavailable, os: win32 }
+
+  # ========== linux ==========
+  - { name: linux-screenshot,     enabled: true,  status: ready,       os: linux }
+  - { name: linux-clipboard,      enabled: true,  status: ready,       os: linux }
+  - { name: linux-notification,   enabled: true,  status: unavailable, os: linux }
+  - { name: xdotool,              enabled: true,  status: unavailable, os: linux }

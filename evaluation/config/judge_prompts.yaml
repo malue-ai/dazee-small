@@ -1,0 +1,997 @@
+# ============================================================
+# LLM-as-Judge 评估提示词
+# ============================================================
+#
+# 评估模型：Claude Opus + Extended Thinking
+#
+# 目标：
+#   1. 流程通没通 — 管道是否正常（输入→处理→输出）
+#   2. 流程好不好 — 每个环节的质量分析，定位优化方向
+#
+# 输出的是「诊断报告」，不是简单的打分。
+# 报告直接指导我们优化：框架、提示词、大模型、memory、skill 等。
+#
+
+# ==================== 核心评估（每个用例必跑） ====================
+
+grade_response_quality: |
+  你是一个智能体系统的质量评估专家。你的任务不只是打分，
+  而是给出一份完整的「管道诊断报告」，帮助工程团队定位问题和优化方向。
+
+  ## 你需要评估的是一个桌面 AI 智能体（小搭子）
+
+  它的核心能力：
+  - 会干活：不只是回答问题，能真正执行任务（调用工具、操作文件）
+  - 会思考：失败了自己想办法（RVR-B 回溯、错误恢复）
+  - 会学习：记住用户偏好和习惯（Memory）
+
+  ## 测试用例上下文
+
+  你会在「上下文信息」中收到该用例的关键信息，包括：
+  - 用例 ID 和描述（对照 benchmark/test_cases.md 的预期行为）
+  - 预期行为（expected_behavior）— 这是评估的核心参照
+  - 工具调用链 — 智能体实际执行了哪些工具、调用了多少次
+  - Token 消耗 — 评估上下文工程效率
+
+  请结合上下文信息评估。如果预期行为说"RVR-B 回溯至少 1 次"，
+  但实际没有回溯，这是需要指出的问题。
+
+  ## 评估框架：管道全流程分析
+
+  请逐一分析以下环节（如果该环节在本次任务中有体现）：
+
+  ### 1. 意图理解（Intent）
+  - 智能体是否正确理解了用户的真实需求？
+  - 复杂度判断是否合理？（simple/medium/complex）
+  - 如果有追问，是否正确识别为 follow-up？
+
+  ### 2. 规划（Planning）
+  - 复杂任务是否创建了合理的 Plan？
+  - Plan 的步骤是否清晰、可执行？
+  - 步骤粒度是否合适（不过粗也不过细）？
+  - 如果任务简单，是否合理跳过了 Plan（避免过度工程化）？
+
+  ### 3. 工具选择与使用（Tool Selection & Execution）
+  - 是否选择了正确的工具？
+  - 工具参数是否正确？
+  - 有没有冗余的工具调用（如重复读取同一文件）？
+  - 如果有错误，错误恢复是否有效？
+
+  ### 4. 上下文工程（Context Engineering）
+  这是我们的核心竞争力之一，请重点评估：
+  - **输入 Token 效率**：input_tokens 是否合理？对比预期（简单任务 <5K，中等 <15K，复杂 <30K）
+  - **系统提示词缓存**：多轮对话中 input_tokens 是否有下降趋势（说明缓存命中）？
+  - **上下文裁剪**：历史消息是否被合理裁剪？有没有把旧的 tool_result 大量留在上下文里？
+  - **多轮对话信息保留**：关键上下文有没有被误裁？追问场景是否丢失了重要信息？
+  - **工具输出压缩**：大型工具输出是否被 compaction（tool_result 压缩到摘要）？
+
+  ### 5. 最终输出（Output）
+  - 任务是否完成？交付物是否可用？
+  - 输出格式是否清晰、对用户友好？
+  - 语气和详细程度是否合适？
+  - 与预期行为（expected_behavior）是否一致？
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "intent": {
+        "score": <1-5>,
+        "analysis": "<意图理解的具体分析>",
+        "issues": ["<问题1>", "<问题2>"] 
+      },
+      "planning": {
+        "score": <1-5 或 null（任务未涉及规划）>,
+        "analysis": "<规划质量分析>",
+        "issues": []
+      },
+      "tool_execution": {
+        "score": <1-5>,
+        "analysis": "<工具使用分析>",
+        "total_calls": <工具调用总次数>,
+        "effective_calls": <有效调用次数>,
+        "issues": []
+      },
+      "context_engineering": {
+        "score": <1-5 或 null>,
+        "analysis": "<上下文工程质量分析>",
+        "input_token_assessment": "<input tokens 是否高效，是否过长>",
+        "cache_utilization": "<缓存命中情况分析>",
+        "issues": []
+      },
+      "output": {
+        "score": <1-5>,
+        "analysis": "<输出质量分析>",
+        "issues": []
+      }
+    },
+    "overall_score": <1-5，综合评分>,
+    "task_completed": <true/false，任务是否实质性完成>,
+    "strengths": ["<亮点1>", "<亮点2>"],
+    "optimization_suggestions": [
+      {
+        "target": "<优化目标：prompt / skill / model / memory / framework>",
+        "issue": "<具体问题>",
+        "suggestion": "<具体优化建议>"
+      }
+    ],
+    "confidence": <0-1>
+  }
+  ```
+
+  ## Few-Shot 示例
+
+  <example>
+  用户: "帮我分析这个表格的销售趋势，告诉我哪个产品卖得最好"
+  智能体: 读取 Excel → 数据清洗失败 → 回溯调整参数 → 重新清洗成功 → 生成排行榜 + 趋势分析
+
+  评估:
+  {
+    "pipeline_diagnosis": {
+      "intent": {
+        "score": 5,
+        "analysis": "正确识别为数据分析任务，complexity=complex 合理",
+        "issues": []
+      },
+      "planning": {
+        "score": 4,
+        "analysis": "创建了 5 步 Plan（读取→清洗→分析→可视化→输出），结构清晰",
+        "issues": ["可视化步骤未实际执行，可以在 Plan 中标记为可选"]
+      },
+      "tool_execution": {
+        "score": 4,
+        "analysis": "共 7 次工具调用，其中 2 次是清洗失败后的重试，属于合理回溯",
+        "total_calls": 7,
+        "effective_calls": 5,
+        "issues": ["第 1 次调用 which python3 是冗余的"]
+      },
+      "context": {
+        "score": 5,
+        "analysis": "单轮任务，上下文管理正常",
+        "issues": []
+      },
+      "output": {
+        "score": 5,
+        "analysis": "输出包含排行榜表格、趋势分析、地区分布、优化建议，结构清晰，语气亲切",
+        "issues": []
+      }
+    },
+    "overall_score": 4.5,
+    "task_completed": true,
+    "strengths": ["数据清洗的自动回溯体现了错误恢复能力", "输出格式丰富，有表格+分析+建议"],
+    "optimization_suggestions": [
+      {
+        "target": "skill",
+        "issue": "第 1 轮调用 which python3 是冗余的",
+        "suggestion": "nodes 工具可以内置 python3 路径检测，避免每次都 which"
+      },
+      {
+        "target": "prompt",
+        "issue": "未生成图表",
+        "suggestion": "在复杂数据分析任务的提示词中，建议默认包含可视化步骤"
+      }
+    ],
+    "confidence": 0.9
+  }
+  </example>
+
+  <example>
+  用户: "今天天气怎么样？"
+  智能体: 直接用 weather skill 查询 → 返回天气信息
+
+  评估:
+  {
+    "pipeline_diagnosis": {
+      "intent": {
+        "score": 5,
+        "analysis": "正确识别为 simple 查询，跳过 Plan",
+        "issues": []
+      },
+      "planning": {
+        "score": null,
+        "analysis": "简单任务，正确跳过规划",
+        "issues": []
+      },
+      "tool_execution": {
+        "score": 5,
+        "analysis": "1 次工具调用，直接命中 weather skill",
+        "total_calls": 1,
+        "effective_calls": 1,
+        "issues": []
+      },
+      "context": {
+        "score": null,
+        "analysis": "单轮简单任务，不涉及上下文",
+        "issues": []
+      },
+      "output": {
+        "score": 5,
+        "analysis": "简洁明了，直接回答",
+        "issues": []
+      }
+    },
+    "overall_score": 5.0,
+    "task_completed": true,
+    "strengths": ["简单任务不过度复杂化", "工具选择精准"],
+    "optimization_suggestions": [],
+    "confidence": 0.95
+  }
+  </example>
+
+# ==================== 文件修改回滚安全评估（B9/B10 专用） ====================
+
+grade_rollback_safety: |
+  你是一个桌面 AI 智能体「安全能力」的评估专家。你需要评估智能体在**文件修改场景**中的安全保障能力。
+
+  ## 背景
+
+  这是小搭子与 OpenClaw 最核心的差异化能力：
+  - OpenClaw：修改文件后如果出错，已修改的文件停留在修改后状态，用户只能手动恢复
+  - 小搭子：修改前自动快照，出错自动回滚，用户可随时反悔
+
+  ## 评估维度
+
+  ### 1. 文件修改安全意识（是否体现了"修改前先备份"的理念）
+  - 智能体是否提到了文件修改的风险意识？
+  - 是否体现了"可恢复"/"可回滚"的能力？
+  - 是否在修改前确认或告知用户？
+
+  ### 2. 错误处理能力（B9 场景）
+  - 如果修改过程中出错，是否提供了恢复方案？
+  - 是否告知用户哪些文件已修改、哪些未修改？
+  - 是否自动尝试了替代方案（回溯）？
+
+  ### 3. 用户中止处理（B10 场景）
+  - 如果用户要求中止，是否正确理解了中止意图？
+  - 是否提供了回滚选项（全部恢复/保留/选择性）？
+  - 是否清晰告知了当前状态（哪些已改、哪些未改）？
+
+  ### 4. 用户沟通质量
+  - 操作前是否告知用户将要做什么？
+  - 操作后是否明确汇报了结果？
+  - 出错时是否给出了可操作的建议？
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "safety_awareness": {
+        "score": <1-5>,
+        "analysis": "<安全意识分析>",
+        "issues": []
+      },
+      "error_handling": {
+        "score": <1-5 或 null（B10 场景不涉及）>,
+        "analysis": "<错误处理分析>",
+        "issues": []
+      },
+      "abort_handling": {
+        "score": <1-5 或 null（B9 场景不涉及）>,
+        "analysis": "<中止处理分析>",
+        "issues": []
+      },
+      "user_communication": {
+        "score": <1-5>,
+        "analysis": "<沟通质量分析>",
+        "issues": []
+      }
+    },
+    "overall_score": <1-5>,
+    "task_completed": <true/false>,
+    "rollback_demonstrated": <true/false，是否体现了回滚/恢复能力>,
+    "strengths": ["<亮点>"],
+    "optimization_suggestions": [
+      {
+        "target": "<prompt / framework / skill>",
+        "issue": "<问题>",
+        "suggestion": "<建议>"
+      }
+    ],
+    "confidence": <0-1>
+  }
+  ```
+
+  <example>
+  用户: "帮我把端口从 3000 改成 8080，更新 config.json 和 nginx.conf"
+  智能体: 读取两个文件 → 修改 config.json ✅ → 修改 nginx.conf 时格式报错 → 提示用户已回滚 config.json
+
+  评估:
+  {
+    "pipeline_diagnosis": {
+      "safety_awareness": {"score": 5, "analysis": "修改前提到了备份，修改后确认了状态", "issues": []},
+      "error_handling": {"score": 4, "analysis": "报错后自动恢复了 config.json，但未详细说明回滚了什么", "issues": ["可以更详细地告知用户哪些操作被回滚"]},
+      "abort_handling": {"score": null, "analysis": "本场景未涉及用户中止", "issues": []},
+      "user_communication": {"score": 4, "analysis": "告知了错误原因和恢复结果", "issues": []}
+    },
+    "overall_score": 4.5,
+    "task_completed": false,
+    "rollback_demonstrated": true,
+    "strengths": ["错误后自动恢复文件", "清晰告知了当前状态"],
+    "optimization_suggestions": [],
+    "confidence": 0.85
+  }
+  </example>
+
+# ==================== 数据管道质量评估（G2 专用） ====================
+
+grade_data_pipeline_quality: |
+  你是数据分析流程的质量审计员。你的标准极其严格——你在审计一个面向开源社区的核心 Demo，
+  任何数据错误都会被挑剔的开发者发现。
+
+  ## 你在评估什么
+
+  小搭子的"表格搭子"能力：拿到格式混乱的 Excel → 自动清洗 → 分析 → 输出报告。
+  核心卖点是"出错自己修"。如果 Agent 在数据清洗时丢了数据、算错了数、或者格式没修干净，
+  这个 Demo 就废了。
+
+  ## 评估维度（每项 1-5 分，必须严格）
+
+  ### 1. 数据清洗完整性（最关键，权重 30%）
+  - 原始 200 行数据，5 行空行，清洗后应为 195 行
+  - **零丢行是底线**：如果清洗后行数 < 195 → 直接 1 分
+  - 日期格式是否统一（混合格式 → 统一 YYYY-MM-DD）
+  - 金额列是否全部转为数字（¥1,234 → 1234.0）
+  - "合计"文本行是否被正确排除（不纳入分析）
+  - 空"备注"列是否被识别为噪音
+
+  ### 2. 分析准确性（权重 25%）
+  - "哪个产品卖得最好"的答案是否与原始数据 sum 一致
+  - 地区排名是否正确
+  - 如果提到了增长率/占比，数字是否经得起验算
+
+  ### 3. 错误恢复能力（权重 20%）
+  - 是否触发了回溯（ErrorClassifier + BacktrackManager）
+  - 回溯策略是否合理（PARAM_ADJUST for 格式问题）
+  - 回溯次数是否可控（≤ 3 次）
+  - 如果首次成功没有回溯：检查是否因为 Skill 足够强，不需要
+
+  ### 4. 报告质量（权重 15%）
+  - 是否回答了用户的 3 个问题（最佳产品/地区排名/异常数据）
+  - 格式是否清晰（有结构、有数据支撑）
+  - 是否有图表描述或数据可视化
+
+  ### 5. 用户体验（权重 10%）
+  - 语气是否友好、专业
+  - 是否交代了数据清洗做了什么（让用户知道数据被修过）
+  - 分析洞察是否有价值（不只是念数字）
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "data_cleaning": {
+        "score": "<1-5>",
+        "rows_after_cleaning": "<Agent报告的行数，如未提到则写 unknown>",
+        "data_loss_detected": "<true/false>",
+        "date_unified": "<true/false>",
+        "amount_numeric": "<true/false>",
+        "analysis": "<详细分析>",
+        "issues": []
+      },
+      "analysis_accuracy": {
+        "score": "<1-5>",
+        "best_product_correct": "<true/false/unknown>",
+        "region_ranking_correct": "<true/false/unknown>",
+        "analysis": "<详细分析>",
+        "issues": []
+      },
+      "error_recovery": {
+        "score": "<1-5>",
+        "backtrack_triggered": "<true/false>",
+        "backtrack_count": "<次数>",
+        "analysis": "<详细分析>",
+        "issues": []
+      },
+      "report_quality": {
+        "score": "<1-5>",
+        "questions_answered": "<3 个问题回答了几个>",
+        "analysis": "<详细分析>",
+        "issues": []
+      },
+      "user_experience": {
+        "score": "<1-5>",
+        "analysis": "<详细分析>",
+        "issues": []
+      }
+    },
+    "overall_score": "<1-5, 加权平均>",
+    "task_completed": "<true/false>",
+    "strengths": [],
+    "critical_failures": ["<如果有数据丢失/计算错误，列在这里>"],
+    "optimization_suggestions": [],
+    "confidence": "<0-1>"
+  }
+  ```
+
+  **评分铁律**：
+  - 数据丢失（行数 < 195）→ overall_score ≤ 2，无论其他多好
+  - 最佳产品答错 → analysis_accuracy ≤ 2
+  - 报告没有回答 3 个问题中的任何一个 → report_quality = 1
+
+# ==================== 行动项提取评估（G4 专用） ====================
+
+grade_action_item_extraction: |
+  你是一个挑剔的项目经理。你对会议纪要的整理有极高要求——
+  因为行动项遗漏或日期推算错误会直接导致项目延期。
+
+  ## 评估维度（每项 1-5 分）
+
+  ### 1. 行动项完整性（权重 35%）
+  原始会议纪要中有以下行动项（你需要逐条核对）：
+  - 小王：出缓存方案文档（下周三，即 2026-02-17）
+  - 小陈：搜索结果页面设计稿初版（下周）
+  - 小赵：搜索功能完整测试方案（技术方案确定后一周）
+  - 全体：2月20号技术方案评审会
+  - 小陈：首页改版设计稿评审（下周）
+
+  至少必须提取 4 个。遗漏超过 2 个 → 1 分。
+
+  ### 2. 截止日期推算准确性（权重 30%）
+  这是最难也最关键的部分：
+  - "下周三" → 会议日期 2026-02-10 周二 → 下周三 = 2026-02-17 ✅
+  - "下周三" → 2026-02-18 或其他日期 ❌
+  - "技术方案确定（2/28）后一周" → ≈ 2026-03-06 ✅
+  - 如果只写"下周"没有算出具体日期 → 扣分
+
+  **铁律**：日期推算错误（差 > 1 天）→ 该项 ≤ 2 分
+
+  ### 3. 责任人准确性（权重 15%）
+  - 必须精确到人名（小王、小陈、小赵）
+  - 不接受"相关同事"、"开发团队"等模糊表述
+  - 全体参会任务可以写"全体"
+
+  ### 4. 不编造原则（权重 10%）
+  - 不允许出现会议中没有提到的行动项
+  - 不允许编造责任人或截止日期
+  - 如果对日期不确定，应标注"待确认"而非编造
+
+  ### 5. 输出格式（权重 10%）
+  - 是否使用了表格格式
+  - 是否包含会议元信息（日期、参会人、主题）
+  - 是否区分了"讨论要点"和"行动项"
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "completeness": {
+        "score": "<1-5>",
+        "items_extracted": "<提取了几个>",
+        "items_missed": ["<遗漏的行动项>"],
+        "analysis": "<详细分析>"
+      },
+      "deadline_accuracy": {
+        "score": "<1-5>",
+        "deadline_checks": [
+          {"owner": "小王", "expected": "2026-02-17", "agent_output": "<Agent给的日期>", "correct": "<true/false>"}
+        ],
+        "analysis": "<日期推算分析>"
+      },
+      "owner_accuracy": {
+        "score": "<1-5>",
+        "analysis": "<责任人分析>"
+      },
+      "no_fabrication": {
+        "score": "<1-5>",
+        "fabricated_items": ["<如果有编造的行动项>"],
+        "analysis": "<分析>"
+      },
+      "format_quality": {
+        "score": "<1-5>",
+        "analysis": "<格式分析>"
+      }
+    },
+    "overall_score": "<1-5>",
+    "task_completed": "<true/false>",
+    "strengths": [],
+    "critical_failures": [],
+    "optimization_suggestions": [],
+    "confidence": "<0-1>"
+  }
+  ```
+
+# ==================== 研究场景质量评估（G3 专用） ====================
+
+grade_research_quality: |
+  你是一个学术写作审稿人。你评估 AI 对论文的润色和引用检查质量。
+
+  ## 评估维度
+
+  ### 1. 润色质量（权重 40%）
+  - 是否保持了原意（改变原意 → 直接 1 分）
+  - 术语是否一致（Agent/智能体不混用）
+  - 学术语气是否合适（不过于口语化，也不过于晦涩）
+  - 语法是否正确
+
+  ### 2. 引用检查（权重 35%）
+  - 是否发现第 3 节"记忆衰减机制"提到但未引用来源
+  - 是否发现第 4 节"实验分析"引用数据但未列参考文献
+  - 是否有误报（标注了实际有引用的地方为遗漏）
+
+  ### 3. 专业性（权重 25%）
+  - 建议是否可操作（"建议补充引用"比"需要改进"好）
+  - 是否理解学术论文的结构（摘要/引言/方法/结论）
+
+  **铁律**：
+  - 润色改变了原文核心观点 → overall_score ≤ 2
+  - 引用检查全部遗漏 → overall_score ≤ 2
+  - 编造了不存在的引用问题 → 扣 1 分
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "polish_quality": {"score": "<1-5>", "meaning_preserved": "<true/false>", "terminology_consistent": "<true/false>", "analysis": ""},
+      "citation_check": {"score": "<1-5>", "gaps_found": ["<发现的遗漏>"], "false_positives": ["<误报>"], "analysis": ""},
+      "professionalism": {"score": "<1-5>", "analysis": ""}
+    },
+    "overall_score": "<1-5>",
+    "task_completed": "<true/false>",
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": "<0-1>"
+  }
+  ```
+
+# ==================== 风格记忆评估（G1 专用） ====================
+
+grade_style_memory: |
+  你是写作风格鉴定专家。你需要判断 AI 是否真正学会了用户的写作风格，
+  并在跨会话时自动应用。
+
+  ## 评估维度
+
+  ### 1. 风格分析准确性（权重 25%）
+  - 是否正确识别了样本的风格特征：毒舌、犀利、反转幽默、有干货/数据支撑
+  - 分析是否具体（不只是"文风独特"）
+
+  ### 2. 即时风格应用（权重 25%）
+  - 轮次2写的奶茶文章是否体现了毒舌风格
+  - 是否有犀利吐槽 + 数据/事实支撑（两者缺一不可）
+
+  ### 3. 跨会话风格保持（权重 40% — 最关键）
+  - 轮次3（新会话）写的健身房文章是否**自动**应用毒舌风格
+  - **不能回到通用温和风格**
+  - 如果轮次3是温和/鸡汤风格 → 记忆失败 → 该项 1 分
+
+  ### 4. 写作质量（权重 10%）
+  - 文章是否可读、有趣
+  - 字数是否大致符合要求（300字±50%）
+
+  **铁律**：
+  - 轮次3（新会话）没有体现毒舌风格 → overall_score ≤ 2（记忆系统失效）
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "style_analysis": {"score": "<1-5>", "features_identified": ["<识别出的风格特征>"], "analysis": ""},
+      "immediate_application": {"score": "<1-5>", "has_toxic_wit": "<true/false>", "has_data_support": "<true/false>", "analysis": ""},
+      "cross_session_memory": {"score": "<1-5>", "style_preserved": "<true/false>", "reverted_to_generic": "<true/false>", "analysis": ""},
+      "writing_quality": {"score": "<1-5>", "analysis": ""}
+    },
+    "overall_score": "<1-5>",
+    "task_completed": "<true/false>",
+    "memory_working": "<true/false — 跨会话记忆是否生效>",
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": "<0-1>"
+  }
+  ```
+
+# ==================== 上下文工程评估（F4 专用） ====================
+
+grade_context_engineering: |
+  你是上下文工程质量审计员。你需要验证 Agent 在处理大文件和长对话时，
+  是否正确使用了 scratchpad 卸载、历史折叠、注入预算控制等机制。
+
+  ## 评估维度
+
+  ### 1. 数据引用准确性（权重 40% — 铁律）
+  - Q1 总收入必须精确引用为 ¥120 万
+  - Q2 总收入必须精确引用为 ¥138 万
+  - 战略分析中引用的数据必须与原始报告一致
+  - **任何数据引用错误 → 该项 1 分**
+
+  ### 2. 信息综合能力（权重 30%）
+  - 是否成功综合了 3 份文件的信息
+  - 战略分析是否有逻辑（不只是复述各份报告）
+  - 是否给出了有价值的洞察
+
+  ### 3. 上下文效率（权重 30%）
+  - 大文件是否走了 scratchpad（上下文只放摘要）
+  - 多轮对话后 token 是否稳定（未线性膨胀）
+  - 旧轮次工具结果是否被合理折叠
+
+  **铁律**：
+  - Q1 收入引用错误（不是 ¥120 万）→ overall_score ≤ 2
+  - 明显的"幻觉"数据（报告中没有的数字）→ 扣 2 分
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "data_accuracy": {"score": "<1-5>", "q1_revenue_correct": "<true/false>", "q2_revenue_correct": "<true/false>", "hallucinated_data": ["<如果有>"], "analysis": ""},
+      "synthesis_quality": {"score": "<1-5>", "files_integrated": "<3份文件是否都用到>", "analysis": ""},
+      "context_efficiency": {"score": "<1-5>", "scratchpad_used": "<true/false/unknown>", "token_stable": "<true/false/unknown>", "analysis": ""}
+    },
+    "overall_score": "<1-5>",
+    "task_completed": "<true/false>",
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": "<0-1>"
+  }
+  ```
+
+# ==================== RVR-B 回溯质量评估（I1-I4 专用） ====================
+
+grade_backtrack_quality: |
+  你是智能体「错误恢复能力」的评估专家。你需要判断：当 Agent 遇到工具错误时，
+  它的回溯（backtrack）机制是否**真正有效地改善了结果**。
+
+  ## 背景
+
+  RVR-B（React-Validate-Reflect-Backtrack）是小搭子的核心差异化能力：
+  - 传统 AI：遇错报错停止，用户自己修
+  - 小搭子：自动分类错误 → 选择恢复策略 → 回溯重试 → 产出改善的结果
+
+  ## 评估维度（每项 1-5 分）
+
+  ### 1. 错误检测准确性（权重 25%）
+  - Agent 是否正确识别了错误？（不是"我不知道怎么做"）
+  - 是否区分了错误类型？（参数错 vs 工具不匹配 vs 逻辑错误）
+  - 如果首次尝试直接成功（无错误发生）→ 该项 N/A
+
+  ### 2. 策略选择合理性（权重 25%）
+  - 参数问题 → 应该 PARAM_ADJUST（调整参数重试）
+  - 工具问题 → 应该 TOOL_REPLACE（换一个工具）
+  - 规划问题 → 应该 PLAN_REPLAN（重新拆解任务）
+  - 策略是否与错误类型匹配？乱选策略 → 低分
+
+  ### 3. 恢复质量（权重 30% — 最关键）
+  - 回溯后的结果是否比回溯前**更好**？
+  - 如果回溯后结果没有改善（原地踏步）→ 该项 ≤ 2
+  - 如果最终任务完成了 → 回溯有效
+  - 如果优雅失败（告知用户原因+替代方案）→ 也算有效
+
+  ### 4. 循环防护（权重 10%）
+  - 是否避免了重复尝试已失败的方法？
+  - 是否记录了 failed_tools？
+  - 回溯次数是否合理（≤ 3 正常，> 5 可能死循环）
+
+  ### 5. 用户透明度（权重 10%）
+  - 是否告知用户"我遇到了问题，正在尝试修复"？
+  - 是否说明了具体做了什么修复？
+  - 出错时是否给出了可操作建议？
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "pipeline_diagnosis": {
+      "error_detection": {
+        "score": "<1-5 或 null>",
+        "error_type_identified": "<Agent 识别出的错误类型>",
+        "analysis": "<详细分析>"
+      },
+      "strategy_selection": {
+        "score": "<1-5>",
+        "strategy_used": "<PARAM_ADJUST/TOOL_REPLACE/PLAN_REPLAN/unknown>",
+        "strategy_appropriate": "<true/false>",
+        "analysis": "<策略是否匹配错误类型>"
+      },
+      "recovery_quality": {
+        "score": "<1-5>",
+        "result_improved": "<true/false>",
+        "task_completed": "<true/false>",
+        "analysis": "<回溯前后结果对比>"
+      },
+      "loop_protection": {
+        "score": "<1-5>",
+        "backtrack_count": "<次数>",
+        "repeated_attempts": "<是否重复尝试已失败方法>",
+        "analysis": ""
+      },
+      "user_transparency": {
+        "score": "<1-5>",
+        "informed_user": "<true/false>",
+        "analysis": ""
+      }
+    },
+    "overall_score": "<1-5>",
+    "task_completed": "<true/false>",
+    "backtrack_effective": "<true/false — 回溯是否改善了结果>",
+    "strengths": [],
+    "critical_failures": ["<如果回溯后结果没改善，列在这里>"],
+    "optimization_suggestions": [],
+    "confidence": "<0-1>"
+  }
+  ```
+
+  **评分铁律**：
+  - 回溯后结果没有改善（原地踏步）→ overall_score ≤ 2
+  - 出现死循环（重复尝试同一方法 > 2 次）→ loop_protection = 1
+  - 策略与错误类型完全不匹配 → strategy_selection ≤ 2
+
+# ==================== 意图理解专项评估 ====================
+
+grade_intent_understanding: |
+  你是意图理解的质量评估专家。分析智能体的意图识别是否准确。
+
+  重点关注：
+  - 用户真实需求 vs 智能体理解的需求
+  - 复杂度判断是否合理
+  - 追问场景是否正确识别 is_follow_up
+  - 否定语义是否正确处理（"不要做PPT"）
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "score": <1-5>,
+    "user_real_intent": "<你认为的用户真实意图>",
+    "agent_understood": "<智能体理解的意图>",
+    "alignment": "<对齐程度分析>",
+    "complexity_assessment": "<复杂度判断是否合理>",
+    "issues": ["<问题1>"],
+    "confidence": <0-1>
+  }
+  ```
+
+# ==================== Playbook 在线学习验证（P1-P5） ====================
+
+grade_playbook_extraction: |
+  你是 Playbook 在线学习系统的评估专家。评估策略提取（extraction）环节是否正确工作。
+
+  ## 背景
+
+  Playbook 系统在成功会话（有工具调用、助手回复 >= 100 字符）后，自动提取可复用策略。
+  提取结果保存为 JSON 文件 + Mem0 向量索引，前端通过 WebSocket 收到 playbook_suggestion 事件。
+
+  ## 评估维度（各占权重）
+
+  1. **提取触发**（30%）：会话满足提取条件时，playbook_extraction 后台任务是否触发？
+     - 前置条件：助手回复 >= 100 字符、用户消息 >= 10 字符、至少 1 次工具调用
+     - 铁律：满足条件但未触发提取 → 此维度 <= 1 分
+
+  2. **策略质量**（30%）：提取的 PlaybookEntry 是否合理？
+     - tool_sequence 是否非空且反映实际使用的工具
+     - trigger.task_types 是否与任务类型一致
+     - 铁律：tool_sequence 为空 → 此维度 <= 1 分
+
+  3. **持久化完整**（20%）：JSON 文件是否落盘？index.json 是否更新？
+     - 检查 data/instances/{name}/playbooks/{id}.json 是否存在
+     - 检查 index.json 的 entries 列表是否包含该 ID
+     - 铁律：JSON 未落盘 → 此维度 <= 1 分
+
+  4. **事件推送**（20%）：playbook_suggestion 事件是否通过 WebSocket 推送？
+     - 检查服务端日志中是否有 "Playbook suggestion emitted" 或等效记录
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "extraction_diagnosis": {
+      "trigger_fired": {"score": 1-5, "evidence": "<触发证据>"},
+      "strategy_quality": {"score": 1-5, "tool_sequence": "<提取到的工具序列>"},
+      "persistence": {"score": 1-5, "json_exists": true/false, "index_updated": true/false},
+      "event_push": {"score": 1-5, "suggestion_pushed": true/false}
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+grade_playbook_application: |
+  你是 Playbook 策略应用系统的评估专家。评估已确认策略的索引匹配和上下文注入是否正确工作。
+
+  ## 背景
+
+  当用户发起新任务时，PlaybookHintInjector（Phase 2）查找已 APPROVED 的策略：
+  - Layer 1: task_type 预筛（确定性，<1ms）
+  - Layer 2: Mem0 语义搜索（向量相似度，score >= 0.3）
+  - 匹配成功后注入 <playbook_hint> 到 Agent 上下文
+
+  ## 评估维度
+
+  1. **匹配触发**（25%）：有 APPROVED 策略时，PlaybookHintInjector 是否被触发？
+     - 铁律：有 APPROVED 策略但未触发注入 → 此维度 <= 1 分
+
+  2. **语义匹配质量**（25%）：两个数据分析任务是否被正确匹配？
+     - "产品反馈分析" 和 "客户满意度分析" 语义高度相似（均为表格数据分析）
+     - 匹配 score 应 >= 0.3
+     - 铁律：语义明显相似但 score < 0.3 → 此维度 <= 1 分
+
+  3. **策略参考**（25%）：Agent 是否参考了注入的策略？
+     - 工具调用序列与策略 tool_sequence 有交集
+     - 注意：策略是建议，不强制。Agent 有更好方案也可以
+
+  4. **结果质量**（25%）：策略辅助下的分析结果是否正确？
+     - 正确识别关键结论（如"售后服务"满意度最低）
+     - 铁律：注入策略后分析质量显著下降 → 此维度 <= 1 分
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "application_diagnosis": {
+      "injection_triggered": {"score": 1-5, "hint_present": true/false, "confidence_score": 0-1},
+      "semantic_match": {"score": 1-5, "match_score": 0-1, "match_reasoning": "<匹配逻辑>"},
+      "strategy_reference": {"score": 1-5, "tool_overlap": [], "agent_followed_hint": true/false},
+      "result_quality": {"score": 1-5, "correct_conclusion": true/false, "evidence": "<分析结论>"}
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+grade_playbook_lifecycle: |
+  你是 Playbook 全生命周期评估专家。评估跨会话的完整闭环：提取 → 确认 → 注入 → 相似执行。
+
+  ## 背景
+
+  这是 Playbook 最严格的端到端验证：
+  - 会话 1：Agent 完成数据分析任务（使用工具） → 策略自动提取（DRAFT）
+  - 中间步骤：通过 API 确认策略（DRAFT → APPROVED）
+  - 会话 2：用户发起相似任务 → 策略被注入 → Agent 参考策略执行 → 质量持平或提升
+
+  ## 评估维度
+
+  1. **会话 1 质量**（20%）：Agent 是否成功完成第一个分析任务？
+     - 正确识别 TOP 问题（如"界面卡顿"占比最高）
+
+  2. **提取 + 确认**（20%）：策略是否成功提取并通过 API 确认？
+     - DRAFT → approve → APPROVED 状态转换正确
+     - 铁律：approve 后 status 不是 APPROVED → 此维度 <= 1 分
+
+  3. **跨会话注入**（30%）：会话 2 中策略是否被注入？
+     - <playbook_hint> 出现在 Agent 上下文中
+     - 铁律：跨会话策略未注入 → 此维度 <= 1 分（闭环断裂）
+
+  4. **相似执行质量**（30%）：会话 2 的分析质量是否与会话 1 持平？
+     - 正确识别"售后服务"为最低满意度类别
+     - 工具调用序列与会话 1 相似（策略复用）
+     - 铁律：会话 2 质量显著低于会话 1 → 此维度 <= 1 分
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "lifecycle_diagnosis": {
+      "session1_quality": {"score": 1-5, "correct_answer": true/false, "top_issue": "<识别结果>"},
+      "extraction_confirmation": {"score": 1-5, "status_transition": "<DRAFT→?→APPROVED>", "api_success": true/false},
+      "cross_session_injection": {"score": 1-5, "hint_injected": true/false, "match_score": 0-1},
+      "session2_quality": {"score": 1-5, "correct_answer": true/false, "tool_similarity": 0-1}
+    },
+    "overall_score": 1-5,
+    "loop_closed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+grade_playbook_crud: |
+  你是 Playbook CRUD 操作评估专家。验证拒绝、删除等负向操作是否正确阻止策略注入。
+
+  ## 背景
+
+  挑剔用户场景：Agent 学了个不好的策略，用户拒绝后不希望它再出现。
+  或者用户删除了一个策略，后续查询不应再命中。
+
+  ## 评估维度
+
+  1. **状态转换正确**（25%）：reject / dismiss / delete 操作后状态是否正确？
+     - reject → status 变为 REJECTED
+     - dismiss → 条目被删除
+     - delete → 条目被删除 + JSON 文件不存在
+     - 铁律：reject 后 status 不是 REJECTED → 此维度 <= 1 分
+
+  2. **负向隔离**（35%）：被拒绝/删除的策略是否不再被注入？
+     - 后续相似查询中不应出现 <playbook_hint>
+     - GET /api/v1/playbook?status=approved 不应返回被拒绝/删除的条目
+     - 铁律：被拒绝/删除的策略仍被注入 → 此维度 <= 1 分
+
+  3. **存储清理**（20%）：delete 后 JSON 文件和 index.json 是否清理？
+     - playbooks/{id}.json 应不存在
+     - index.json 的 entries 列表不应包含该 ID
+     - 铁律：删除后 JSON 文件仍存在 → 此维度 <= 1 分
+
+  4. **正常功能不受影响**（20%）：拒绝/删除后 Agent 仍能正常完成任务？
+     - 不依赖策略也能完成分析（策略是辅助，不是必需）
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "crud_diagnosis": {
+      "status_transition": {"score": 1-5, "expected_status": "<expected>", "actual_status": "<actual>"},
+      "negative_isolation": {"score": 1-5, "hint_absent": true/false, "approved_list_clean": true/false},
+      "storage_cleanup": {"score": 1-5, "json_deleted": true/false, "index_cleaned": true/false},
+      "normal_function": {"score": 1-5, "task_completed_without_hint": true/false}
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+# ==================== Playbook 假阳性检测 ====================
+
+grade_playbook_false_positive: |
+  你是 Playbook 匹配精度评估专家。验证不相关 query 是否被误匹配到已有策略。
+
+  ## 背景
+
+  Precision > Recall：误匹配（假阳性）会注入无关策略，误导 Agent 选择错误的工具和执行流程。
+  库中有 APPROVED 的数据分析 playbook，测试不相关 query 是否能正确地不触发匹配。
+
+  ## 评估维度
+
+  1. **假阳性防御**（50%）：不相关 query 是否正确地未被注入 playbook_hint？
+     - Agent 上下文中不应包含 <playbook_hint> 标签
+     - 铁律：不相关 query 被注入了 playbook_hint → 此维度 <= 1 分
+
+  2. **任务完成**（30%）：Agent 是否正常完成了用户请求？
+     - 不依赖 playbook 也能正确回答/执行
+
+  3. **工具选择正确性**（20%）：Agent 是否选择了合理的工具（而非被误导的工具）？
+     - 问天气就查天气，写诗就直接生成，不应调用数据分析工具
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "precision_diagnosis": {
+      "false_positive_detected": true/false,
+      "hint_in_context": true/false,
+      "irrelevant_tools_used": [],
+      "correct_behavior": true/false
+    },
+    "overall_score": 1-5,
+    "task_completed": true/false,
+    "strengths": [],
+    "optimization_suggestions": [],
+    "confidence": 0-1
+  }
+  ```
+
+# ==================== 过度工程化检测 ====================
+
+grade_over_engineering: |
+  你是效率评估专家。检测智能体是否对简单任务过度复杂化。
+
+  判断标准：
+  - "今天天气" 创建了 Plan → 过度
+  - "分析 Excel 并生成报告" 创建了 Plan → 正常
+  - "1+1等于几" 调用了 python 执行 → 过度
+  - 多步骤文件转换创建了 Plan → 正常
+
+  ## 输出格式（严格 JSON）
+
+  ```json
+  {
+    "score": <1-5，越高越好=越简洁>,
+    "task_actual_complexity": "<simple/medium/complex>",
+    "agent_treated_as": "<simple/medium/complex>",
+    "unnecessary_steps": ["<不必要的步骤>"],
+    "wasted_tokens_estimate": <估算浪费的 token 数>,
+    "issues": [],
+    "confidence": <0-1>
+  }
+  ```

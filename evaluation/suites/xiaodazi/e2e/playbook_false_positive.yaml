@@ -1,0 +1,142 @@
+# Playbook 假阳性（False Positive）评估
+#
+# 目的：验证不相关 query 不会被误匹配到已有 playbook
+#
+# 前提：库中已有 APPROVED 的 "Excel 数据分析并生成图表" playbook
+# 测试：发送与该 playbook 无关的 query，验证无 <playbook_hint> 注入
+#
+# Precision > Recall：宁可不匹配，不能误匹配
+
+id: playbook_false_positive
+name: Playbook 假阳性测试
+description: 验证不相关 query 不会触发 playbook hint 误注入
+category: xiaodazi_e2e
+default_trials: 1
+
+metadata:
+  version: "1.0.0"
+  dimension: playbook_precision
+  runner: run_e2e_eval
+
+tasks:
+
+  # ================================================================
+  # FP1 — 完全不相关的日常闲聊
+  # 期望：不注入任何 playbook_hint
+  # ================================================================
+  - id: FP1
+    description: "假阳性测试 — 日常闲聊不应触发数据分析 playbook"
+    category: e2e_playbook_precision
+    input:
+      user_query: "今天天气怎么样？"
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先 approve 一个 Excel 数据分析 playbook"
+    expected_outcome:
+      hint_absent: true
+      task_completed: true
+    graders:
+      - type: code
+        name: check_no_playbook_hint
+        check: "check_no_playbook_hint()"
+    trials: 1
+    timeout_seconds: 120
+    tags: ["playbook", "false_positive", "precision"]
+    metadata:
+      setup_steps:
+        - description: "确保库中有 APPROVED 的数据分析 playbook"
+      expected_behavior: >
+        库中有 "Excel 数据分析并生成图表" 策略。
+        用户问天气 → 与数据分析无关 → 不应注入 playbook_hint。
+        铁律：闲聊触发了数据分析 playbook = 假阳性。
+
+  # ================================================================
+  # FP2 — 不同领域的生成任务
+  # 期望：不注入任何 playbook_hint
+  # ================================================================
+  - id: FP2
+    description: "假阳性测试 — 写作任务不应触发数据分析 playbook"
+    category: e2e_playbook_precision
+    input:
+      user_query: "帮我写一首关于春天的诗"
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先 approve 一个 Excel 数据分析 playbook"
+    expected_outcome:
+      hint_absent: true
+      task_completed: true
+    graders:
+      - type: code
+        name: check_no_playbook_hint
+        check: "check_no_playbook_hint()"
+    trials: 1
+    timeout_seconds: 120
+    tags: ["playbook", "false_positive", "precision"]
+    metadata:
+      expected_behavior: >
+        库中有 "Excel 数据分析并生成图表" 策略。
+        用户要写诗 → 与数据分析完全无关 → 不应注入 playbook_hint。
+
+  # ================================================================
+  # FP3 — 关键词相似但语义不同
+  # "分析" 一词出现但上下文完全不同
+  # 期望：不注入 playbook_hint（高精度要求）
+  # ================================================================
+  - id: FP3
+    description: "假阳性测试 — 关键词相似但语义不同不应误匹配"
+    category: e2e_playbook_precision
+    input:
+      user_query: "分析一下为什么我最近总失眠"
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先 approve 一个 Excel 数据分析 playbook"
+    expected_outcome:
+      hint_absent: true
+      task_completed: true
+    graders:
+      - type: code
+        name: check_no_playbook_hint
+        check: "check_no_playbook_hint()"
+    trials: 1
+    timeout_seconds: 120
+    tags: ["playbook", "false_positive", "precision", "keyword_trap"]
+    metadata:
+      expected_behavior: >
+        库中有 "Excel 数据分析并生成图表" 策略。
+        用户说"分析失眠原因" → 虽含"分析"关键词，但语义完全不同 →
+        不应被 FTS5 关键词匹配误导 → 不注入 playbook_hint。
+        这是 FTS5 CJK 单字分词噪音的典型陷阱。
+
+  # ================================================================
+  # FP4 — 真正匹配的正例对照
+  # 期望：应当注入 playbook_hint（验证不是全部被阻断）
+  # ================================================================
+  - id: FP4
+    description: "正例对照 — 真正相关的数据分析请求应匹配 playbook"
+    category: e2e_playbook_precision
+    input:
+      user_query: "帮我分析这份 CSV 文件的销售数据趋势"
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先 approve 一个 Excel 数据分析 playbook"
+      files:
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      hint_present: true
+      task_completed: true
+    graders:
+      - type: code
+        name: check_playbook_hint_present
+        check: "check_playbook_hint_present()"
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+    trials: 1
+    timeout_seconds: 300
+    tags: ["playbook", "true_positive", "precision"]
+    metadata:
+      expected_behavior: >
+        库中有 "Excel 数据分析并生成图表" 策略。
+        用户要分析 CSV 销售数据 → 与数据分析 playbook 高度匹配 →
+        应注入 playbook_hint（score >= 0.5）。
+        此用例确认提高阈值后真正相关的请求仍能命中。

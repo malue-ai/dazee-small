@@ -1,0 +1,309 @@
+# ============================================================
+# Skills 配置
+# ============================================================
+#
+# 所有工具能力统一通过 Skills 管理，包括 MCP 工具。
+# 按 OS x 复杂度 分类，框架自动按当前系统过滤。
+#
+# backend_type:
+#   tool     - 框架内置工具（系统级）
+#   local    - 本地 Skill（SKILL.md 驱动）
+#   mcp      - MCP 服务器（连接细节写在条目内）
+#   api      - REST API
+#
+# skill_source:
+#   instance - 实例目录 skills/ 下
+#   library  - 框架全局 skills/library/ 下
+#
+# 复杂度分级:
+#   builtin     - 装好就能用
+#   lightweight - 首次用时自动装，或点一下授权
+#   external    - 需要你装一个软件
+#   cloud_api   - 需要填个 API Key
+#
+
+# ==================== Skill 分组（意图驱动按需注入） ====================
+#
+# IntentAnalyzer 语义判断需要哪些分组（可多选）。
+# 只有被选中分组的 Skills 才会注入到系统提示词中，节省 token。
+# _always 组始终注入。
+#
+
+skill_groups:
+  writing:
+    description: "写作、润色、改写、扩写、去 AI 味、文章生成、风格学习、多平台格式转换、PDF 报告、内容摘要、PPT 生成与编辑"
+    skills: [writing-assistant, writing-analyzer, style-learner, content-reformatter, humanizer, elegant-reports, ppt-generator, slidespeak-generator, slidespeak-editor, slidespeak-slide-editor, summarize]
+  content_creation:
+    description: "社交媒体内容创作（Twitter/LinkedIn/Instagram）、Newsletter/周报/公告、视频脚本（短视频/YouTube/教学）、数据可视化视频、多平台发布策略、X/Twitter 发帖"
+    skills: [social-media-creator, newsletter-writer, video-script-writer, remotion, bird]
+  data_analysis:
+    description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理"
+    skills: [excel-analyzer, excel-fixer, invoice-organizer]
+  file_operation:
+    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印/扫描件 OCR 提取、批量格式转换（图片/文档）、视频帧提取、桌面智能整理、极速全盘文件搜索"
+    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, multi-lang-ocr, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder, windows-explorer-advanced, everything-search]
+  translation:
+    description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
+    skills: [translator, locale-aware-formatter, multi-lang-ocr]
+  research:
+    description: "学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研、高性能网页爬取(Crawl4AI)"
+    skills: [literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research, web-scraper]
+  meeting:
+    description: "会议记录分析、提取行动项、参与度评估"
+    skills: [meeting-insights-analyzer, meeting-notes-to-action-items]
+  career:
+    description: "求职辅助、简历优化、JD 分析、模拟面试、定制简历生成"
+    skills: [job-application-optimizer, tailored-resume]
+  learning:
+    description: "个人导师、学习计划、测验出题、间隔复习、读书笔记管理、跨书籍主题关联"
+    skills: [skill-tutor, quiz-maker, reading-companion]
+  creative:
+    description: "头脑风暴、创意发散、方案构思、GIF 搜索、Gemini CLI 问答与生成"
+    skills: [brainstorming, gifgrep, gemini]
+  diagram:
+    description: "流程图、架构图、思维导图、手绘图表"
+    skills: [draw-io, excalidraw]
+  image_gen:
+    description: "AI 图像生成（DALL·E、Gemini）"
+    skills: [openai-image-gen, nano-banana-pro]
+  media:
+    description: "语音转文字、文字转语音、音乐播放、视频帧/片段提取、React 编程式视频生成（Remotion）"
+    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, sag, spotify-player, video-frames, remotion]
+  health:
+    description: "营养分析、饮食建议、用药管理、健康追踪"
+    skills: [nutrition-analyzer, medication-tracker]
+  productivity:
+    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项/Microsoft To Do）、日历、邮件、Google 全家桶、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
+    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks, microsoft-todo]
+  app_automation:
+    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化（macOS peekaboo / Windows pywinauto / Claude Computer Use 终极方案）、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化、Windows Terminal 管理"
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, windows-open, windows-terminal, pywinauto, openhue, goplaces, cross-app-workflow, claude-computer-use]
+  system_maintenance:
+    description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查、软件安装与升级（winget）、定时任务管理、WSL 管理"
+    skills: [disk-health-monitor, winget, task-scheduler, wsl]
+  lifestyle:
+    description: "个人记账、消费报告、预算管理、旅行规划、行程安排、打包清单"
+    skills: [personal-finance, travel-planner]
+  security:
+    description: "隐私审计、敏感文件扫描、权限检查、本地文件加密/解密、数据保护"
+    skills: [privacy-auditor, local-file-encrypt]
+  code:
+    description: "GitHub 仓库管理、Issue 追踪、代码相关"
+    skills: [github]
+  _always:
+    description: "始终注入（基础能力）"
+    skills: [local-search, app-recommender, weather]
+
+# ==================== Skills 清单 ====================
+
+skills:
+  loading_mode: "lazy"
+  os_aware: true
+
+  # ==================== 全平台通用 ====================
+
+  common:
+    builtin:
+      # --- 框架核心（系统级，强制启用，不对用户暴露） ---
+      - { name: plan-todo,           backend_type: tool, tool_name: plan_todo,  system: true, description: "任务规划与进度追踪" }
+      - { name: hitl,                backend_type: tool, tool_name: hitl,       system: true, description: "涉及敏感操作时请求用户确认" }
+      - { name: api-calling,         backend_type: tool, tool_name: api_calling, system: true, description: "通用 HTTP API 调用能力" }
+
+      # --- 基础设施（系统级，强制启用，不对用户暴露） ---
+      - { name: file-manager,        backend_type: local, skill_source: instance, system: true, description: "本地文件管理" }
+      - { name: local-search,        backend_type: local, skill_source: instance, system: true, description: "本地文件搜索（Spotlight + FTS5）" }
+      - { name: app-recommender,     backend_type: local, skill_source: instance, system: true, description: "根据任务推荐最合适的应用" }
+
+      # --- 写作 ---
+      - { name: writing-assistant,   backend_type: local, skill_source: instance, description: "写作辅助：润色、改写、扩写" }
+      - { name: translator,          backend_type: local, skill_source: instance, description: "多语言翻译" }
+      - { name: writing-analyzer,    backend_type: local, skill_source: instance, description: "写作风格分析" }
+      - { name: style-learner,       backend_type: local, skill_source: instance, description: "学习并记忆用户写作风格" }
+      - { name: content-reformatter, backend_type: local, skill_source: instance, description: "多平台格式转换（公众号/小红书/知乎等）" }
+
+      # --- 研究 ---
+      - { name: literature-reviewer, backend_type: local, skill_source: instance, description: "多文献对比分析与综述" }
+      - { name: paper-search,        backend_type: local, skill_source: instance, description: "学术论文搜索（Semantic Scholar）" }
+      - { name: arxiv-search,        backend_type: local, skill_source: instance, description: "arXiv 预印本论文搜索" }
+
+      # --- 生活 ---
+      - { name: nutrition-analyzer,  backend_type: local, skill_source: instance, description: "食物营养分析与饮食建议" }
+      - { name: medication-tracker,  backend_type: local, skill_source: instance, description: "用药管理与服药提醒" }
+      - { name: trend-spotter,       backend_type: local, skill_source: instance, description: "行业趋势与热点发现" }
+      - { name: competitive-intel,   backend_type: local, skill_source: instance, description: "竞品动态监控与分析" }
+      - { name: readwise-rival,      backend_type: local, skill_source: instance, description: "阅读高亮收集、复习与知识卡片" }
+
+      # --- 天气 ---
+      - { name: weather,             backend_type: local, skill_source: library,  description: "天气查询" }
+
+      # --- 写作增强 ---
+      - { name: humanizer,            backend_type: local, skill_source: instance, description: "去除 AI 写作痕迹，让文本更自然" }
+
+      # --- 思维与效率 ---
+      - { name: brainstorming,        backend_type: local, skill_source: instance, description: "结构化头脑风暴，帮用户拓展思路" }
+
+      # --- 会议 ---
+      - { name: meeting-insights-analyzer, backend_type: local, skill_source: instance, description: "会议记录深度分析：参与度、决策、行动项" }
+      - { name: meeting-notes-to-action-items, backend_type: local, skill_source: instance, description: "会议纪要转结构化行动项清单" }
+
+      # --- 求职 ---
+      - { name: job-application-optimizer, backend_type: local, skill_source: instance, description: "求职全流程辅助：JD 分析、简历优化、模拟面试" }
+
+      # --- 学习 ---
+      - { name: skill-tutor,          backend_type: local, skill_source: instance, description: "个人学习导师，跟踪进度，间隔复习" }
+      - { name: quiz-maker,           backend_type: local, skill_source: instance, description: "根据材料生成多题型测验" }
+
+      # --- 端侧独有能力 ---
+      - { name: smart-desktop-organizer, backend_type: local, skill_source: instance, description: "智能整理桌面/下载文件夹：语义分类、去重、归档" }
+      - { name: disk-health-monitor,     backend_type: local, skill_source: instance, description: "磁盘健康检查：空间分析、大文件发现、缓存清理" }
+      - { name: scheduled-tasks,         backend_type: local, skill_source: instance, description: "定时任务调度：周期性自动化任务" }
+      - { name: cross-app-workflow,      backend_type: local, skill_source: instance, description: "跨应用工作流：串联多个 Skill 完成复杂任务链" }
+
+      # --- 内容创作 ---
+      - { name: social-media-creator,    backend_type: local, skill_source: instance, description: "多平台社交媒体内容创作（Twitter/LinkedIn/Instagram 等）" }
+      - { name: newsletter-writer,       backend_type: local, skill_source: instance, description: "Newsletter/周报/公告/通讯写作" }
+      - { name: video-script-writer,     backend_type: local, skill_source: instance, description: "视频脚本创作：短视频口播、YouTube、教学视频" }
+
+      # --- 会干活补全 ---
+      - { name: smart-email-assistant,   backend_type: local, skill_source: instance, description: "智能邮件：起草回复、分类优先级、邮件摘要" }
+      - { name: tailored-resume,         backend_type: local, skill_source: instance, description: "分析 JD 生成定制简历，突出匹配技能" }
+      - { name: deep-research,           backend_type: local, skill_source: instance, description: "多步自主深度调研：市场分析、竞品研究、行业报告" }
+
+      # --- 文化自适应 ---
+      - { name: locale-aware-formatter,  backend_type: local, skill_source: instance, description: "文化自适应格式化：日期/货币/信函/称谓本地化" }
+
+      # --- 生活场景 ---
+      - { name: personal-finance,        backend_type: local, skill_source: instance, description: "个人记账：收支记录、消费报告、预算管理" }
+      - { name: travel-planner,          backend_type: local, skill_source: instance, description: "旅行规划：行程安排、打包清单、预算估算" }
+      - { name: reading-companion,       backend_type: local, skill_source: instance, description: "阅读伴侣：读书笔记、核心观点、跨书关联" }
+
+      # --- 安全隐私 ---
+      - { name: privacy-auditor,         backend_type: local, skill_source: instance, description: "隐私审计：扫描敏感文件、检查权限、风险报告" }
+
+    lightweight:
+      - { name: web-scraper,         backend_type: local, skill_source: instance, python_packages: ["crawl4ai"], auto_install: true, post_install: "crawl4ai-setup", description: "Crawl4AI 高性能爬虫：Playwright 反爬 + 异步并发 + LLM 优化 Markdown (59k Stars, 完全免费)" }
+      - { name: browser,             backend_type: tool,  tool_name: browser, skill_source: library, python_packages: ["playwright"], description: "Playwright browser automation: navigate, snapshot, click/type by ref" }
+      - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
+      - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }
+      - { name: excel-fixer,         backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel 格式自动修复" }
+      - { name: word-processor,      backend_type: local, skill_source: instance, python_packages: ["python-docx"], auto_install: true, description: "Word 文档创建与编辑" }
+      - { name: invoice-organizer,   backend_type: local, skill_source: instance, python_packages: ["pypdf", "Pillow"], auto_install: true, description: "发票和收据自动整理归档" }
+      - { name: elegant-reports,     backend_type: local, skill_source: instance, python_packages: ["fpdf2", "matplotlib"], description: "生成精美 Nordic 风格 PDF 报告" }
+      - { name: pdf-toolkit,        backend_type: local, skill_source: instance, python_packages: ["pypdf", "reportlab"], auto_install: true, description: "PDF 工具箱：合并/拆分/加密/水印/文本提取" }
+      - { name: batch-file-converter, backend_type: local, skill_source: instance, python_packages: ["Pillow"], auto_install: true, description: "批量文件格式转换（图片/文档）" }
+      - { name: local-file-encrypt,  backend_type: local, skill_source: instance, python_packages: ["cryptography"], auto_install: true, description: "本地文件加密/解密（AES-256）" }
+      - { name: video-frames,        backend_type: local, skill_source: library, bins: ["ffmpeg"], description: "从视频提取帧或短片（ffmpeg）" }
+
+    external:
+      - { name: summarize,           backend_type: local, skill_source: library, bins: ["summarize"], description: "URL / 视频 / 文档一键摘要" }
+      - { name: obsidian,            backend_type: local, skill_source: library, requires_app: "Obsidian", description: "Obsidian 笔记管理" }
+      - { name: openai-whisper,      backend_type: local, skill_source: library, bins: ["whisper"], description: "本地语音转文字（离线）" }
+      - { name: ppt-generator,       backend_type: local, skill_source: library, description: "PPT 演示文稿生成" }
+      - { name: gog,                 backend_type: local, skill_source: library, bins: ["gog"], description: "Google Docs / Sheets / Calendar" }
+      - { name: blogwatcher,         backend_type: local, skill_source: library, bins: ["blogwatcher"], description: "RSS 博客监控与摘要" }
+      - { name: 1password,           backend_type: local, skill_source: library, bins: ["op"], description: "1Password 密码管理" }
+      - { name: himalaya,            backend_type: local, skill_source: library, bins: ["himalaya"], description: "本地邮件收发（IMAP）" }
+      - { name: sherpa-onnx-tts,     backend_type: local, skill_source: library, bins: ["sherpa-onnx"], description: "本地语音合成（离线 TTS）" }
+      - { name: gifgrep,             backend_type: local, skill_source: library, bins: ["gifgrep"], description: "GIF 动图搜索" }
+      - { name: github,              backend_type: local, skill_source: library, bins: ["gh"], description: "GitHub 仓库与 Issue 管理" }
+      - { name: draw-io,              backend_type: local, skill_source: instance, requires_app: "draw.io", description: "生成专业流程图、架构图（draw.io 格式）" }
+      - { name: excalidraw,           backend_type: local, skill_source: instance, description: "生成手绘风格图表（Excalidraw 格式）" }
+      # multi-lang-ocr: 按 OS 分区注册（darwin/builtin 零安装，win32+linux/lightweight pip 安装）
+      - { name: bird,                 backend_type: local, skill_source: library, bins: ["bird"], description: "X/Twitter CLI：读、搜、发帖与互动" }
+      - { name: wacli,                backend_type: local, skill_source: library, bins: ["wacli"], description: "WhatsApp 消息发送与历史同步" }
+      - { name: gemini,               backend_type: local, skill_source: library, bins: ["gemini"], description: "Gemini CLI 问答与生成" }
+      - { name: remotion,              backend_type: local, skill_source: library, description: "React 编程式视频生成：动态图表、数据可视化视频（需 Node.js + Remotion 项目）" }
+
+    cloud_api:
+      # --- Claude Computer Use（终极 UI 自动化：截屏+视觉理解+坐标操作） ---
+      - { name: claude-computer-use, backend_type: local, skill_source: instance, description: "Claude Computer Use - 截屏+视觉理解操作任意桌面应用（坐标点击/滚动/拖拽/键盘）" }
+
+      # --- MCP Skills（连接细节内聚在 Skill 条目内，用户只看到 Skill 名称） ---
+      - name: deep-doc-reader
+        backend_type: mcp
+        skill_source: instance
+        server_url: "https://chat.pageindex.ai/mcp"
+        server_name: "pageindex"
+        auth_type: "bearer"
+        auth_env: "PAGEINDEX_API_KEY"
+        capability: "document_analysis"
+        description: "长文档深度阅读与问答（PDF 年报/合同/论文/手册），基于树索引的推理检索"
+
+      # --- API Skills ---
+      - { name: notion,              backend_type: api,   skill_source: library, description: "Notion 笔记与数据库" }
+      - { name: trello,              backend_type: local, skill_source: library, description: "Trello 看板任务管理" }
+      - { name: nano-banana-pro,     backend_type: local, skill_source: library, description: "Gemini 图像生成" }
+      - { name: openai-image-gen,    backend_type: local, skill_source: library, description: "DALL·E 图像生成" }
+      - { name: openai-whisper-api,  backend_type: local, skill_source: library, description: "云端语音转文字" }
+      - { name: goplaces,            backend_type: local, skill_source: library, description: "周边地点搜索（Google Places）" }
+      - { name: discord,             backend_type: local, skill_source: library, description: "Discord 消息与频道管理" }
+      - { name: slack,               backend_type: local, skill_source: library, description: "Slack 消息与频道操作（需配置 channels.slack）" }
+      - { name: slidespeak-generator, backend_type: local, skill_source: library, description: "SlideSpeak API 生成专业 PPT" }
+      - { name: slidespeak-editor,    backend_type: local, skill_source: library, description: "SlideSpeak API 编辑已有 PPT 形状内容" }
+      - { name: slidespeak-slide-editor, backend_type: local, skill_source: library, description: "SlideSpeak API 插入/删除/重生成幻灯片" }
+      - { name: sag,                 backend_type: local, skill_source: library, description: "ElevenLabs 文字转语音（需 ELEVENLABS_API_KEY）" }
+
+  # ==================== macOS 专属 ====================
+
+  darwin:
+    builtin:
+      - { name: macos-screenshot,    backend_type: local, skill_source: instance, system: true, bins: ["screencapture"], description: "macOS 截图" }
+      - { name: macos-clipboard,     backend_type: local, skill_source: instance, system: true, bins: ["pbcopy", "pbpaste"], description: "macOS 剪贴板" }
+      - { name: macos-notification,  backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "macOS 系统通知" }
+      - { name: macos-open,          backend_type: local, skill_source: instance, system: true, bins: ["open"], description: "打开文件、URL、应用" }
+      - { name: macos-finder,        backend_type: local, skill_source: instance, system: true, description: "Finder 操作：标签、预览、文件信息" }
+      - { name: applescript,         backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
+      - { name: app-scanner,         backend_type: local, skill_source: instance, system: true, description: "发现已安装应用" }
+      - { name: multi-lang-ocr,     backend_type: local, skill_source: instance, description: "多语言 OCR 图片文字提取（macOS Vision 内置，中英混排，零安装）" }
+
+    lightweight:
+      - { name: apple-notes,         backend_type: local, skill_source: library, system_auth: "accessibility", description: "Apple 备忘录" }
+      - { name: apple-reminders,     backend_type: local, skill_source: library, system_auth: "reminders", description: "Apple 提醒事项" }
+      - { name: apple-calendar,      backend_type: local, skill_source: instance, system_auth: "calendar", description: "Apple 日历" }
+
+    external:
+      - { name: peekaboo,            backend_type: local, skill_source: library, bins: ["peekaboo"], description: "macOS UI 自动化" }
+      - { name: imsg,                backend_type: local, skill_source: library, bins: ["imsg"], description: "iMessage/SMS CLI（macOS）" }
+      - { name: bear-notes,          backend_type: local, skill_source: library, requires_app: "Bear", description: "Bear 笔记" }
+      - { name: things-mac,          backend_type: local, skill_source: library, requires_app: "Things", description: "Things 待办管理" }
+      - { name: spotify-player,      backend_type: local, skill_source: library, description: "Spotify 音乐播放控制" }
+      - { name: openhue,             backend_type: local, skill_source: library, bins: ["openhue"], description: "Philips Hue 智能灯控" }
+
+  # ==================== Windows 专属 ====================
+
+  win32:
+    builtin:
+      - { name: windows-screenshot,          backend_type: local, skill_source: instance, system: true, description: "Windows 截图" }
+      - { name: windows-clipboard,           backend_type: local, skill_source: instance, system: true, description: "Windows 剪贴板" }
+      - { name: windows-notification,        backend_type: local, skill_source: instance, system: true, description: "Windows 系统通知" }
+      - { name: powershell-basic,            backend_type: local, skill_source: instance, system: true, description: "PowerShell 系统操作" }
+      - { name: windows-open,               backend_type: local, skill_source: instance, system: true, description: "打开文件、URL、文件夹、应用" }
+      - { name: windows-explorer-advanced,   backend_type: local, skill_source: instance, system: true, description: "文件资源管理器高级操作：快速访问、磁盘分析、文件统计" }
+      - { name: winget,                      backend_type: local, skill_source: instance, bins: ["winget"], description: "Windows 包管理器：搜索、安装、升级应用" }
+      - { name: windows-terminal,            backend_type: local, skill_source: instance, bins: ["wt"], description: "Windows Terminal 管理：标签页、分屏、配置文件" }
+      - { name: microsoft-todo,              backend_type: local, skill_source: instance, description: "Microsoft To Do 任务管理（Windows 内置）" }
+      - { name: task-scheduler,              backend_type: local, skill_source: instance, description: "Windows 任务计划程序：定时任务自动化" }
+
+    lightweight:
+      - { name: multi-lang-ocr,              backend_type: local, skill_source: instance, auto_install: "pip install rapidocr-onnxruntime", description: "多语言 OCR 图片文字提取（中英混排，本地离线）" }
+      - { name: outlook-cli,                 backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
+      - { name: onenote,                     backend_type: local, skill_source: instance, requires_app: "OneNote", description: "OneNote 笔记" }
+      - { name: pywinauto,                   backend_type: local, skill_source: instance, python_packages: ["pywinauto"], description: "Windows UI 自动化：操作任意桌面应用" }
+      - { name: wsl,                         backend_type: local, skill_source: instance, bins: ["wsl"], description: "WSL：在 Windows 上运行 Linux 命令" }
+
+    external:
+      - { name: everything-search,           backend_type: local, skill_source: instance, bins: ["es"], description: "Everything 极速文件搜索（毫秒级全盘搜索）" }
+
+  # ==================== Linux 专属 ====================
+
+  linux:
+    builtin:
+      - { name: linux-screenshot,     backend_type: local, skill_source: instance, system: true, description: "Linux 截图" }
+      - { name: linux-clipboard,      backend_type: local, skill_source: instance, system: true, description: "Linux 剪贴板" }
+
+    lightweight:
+      - { name: multi-lang-ocr,      backend_type: local, skill_source: instance, auto_install: "pip install rapidocr-onnxruntime", description: "多语言 OCR 图片文字提取（中英混排，本地离线）" }
+      - { name: linux-notification,   backend_type: local, skill_source: instance, bins: ["notify-send"], description: "Linux 桌面通知" }
+
+    external:
+      - { name: xdotool,              backend_type: local, skill_source: instance, bins: ["xdotool"], description: "Linux UI 自动化" }

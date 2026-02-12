@@ -1,0 +1,75 @@
+# E5: 规划深度合理性 - 小搭子效率性测评
+# 验证：简单任务不规划、中等任务 minimal、复杂任务 full
+
+id: xiaodazi_efficiency_planning_depth
+name: 规划深度合理性（E5）
+description: 评估小搭子规划深度是否与任务复杂度匹配
+category: xiaodazi_efficiency
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: efficiency
+  capability: E5_planning_depth
+
+tasks:
+  - id: E5-01_simple_no_plan
+    description: "简单问答 - 不应启动 plan 工具"
+    category: planning_depth
+    input:
+      user_query: "1+1 等于几？"
+      conversation_history: []
+      context: {}
+    metadata:
+      expected_planning: none
+    graders:
+      - type: model
+        rubric: grade_planning_depth
+        min_score: 4
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 4
+    trials: 2
+    timeout_seconds: 20
+    tags: ["efficiency", "planning", "simple", "E5"]
+
+  - id: E5-02_medium_minimal_plan
+    description: "中等任务 - 应有 2-3 步规划即可"
+    category: planning_depth
+    input:
+      user_query: "搜索远程办公的最新数据，然后写一段 200 字总结"
+      conversation_history: []
+      context: {}
+    metadata:
+      expected_planning: minimal
+      expected_steps_range: [2, 4]
+    graders:
+      - type: model
+        rubric: grade_planning_depth
+        min_score: 3
+      - type: model
+        rubric: grade_over_engineering
+        min_score: 3
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "planning", "E5"]
+
+  - id: E5-03_complex_full_plan
+    description: "复杂任务 - 应有完整规划（5+ 步或显式 plan）"
+    category: planning_depth
+    input:
+      user_query: "调研三家竞品的 AI 功能差异，写一份对比报告并生成 PPT"
+      conversation_history: []
+      context: {}
+    metadata:
+      expected_planning: full
+    graders:
+      - type: model
+        rubric: grade_planning_depth
+        min_score: 3
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 120
+    tags: ["efficiency", "planning", "complex", "E5"]

@@ -1,0 +1,21 @@
+semantic_search:
+  mode: local
+  local:
+    repo: ''
+    model: ''
+  cloud:
+    model: ''
+memory:
+  enabled: true
+  mem0_enabled: true
+state_consistency:
+  enabled: true
+  snapshot:
+    retention_hours: 24
+    capture_files: true
+    capture_cwd: true
+    capture_clipboard: false
+  rollback:
+    auto_rollback_on_consecutive_failures: 3
+    auto_rollback_on_critical_error: true
+    rollback_timeout_seconds: 60

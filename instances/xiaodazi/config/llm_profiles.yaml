@@ -1,0 +1,238 @@
+# ============================================================
+# 框架内部 LLM 配置
+# ============================================================
+#
+# 通过 config.yaml 的 agent.provider 一键切换所有模型。
+# 普通用户通常不需要修改此文件。
+#
+# 模型分配：
+#
+#   ┌──────────┬───────────────────────────┬──────────────────────────┬──────────────────────────┬──────────────────────────┐
+#   │ 角色     │ qwen                      │ claude                   │ deepseek                 │ glm                      │
+#   ├──────────┼───────────────────────────┼──────────────────────────┼──────────────────────────┼──────────────────────────┤
+#   │ 主 Agent │ qwen3-max                 │ claude-opus-4-6          │ deepseek-reasoner        │ glm-5                    │
+#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │ deepseek-reasoner        │ glm-5                    │
+#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │ deepseek-chat            │ glm-4.5-flash            │
+#   └──────────┴───────────────────────────┴──────────────────────────┴──────────────────────────┴──────────────────────────┘
+#
+
+# ==================== Provider 模板 ====================
+#
+# 一键切换的核心。agent.provider 决定使用哪套模板。
+#
+
+provider_templates:
+  qwen:
+    agent_model: "qwen3-max"           # 默认主 Agent
+    agent_llm:
+      max_tokens: 65536
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: false
+      # temperature: thinking 开启时由框架自动设置
+    heavy:
+      provider: "qwen"
+      model: "qwen3-max"
+      api_key_env: "DASHSCOPE_API_KEY"
+      region: "singapore"
+    light:
+      provider: "qwen"
+      model: "qwen-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      region: "singapore"
+
+  claude:
+    agent_model: "claude-sonnet-4-5-20250929"   # 主 Agent：Sonnet 4.5（Benchmark 全流程验证）
+    # agent_model: "claude-opus-4-6"            # 可选：Opus 4.6
+    agent_llm:
+      max_tokens: 128000
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: true
+      # temperature: thinking 开启时由框架自动设置（Claude 强制 1.0）
+    heavy:
+      provider: "claude"
+      model: "claude-sonnet-4-5-20250929"
+      api_key_env: "ANTHROPIC_API_KEY"
+    light:
+      provider: "claude"
+      model: "claude-haiku-4-5-20251001"
+      api_key_env: "ANTHROPIC_API_KEY"
+
+  deepseek:
+    agent_model: "deepseek-reasoner"            # 主 Agent：思考模式（V3.2），对标 Sonnet/Qwen3-max
+    agent_llm:
+      max_tokens: 32768                         # reasoner 默认 32K，最大 64K（含 CoT）
+      enable_thinking: true
+      thinking_budget: 10000                    # API 忽略此参数，保留以兼容框架
+      enable_caching: false                     # DeepSeek 不支持 prompt cache
+      # temperature: reasoner 模式下被忽略
+    heavy:
+      provider: "deepseek"
+      model: "deepseek-reasoner"
+      api_key_env: "DEEPSEEK_API_KEY"
+    light:
+      provider: "deepseek"
+      model: "deepseek-chat"
+      api_key_env: "DEEPSEEK_API_KEY"
+
+  glm:
+    agent_model: "glm-5"                        # 主 Agent：GLM-5 旗舰（200K 上下文，128K 输出，Coding/Agent SOTA）
+    agent_llm:
+      max_tokens: 65536                         # 官方示例推荐 65536
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: false                     # GLM 上下文缓存独立控制
+      # temperature: thinking 开启时由框架自动设置（官方示例 1.0）
+    heavy:
+      provider: "glm"
+      model: "glm-5"
+      api_key_env: "ZHIPUAI_API_KEY"
+    light:
+      provider: "glm"
+      model: "glm-4.5-flash"
+      api_key_env: "ZHIPUAI_API_KEY"
+
+# ==================== 各调用点配置 ====================
+#
+# tier: heavy / light（从上面的 provider_templates 解析）
+# 其余为该调用点的专属参数。
+#
+# temperature 规范（只允许以下值）：
+#   0   - 精准模式（默认）
+#   0.8 - 生成/创意模式
+#   不设 - enable_thinking=true 时由框架自动设置（Claude 强制 1.0）
+#
+# 如需覆盖某个调用点的模型，直接写 provider/model/api_key_env，
+# 会跳过 tier 模板解析。
+#
+
+llm_profiles:
+  # ---------- 运行时（每次请求都可能调用） ----------
+
+  intent_analyzer:
+    tier: "light"
+    max_tokens: 512         # Output is ~50 token JSON, 512 is generous
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  semantic_inference:
+    tier: "light"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  tool_capability_inference:
+    tier: "light"
+    max_tokens: 100
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  background_task:
+    tier: "light"
+    max_tokens: 100
+    temperature: 0.8
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 1
+
+  # ---------- 规划系统 ----------
+
+  plan_generator:
+    tier: "light"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  plan_manager:
+    tier: "heavy"
+    max_tokens: 65536
+    enable_thinking: true
+    thinking_budget: 5000
+    timeout: 120.0
+    max_retries: 2
+    # temperature: thinking 开启，由框架自动设置
+
+  # ---------- 记忆系统 ----------
+
+  fragment_extractor:
+    tier: "light"
+    max_tokens: 1024
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  behavior_analyzer:
+    tier: "light"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  memory_update:
+    tier: "light"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  aggregator:
+    tier: "light"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  reranker:
+    tier: "light"
+    max_tokens: 1024
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  # ---------- 启动时（提示词生成，仅首次或缓存失效时） ----------
+
+  llm_analyzer:
+    tier: "heavy"
+    max_tokens: 32000
+    temperature: 0
+    enable_thinking: false
+    timeout: 600.0
+    max_retries: 3
+
+  schema_generator:
+    tier: "heavy"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: false
+    timeout: 90.0
+    max_retries: 2
+
+  prompt_merger:
+    tier: "heavy"
+    max_tokens: 32000
+    temperature: 0
+    enable_thinking: false
+    timeout: 600.0
+    max_retries: 3
+
+  prompt_decomposer:
+    tier: "heavy"
+    max_tokens: 32000
+    temperature: 0
+    enable_thinking: false
+    timeout: 300.0
+    max_retries: 2

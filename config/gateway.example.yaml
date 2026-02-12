@@ -1,0 +1,29 @@
+# ============================================================
+# Gateway 配置模板
+# ============================================================
+#
+# 使用方式：
+#   1. 复制此文件为 gateway.yaml
+#   2. 填入你的 bot token / app secret
+#   3. gateway.yaml 不会提交到 git（已在 .gitignore 中排除）
+#
+
+gateway:
+  enabled: false
+
+channels:
+  telegram:
+    enabled: false
+    bot_token: ""          # 从 @BotFather 获取
+    allowed_users: []
+    allowed_groups: []
+  feishu:
+    enabled: false
+    app_id: ""             # 从飞书开放平台获取
+    app_secret: ""         # 从飞书开放平台获取
+
+bindings:
+  - channel: telegram
+    agent_id: xiaodazi
+  - channel: feishu
+    agent_id: xiaodazi

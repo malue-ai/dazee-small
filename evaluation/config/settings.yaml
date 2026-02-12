@@ -1,0 +1,158 @@
+# ZenFlux Agent 评估系统配置
+# 
+# 基于 Anthropic 评估方法论设计
+# 参考：https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
+
+# ===================
+# 基础配置
+# ===================
+
+# 评估套件目录
+suites_dir: "evaluation/suites"
+
+# 评估报告输出目录
+reports_dir: "evaluation/reports"
+
+# 默认试验次数（应对模型随机性）
+default_trials: 3
+
+# 默认超时时间（秒）
+default_timeout_seconds: 60
+
+# 并发执行任务数
+concurrency: 5
+
+# ===================
+# 评分器配置
+# ===================
+
+graders:
+  # Code-based Graders（优先使用）
+  code:
+    enabled: true
+    # 默认Token限制
+    default_token_limit: 100000
+    # 默认执行时间限制（毫秒）
+    default_execution_time_limit: 30000
+  
+  # Model-based Graders（LLM-as-Judge）
+  #
+  # 定位：独立的质量评估者，NOT 通过/不通过的闸门。
+  #
+  # 核心原则：
+  #   - Judge 只评分 + 给分析，不决定 PASS/FAIL
+  #   - PASS/FAIL 由代码评分器（check_no_tool_errors 等）决定
+  #   - Judge 的评分供人类审查，指导优化方向
+  #   - Judge 完全独立于 Agent 的 plan-todo 和执行逻辑
+  #
+  # 模型选择：评分者必须比被评对象更强。
+  # 固定使用 Claude Opus + Extended Thinking，不跟实例 provider 走。
+  #
+  model:
+    enabled: true
+    # LLM 配置（独立于实例 provider）
+    provider: "claude"
+    model: "claude-opus-4-6"
+    api_key_env: "ANTHROPIC_API_KEY"
+    max_tokens: 51200         # Must be > thinking_budget (Claude requirement)
+    temperature: 1            # Claude requires temperature=1 when thinking is enabled
+    enable_thinking: true
+    thinking_budget: 8192
+    timeout: 300.0  # Opus 4.6 + Thinking + 50K input needs ~4-8 min per eval
+    # 评估提示词：evaluation/config/judge_prompts.yaml
+    # 评分结果仅供参考，不作为自动化闸门
+  
+  # Human Graders（人工校准）
+  human:
+    enabled: true
+    # 每周抽样数量
+    weekly_sample_size: 100
+    # 每个样本需要的评分员数量
+    num_raters: 3
+    # 评分员间一致性阈值
+    inter_rater_agreement_threshold: 0.7
+
+# ===================
+# QoS 集成配置
+# ===================
+
+qos_integration:
+  enabled: true
+  # 不同QoS级别的评估配置
+  levels:
+    free:
+      max_tasks_per_run: 10
+      max_token_limit: 50000
+      enable_model_graders: false  # 免费用户不使用LLM评分
+    
+    basic:
+      max_tasks_per_run: 50
+      max_token_limit: 100000
+      enable_model_graders: true
+    
+    pro:
+      max_tasks_per_run: 200
+      max_token_limit: 200000
+      enable_model_graders: true
+    
+    enterprise:
+      max_tasks_per_run: 1000
+      max_token_limit: 500000
+      enable_model_graders: true
+      enable_human_graders: true
+
+# ===================
+# 报告配置
+# ===================
+
+reports:
+  # 报告格式
+  formats:
+    - markdown
+    - json
+  
+  # 是否包含详细的Trial信息
+  include_trial_details: true
+  
+  # 是否包含Token使用统计
+  include_token_stats: true
+  
+  # 不稳定任务阈值（标准差）
+  unstable_threshold: 0.15
+
+# ===================
+# CI/CD 集成
+# ===================
+
+ci_cd:
+  # 在CI/CD中运行评估
+  enabled: true
+  
+  # 失败时阻止合并
+  fail_on_regression: true
+  
+  # 回归阈值（通过率下降超过此值则失败）
+  regression_threshold: 0.05
+  
+  # 必须通过的评估套件
+  required_suites:
+    - conversation/intent_understanding
+  
+  # 可选评估套件（不阻止合并，但会报告）
+  optional_suites:
+    - coding/simple_tasks
+    - document/summarization
+
+# ===================
+# 生产监控集成
+# ===================
+
+production_monitoring:
+  # 自动收集生产失败案例
+  auto_collect_failures: true
+  
+  # 失败案例转化为评估任务
+  convert_failures_to_tasks: true
+  
+  # 失败案例保留天数
+  failure_retention_days: 30

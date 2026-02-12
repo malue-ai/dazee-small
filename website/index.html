@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <title>小搭子 - 开源桌面 AI 助手 | Dazee.ai</title>
+  <meta name="description" content="小搭子是全开源免费的 AI 桌面助手，支持 7+ 主流 AI 模型，一键安装，三分钟上手。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ==================== Reset & Base ==================== */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+      overflow-x: hidden;
+    }
+    @media (max-width: 1023px) and (min-width: 768px) {
+      html { font-size: 14px; }
+    }
+    @media (max-width: 767px) {
+      html { font-size: clamp(12px, calc(100vw / 26.25), 16px); }
+    }
+
+    body {
+      font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #FFFFFF;
+      color: #1A1A2E;
+      line-height: 1.6;
+      overflow-x: hidden;
+      width: 100%;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+
+    /* ==================== Tokens ==================== */
+    :root {
+      --accent: #03CB86;
+      --accent-light: #6BFAC8;
+      --accent-bg: #E8FFF6;
+      --green-gradient: linear-gradient(180deg, #B8FFE0 0%, #E8FFF6 40%, #FFFFFF 100%);
+      --bg-white: #FFFFFF;
+      --bg-light: #F8FAF9;
+      --bg-dark: #0D1117;
+      --bg-card-dark: #161B22;
+      --text-dark: #1A1A2E;
+      --text-body: #4A4A68;
+      --text-muted: #8B949E;
+      --text-white: #FFFFFF;
+      --border-light: rgba(0,0,0,0.08);
+      --border-dark: rgba(139,148,158,0.15);
+      --max-w: 75rem;
+    }
+
+    /* ==================== Utility ==================== */
+    .container { max-width: var(--max-w); margin: 0 auto; padding: 0 1.5rem; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.75rem 1.75rem; border-radius: 3rem; font-size: 0.9375rem; font-weight: 600;
+      border: none; cursor: pointer; transition: all 0.25s ease;
+      white-space: nowrap; text-decoration: none;
+    }
+    .btn svg { width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
+    .btn-green { background: var(--accent); color: #fff; }
+    .btn-green:hover { background: #02b577; transform: translateY(-0.125rem); box-shadow: 0 0.5rem 1.5rem rgba(3,203,134,0.3); }
+    .btn-dark { background: var(--text-dark); color: #fff; }
+    .btn-dark:hover { background: #2a2a4e; transform: translateY(-0.125rem); }
+    .btn-outline-dark { background: transparent; color: var(--text-dark); border: 0.0625rem solid var(--border-light); }
+    .btn-outline-dark:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-outline-light { background: transparent; color: #fff; border: 0.0625rem solid rgba(255,255,255,0.3); }
+    .btn-outline-light:hover { border-color: #fff; }
+
+    /* ==================== Nav ==================== */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; justify-content: center;
+      height: 3.75rem; /* 60px */
+      padding: 1.25rem 2.5rem; /* 20px 40px */
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(2.1875rem); /* 35px */
+      -webkit-backdrop-filter: blur(2.1875rem);
+      border-bottom: 1px solid var(--border-light);
+    }
+    .nav-inner {
+      display: flex; justify-content: space-between; align-items: center;
+      width: 100%; max-width: 92.5rem; /* 1480px */
+    }
+    .nav-logo { display: flex; align-items: center; text-decoration: none; }
+    .nav-logo svg { height: 1.375rem; /* 22px */ width: auto; flex-shrink: 0; }
+    .nav-logo .brand-text {
+      font-family: 'Poppins', sans-serif; font-size: 1.125rem; font-weight: 700;
+      color: var(--text-dark); margin-left: 0.5rem;
+    }
+    .nav-logo .beta {
+      font-size: 0.625rem; font-weight: 600; color: var(--accent);
+      background: var(--accent-bg); padding: 0.125rem 0.375rem; border-radius: 0.25rem; margin-left: 0.375rem;
+    }
+
+    /* 桌面端按钮组 */
+    .header-actions {
+      display: flex; align-items: center; gap: 1rem; /* 16px */
+    }
+
+    /* Secondary button */
+    .btn-nav {
+      display: flex; justify-content: center; align-items: center;
+      padding: 0.5rem 1.25rem;
+      background: rgba(0,0,0,0.04);
+      border: none; border-radius: 2.125rem; /* 34px */
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem; /* 14px */
+      font-weight: 600; line-height: 1.25rem; /* 20px */
+      color: var(--text-dark);
+      cursor: pointer; transition: all 0.2s ease;
+      text-decoration: none;
+    }
+    .btn-nav:hover { background: rgba(0,0,0,0.08); }
+
+    /* Language switcher - transparent bg */
+    .btn-nav.nav-lang {
+      background: transparent; gap: 0.25rem;
+    }
+    .btn-nav.nav-lang:hover { background: rgba(0,0,0,0.04); }
+    .btn-nav.nav-lang svg { flex-shrink: 0; }
+
+    /* Primary button */
+    .btn-nav.primary {
+      background: var(--accent); color: #fff;
+      border-radius: 2.875rem; /* 46px */
+      box-shadow:
+        0 0.25rem 3rem rgba(3,203,134,0.25),
+        0 0.25rem 1.25rem rgba(3,203,134,0.2);
+    }
+    .btn-nav.primary:hover {
+      background: #02b577;
+      transform: translateY(-0.0625rem); /* -1px */
+      box-shadow:
+        0 0.25rem 3.125rem rgba(3,203,134,0.35),
+        0 0.25rem 1.5rem rgba(3,203,134,0.3);
+    }
+
+    /* 移动端语言切换按钮 */
+    .mobile-lang-btn {
+      display: none; align-items: center; justify-content: center; gap: 0.25rem;
+      padding: 0.375rem 0.625rem;
+      border: none; background: transparent; cursor: pointer;
+      font-family: 'Poppins', sans-serif; font-size: 0.8125rem; font-weight: 600;
+      color: var(--text-dark); border-radius: 1.5rem;
+      transition: background 0.2s ease;
+    }
+    .mobile-lang-btn:hover { background: rgba(0,0,0,0.04); }
+    .mobile-lang-btn svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+
+    @media (max-width: 1440px) { .nav { padding: 1.25rem 5rem; } }
+    @media (max-width: 1280px) { .nav { padding: 1.25rem 2.5rem; } }
+    @media (max-width: 768px) {
+      .nav { padding: 1rem 1.25rem; height: 4rem; /* 64px */ }
+      .header-actions { display: none; }
+      .mobile-lang-btn { display: flex; }
+    }
+
+    /* ==================== Hero ==================== */
+    .hero {
+      padding: 8rem 0 4rem;
+      background: var(--green-gradient);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; top: -10rem; left: 50%; transform: translateX(-50%);
+      width: min(50rem, 100vw); height: min(50rem, 100vw); border-radius: 50%;
+      background: radial-gradient(circle, rgba(107,250,200,0.25) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-title {
+      font-size: 5rem; font-weight: 800; line-height: 1.1;
+      color: var(--text-dark); margin-bottom: 0.75rem;
+    }
+    .hero-tagline {
+      font-size: 1.125rem; font-weight: 600; color: var(--accent);
+      margin-bottom: 1.5rem;
+    }
+    .hero-desc {
+      font-size: 1rem; color: var(--text-body); max-width: 42rem;
+      margin: 0 auto 2.5rem; line-height: 1.8;
+    }
+    .hero-downloads {
+      display: flex; justify-content: center; gap: 0.75rem; margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .hero-download-btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.625rem 1.5rem; border-radius: 3rem;
+      background: var(--accent); color: #fff; font-size: 0.875rem; font-weight: 600;
+      transition: all 0.25s; text-decoration: none;
+    }
+    .hero-download-btn:hover { background: #02b577; transform: translateY(-0.125rem); box-shadow: 0 0.375rem 1rem rgba(3,203,134,0.3); }
+    .hero-download-btn svg { width: 1.25rem; height: 1.25rem; }
+    .hero-github {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.625rem 1.5rem; border-radius: 3rem;
+      background: var(--text-dark); color: #fff; font-size: 0.875rem; font-weight: 600;
+      transition: all 0.25s; text-decoration: none; margin-bottom: 1.5rem;
+    }
+    .hero-github:hover { background: #2a2a4e; transform: translateY(-0.125rem); }
+    .hero-github svg { width: 1.125rem; height: 1.125rem; }
+    .hero-note {
+      font-size: 0.8125rem; color: var(--text-muted);
+    }
+
+    @media (max-width: 767px) {
+      .hero { padding: 6.5rem 0 3rem; }
+      .hero-title { font-size: 3rem; }
+      .hero-tagline { font-size: 1rem; }
+      .hero-desc { font-size: 0.9375rem; padding: 0 0.5rem; }
+      .hero-download-btn { font-size: 0.8125rem; padding: 0.5rem 1.25rem; }
+      .hero-github { font-size: 0.8125rem; padding: 0.5rem 1.25rem; }
+    }
+
+    /* ==================== Features ==================== */
+    .features {
+      padding: 5rem 0;
+      background: linear-gradient(238deg, #53F9EE 5%, #6BFAC8 58%);
+    }
+    .features-header { text-align: center; margin-bottom: 3.5rem; }
+    .features-header h2 {
+      font-size: 2.5rem; font-weight: 800; color: var(--text-dark); margin-bottom: 1rem;
+    }
+    .features-header p {
+      font-size: 1rem; color: var(--text-muted);
+    }
+    .features-grid {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 1.25rem;
+    }
+    .feature-card { grid-column: span 2; }
+    .feature-card {
+      background: var(--bg-light); border-radius: 1.25rem; padding: 2rem 1.75rem;
+      border: 0.0625rem solid var(--border-light);
+      transition: all 0.3s ease; position: relative; overflow: hidden;
+    }
+    .feature-card:hover {
+      border-color: rgba(3,203,134,0.3);
+      transform: translateY(-0.25rem);
+      box-shadow: 0 0.5rem 1.5rem rgba(0,0,0,0.06);
+    }
+    .feature-card.wide { grid-column: span 3; }
+    .feature-icon {
+      width: 2.75rem; height: 2.75rem; border-radius: 0.75rem;
+      background: var(--accent-bg); display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1.25rem; color: var(--accent);
+    }
+    .feature-icon svg { width: 1.375rem; height: 1.375rem; }
+    .feature-card h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.625rem; color: var(--text-dark); }
+    .feature-card p { font-size: 0.875rem; color: var(--text-body); line-height: 1.7; margin-bottom: 1.25rem; }
+    .feature-check {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      font-size: 0.8125rem; color: var(--accent); font-weight: 600;
+    }
+    .feature-check svg { width: 1rem; height: 1rem; }
+
+    @media (max-width: 1023px) {
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .feature-card { grid-column: span 1; }
+      .feature-card.wide { grid-column: span 1; }
+    }
+    @media (max-width: 767px) {
+      .features { padding: 3.5rem 0; }
+      .features-header h2 { font-size: 1.75rem; }
+      .features-grid { grid-template-columns: 1fr; gap: 1rem; }
+      .feature-card { grid-column: span 1; }
+      .feature-card.wide { grid-column: span 1; }
+      .feature-card:hover { transform: none; }
+    }
+
+    /* ==================== Steps ==================== */
+    .steps { padding: 5rem 0; background: var(--bg-white); }
+    .steps-header { text-align: center; margin-bottom: 3.5rem; }
+    .steps-header h2 {
+      font-size: 2.5rem; font-weight: 800; color: var(--text-dark); margin-bottom: 0.75rem;
+    }
+    .steps-subtitle { font-size: 1rem; color: var(--text-muted); }
+    .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+    /* Step card: light bg #F9F9F9, dark text #181818, radius 20px, padding 40px 30px 30px */
+    .step-card {
+      background: #F9F9F9; border-radius: 1.25rem; padding: 2.5rem 1.875rem 1.875rem;
+      color: #181818; overflow: hidden;
+    }
+    .step-number {
+      font-size: 1.25rem; font-weight: 400; color: var(--accent);
+      letter-spacing: 0.0625rem; text-transform: uppercase; margin-bottom: 1.0625rem; /* 17px */
+      font-family: 'Poppins', sans-serif;
+    }
+    .step-card h3 {
+      font-size: 1.375rem; font-weight: 700; margin-bottom: 1.25rem; /* 20px gap to description */
+      color: #181818;
+    }
+    .step-card > p {
+      font-size: 1.125rem; color: #3B3E41; line-height: 2rem; /* 32px */ margin-bottom: 1.5rem;
+    }
+
+    /* Step 1 specific: download + platform icons */
+    .step-github-btn {
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      padding: 0.5rem 1rem; border-radius: 5.625rem; /* 90px */
+      font-size: 0.875rem; /* 14px */ font-weight: 700; /* Bold */
+      background: #fff; color: #181818; border: 0.125rem solid #181818; /* 2px */
+      text-decoration: none; transition: all 0.2s;
+    }
+    .step-github-btn:hover { background: #f0f0f0; }
+    .step-github-btn svg { width: 1.125rem; height: 1.1rem; }
+    .step-install-info {
+      margin-bottom: 1.25rem; font-size: 1.125rem; /* 18px */
+      color: #3B3E41; line-height: 2rem; /* 32px */
+    }
+    .step-install-info .download-link {
+      color: #000; text-decoration: underline; font-weight: 400;
+    }
+    .install-cmd {
+      display: block; margin-top: 0.25rem; padding: 0.375rem 0.5rem; border-radius: 0.375rem;
+      background: rgba(0,0,0,0.04); border: 0.0625rem solid rgba(0,0,0,0.08);
+      font-family: 'Courier New', monospace; font-size: 0.8125rem; /* 13px */
+      color: var(--accent); word-break: break-all;
+    }
+    .step-tree {
+      text-align: center; margin-top: 0.25rem;
+    }
+    .step-tree-btn-wrap {
+      position: relative; display: inline-flex; align-items: center;
+    }
+    .step-tree-cursor {
+      position: absolute; right: 1.15rem; top: 1.55rem;
+      width: 1.375rem; height: 1.25rem;
+    }
+    .step-tree-svg {
+      width: 12rem; height: 3.8rem; display: block; margin: 0 auto;
+    }
+    .platform-icons { display: inline-flex; gap: 3.5rem; }
+    .platform-item { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-width: 4.25rem; }
+    /* 48px dark rounded square with white icon */
+    .platform-icon {
+      width: 3rem; height: 3rem; border-radius: 0.75rem;
+      background: #0A0A0A; display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    .platform-icon:hover { background: #1a1a2e; }
+    .platform-icon svg { width: 2rem; height: 2rem; color: #fff; }
+    .platform-item span { font-size: 0.875rem; font-weight: 700; color: #181818; }
+
+    /* Step 2 specific: API Key + model tags */
+    .step-apikey-wrap {
+      position: relative; display: flex; align-items: flex-start; gap: 0.25rem;
+      margin-bottom: 1rem;
+    }
+    .step-apikey-arrow {
+      width: 1.75rem; height: 2rem; flex-shrink: 0;
+      margin-top: 0.25rem;
+    }
+    .step-apikey {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.625rem 1rem; border-radius: 0.5rem;
+      background: #fff; border: 0.125rem solid #181818;
+      font-size: 0.875rem; color: #181818;
+    }
+    .step-apikey span { color: #181818; font-weight: 500; }
+    .model-tags { display: flex; flex-wrap: wrap; gap: 0.625rem; }
+    .model-tag {
+      padding: 0.4375rem 0.875rem; border-radius: 6.1875rem; font-size: 0.8125rem; font-weight: 600;
+      background: #fff; color: #181818; border: 0.125rem solid #181818;
+    }
+    /* DeepSeek active: fill #6BFAC8 */
+    .model-tag.active { background: #6BFAC8; color: #0C1117; border-color: #181818; }
+
+    /* Step 3 specific: chat UI mockup */
+    .step-chat-mock {
+      font-size: 0.875rem;
+    }
+    .chat-files-stagger {
+      display: flex; gap: 0.75rem; margin-bottom: 0.875rem;
+    }
+    .chat-files-col {
+      display: flex; flex-direction: column; gap: 0.75rem; flex: 1;
+    }
+    .chat-files-col-left { padding-top: 2.75rem; }
+    .chat-file-card {
+      display: flex; align-items: center; gap: 0.625rem;
+      padding: 0.625rem 0.875rem; border-radius: 0.625rem;
+      font-size: 0.875rem; font-weight: 600; color: #181818;
+      background: #fff; border: 0.0625rem solid rgba(0,0,0,0.06);
+      box-shadow: 0 0.1875rem 0.75rem rgba(0,0,0,0.07);
+    }
+    .file-card-icon {
+      width: 1.75rem; height: 1.75rem; border-radius: 0.375rem;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.6875rem; font-weight: 800; color: #fff; flex-shrink: 0;
+      font-family: 'Poppins', sans-serif;
+    }
+    .file-card-icon.pdf-icon { background: #EA4335; }
+    .file-card-icon.csv-icon { background: #0F9D7A; }
+    .file-card-icon.doc-icon { background: #2B579A; }
+    .file-card-icon.xls-icon { background: #217346; }
+    .chat-toolbar {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+      background: transparent;
+      font-size: 0.875rem; color: #3B3E41;
+    }
+    .toolbar-icon {
+      font-size: 1rem; opacity: 0.4; cursor: pointer;
+      font-family: 'Poppins', sans-serif; font-weight: 500;
+    }
+    .toolbar-spacer { flex: 1; }
+    .chat-send-btn {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      padding: 0.375rem 0.75rem; border-radius: 0.4375rem;
+      background: var(--accent); color: #fff; font-size: 0.75rem; font-weight: 600;
+    }
+
+    @media (max-width: 1023px) {
+      .steps-grid { grid-template-columns: 1fr; max-width: 28rem; margin: 0 auto; }
+    }
+    @media (max-width: 767px) {
+      .steps { padding: 3.5rem 0; }
+      .steps-header h2 { font-size: 1.75rem; }
+    }
+
+    /* ==================== CTA ==================== */
+    .cta {
+      padding: 5rem 0; text-align: center;
+      background: var(--bg-white);
+    }
+    .cta .label {
+      font-size: 0.8125rem; font-weight: 700; color: var(--accent);
+      text-transform: uppercase; letter-spacing: 0.1rem; margin-bottom: 0.5rem;
+    }
+    .cta h2 {
+      font-size: 2.5rem; font-weight: 800; color: var(--text-dark); margin-bottom: 1rem;
+    }
+    .cta p { font-size: 1rem; color: var(--text-muted); margin-bottom: 2rem; }
+
+    @media (max-width: 767px) {
+      .cta { padding: 3.5rem 0; }
+      .cta h2 { font-size: 1.75rem; }
+    }
+
+    /* ==================== Footer (copied from WelcomeFooter.vue) ==================== */
+    .footer {
+      width: 100%;
+      background: #181818;
+      padding: 3.75rem 2.5rem 2.5rem;
+      margin-top: auto;
+    }
+    .footer-content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      max-width: 78.75rem;
+      margin: 0 auto;
+    }
+    /* 第一行：Logo + 社交媒体 */
+    .footer-row-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .footer-brand-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 50%;
+      background: rgba(107,250,200,0.15);
+    }
+    .footer-brand-icon svg { width: 2.5rem; height: 2.5rem; }
+    .footer-logo {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 1.25rem; font-weight: 700; color: #fff;
+    }
+    .footer-logo .beta {
+      font-size: 0.5625rem; font-weight: 600; color: var(--accent-light);
+      background: rgba(107,250,200,0.12); padding: 0.125rem 0.375rem; border-radius: 0.25rem;
+    }
+    /* 社交媒体容器 */
+    .footer-social {
+      display: flex;
+      gap: 0.625rem;
+      padding: 0.3125rem 0.625rem;
+      border-radius: 0.9375rem;
+    }
+    .social-item {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      padding: 0.3125rem 0.625rem;
+      border-radius: 0.625rem;
+      text-decoration: none;
+      opacity: 0.6;
+      transition: opacity 0.2s ease;
+    }
+    .social-item:hover { opacity: 1; }
+    .social-item svg {
+      color: rgba(255, 255, 255, 0.6);
+      display: block;
+      flex-shrink: 0;
+      width: 1.625rem; height: 1.625rem;
+    }
+    .social-info {
+      display: flex;
+      color: rgba(255, 255, 255, 0.6);
+      flex-direction: column;
+    }
+    .social-cta {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.625rem;
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.2;
+    }
+    .social-handle {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.2;
+    }
+    /* 第二行：版权 + 链接 */
+    .footer-row-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      color: rgba(255, 255, 255, 0.6);
+    }
+    .footer-copy-line {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1rem;
+      font-weight: 400;
+      line-height: 100%;
+    }
+    .footer-links { display: flex; gap: 1.25rem; }
+    .footer-links a {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1rem;
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.3);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+    .footer-links a:hover { color: rgba(255, 255, 255, 0.8); }
+    /* 底部大字水印 — SVG 矢量图填满底部 */
+    .footer-watermark {
+      width: 100%;
+      padding: 0 1rem;
+      margin-top: 2.5rem;
+      user-select: none;
+    }
+    .footer-watermark svg {
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 0 auto;
+    }
+    /* 响应式 */
+    @media (max-width: 1440px) { .footer { padding: 3.75rem 5rem 2.5rem; } }
+    @media (max-width: 1280px) {
+      .footer { padding: 3rem 2.5rem 2rem; }
+    }
+    @media (max-width: 1024px) {
+      .footer-content { flex-direction: column; gap: 2rem; align-items: center; text-align: center; }
+      .footer-row-top { flex-direction: column; gap: 1.5rem; }
+      .footer-row-bottom { flex-direction: column; gap: 1rem; }
+      .footer-links { flex-wrap: wrap; justify-content: center; gap: 1rem 1.5rem; }
+      .footer-social { flex-wrap: wrap; justify-content: center; }
+    }
+    @media (max-width: 768px) {
+      .footer { padding: 2.5rem 1.25rem 1.5rem; }
+      .footer-watermark { margin-top: 1.5rem; }
+    }
+
+    /* ==================== Animations ==================== */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(1.5rem); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate { opacity: 0; animation: fadeInUp 0.6s ease forwards; }
+    .animate.d1 { animation-delay: 0.1s; }
+    .animate.d2 { animation-delay: 0.2s; }
+    .animate.d3 { animation-delay: 0.3s; }
+    .animate.d4 { animation-delay: 0.4s; }
+    .reveal { opacity: 0; transform: translateY(1.5rem); transition: all 0.6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+  <!-- ==================== Navigation ==================== -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="var(--accent)"/><path d="M10 12h12v2H10zm0 4h8v2h-8zm0 4h10v2H10z" fill="#fff" fill-rule="evenodd"/></svg>
+        <span class="brand-text">Dazee.ai</span>
+        <span class="beta">beta</span>
+      </a>
+      <!-- 桌面端按钮组 -->
+      <div class="header-actions">
+        <button class="btn-nav nav-lang" onclick="toggleLang()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span data-i18n="lang_label">ZH</span>
+        </button>
+        <a href="#features" class="btn-nav" data-i18n="nav_getstarted">Get started</a>
+      </div>
+      <!-- 移动端语言切换 -->
+      <button class="mobile-lang-btn" onclick="toggleLang()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span data-i18n="lang_label">ZH</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ==================== Hero ==================== -->
+  <section class="hero">
+    <div class="container">
+      <h1 class="hero-title animate" data-i18n="hero_title">小搭子</h1>
+      <p class="hero-tagline animate d1" data-i18n="hero_tagline">养在电脑里，越用越懂你</p>
+      <p class="hero-desc animate d2" data-i18n="hero_desc">
+        简易安装后，小搭子就直接住在你的电脑里。它能看到你的屏幕、帮你管文件、产内容、做分析、设提醒。只需用自然语言告诉它想做什么，它就能动手帮你搞定！越用越懂你！
+      </p>
+      <div class="hero-downloads animate d3">
+        <a href="#" class="hero-download-btn">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          macOS
+        </a>
+        <a href="#" class="hero-download-btn">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .15V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm17 .25V22l-10-1.91V13.1l10 .15z"/></svg>
+          Windows
+        </a>
+      </div>
+      <a href="https://github.com/malue-ai/dazee-small" class="hero-github animate d3" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <span data-i18n="hero_github">在 GitHub 上查看</span>
+      </a>
+      <p class="hero-note animate d4" data-i18n="hero_note">小搭子完全开源，欢迎参与共建</p>
+    </div>
+  </section>
+
+  <!-- ==================== Features ==================== -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="features-header reveal">
+        <h2 data-i18n="features_title">五大核心优势</h2>
+        <p data-i18n="features_subtitle">让每一位用户都能轻松上手、高效使用、安心无忧</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card reveal">
+          <div class="feature-icon">
+            <svg viewBox="-2 -2 34 34" fill="currentColor"><path d="M9.36 -0.4L10.63 4.19Q10.68 4.39 10.68 4.59Q10.68 5.07 10.49 5.5Q10.24 6.07 9.76 6.07Q9.76 6.09 9.18 6.09Q8.58 6.09 8.07 5.78Q7.56 5.47 7.24 4.99L6.47 0.4Q6.42 0.2 6.42 0Q6.42 -0.48 6.62 -0.92Q6.86 -1.5 7.92 -1.5Q8.52 -1.5 9.03 -1.19Q9.33 -1.03 9.36 -0.4ZM19.72 4.1Q20.18 3.61 20.18 3.01Q20.18 2.41 19.88 1.9Q19.58 1.51 18.68 1.51Q18.08 1.51 17.65 1.92L14.48 4.93Q14.03 5.33 14.02 6.02Q14.02 6.62 14.31 7.12Q14.62 7.52 15.52 7.52Q16.12 7.52 16.55 7.1L19.72 4.1ZM0.4 6.47L4.99 7.74Q5.47 7.87 5.78 8.09Q6.09 8.37 6.09 9.18Q6.09 9.78 5.79 10.29Q5.47 10.68 4.59 10.68Q4.39 10.68 4.19 10.63L-0.4 9.36Q-0.87 9.23 -1.19 9.01Q-1.5 8.73 -1.5 7.92Q-1.5 7.32 -1.2 6.81Q-0.87 6.42 0 6.42Q0.2 6.42 0.4 6.47ZM30.34 17.3L11.34 9.38Q10.99 9.27 10.77 9.27Q10.12 9.27 9.62 9.71Q9.18 10.12 9.27 10.77Q9.27 10.92 9.38 11.34L17.3 30.34Q17.54 30.93 18.13 31.17Q18.63 31.27 19.13 31.05Q19.56 30.83 19.76 30.39Q19.88 30.1 20.1 30.26L22.71 22.71L30.26 20.1Q30.81 19.88 31.05 19.34Q31.27 18.84 31.05 18.25Q30.83 17.8 30.34 17.3ZM13.55 13.55L18.55 25.56L20.12 21.04Q20.26 20.59 20.47 20.47Q20.59 20.35 21.04 20.12L25.56 18.55L13.55 13.55ZM7.1 16.55Q7.52 16.1 7.52 15.52Q7.52 14.91 7.21 14.41Q6.91 14.02 6.02 14.02Q5.42 14.02 4.93 14.48L1.92 17.65Q1.51 18.06 1.51 18.68Q1.51 19.29 1.81 19.79Q2.11 20.18 3.01 20.18Q3.61 20.18 4.1 19.72L7.1 16.55Z"/></svg>
+          </div>
+          <h3 data-i18n="f1_title">一键安装</h3>
+          <p data-i18n="f1_desc">下载安装包 → 双击安装 → 填一个 API Key → 开聊！全程不到 3 分钟，无需任何技术背景。</p>
+          <div class="feature-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            <span data-i18n="f1_check">三步搞定，开箱即用</span>
+          </div>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <h3 data-i18n="f2_title">小白友好</h3>
+          <p data-i18n="f2_desc">所有操作用自然语言完成，不需要学命令、记快捷键。出了问题它会说「我换个方法试试」，而不是给你看报错代码。</p>
+          <div class="feature-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            <span data-i18n="f2_check">说人话，不甩术语</span>
+          </div>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">
+            <svg viewBox="-2 -2 33 33" fill="currentColor"><path d="M7 7.89Q3.5 11.1 -0.23 12.38Q-1.52 12.82 -1.5 14.32Q-1.48 15.87 -0.12 16.22Q8.96 18.9 12.19 28.91Q12.77 30.25 14.13 30.17Q15.54 30.09 15.86 28.78Q18.49 19.19 28.63 16.14Q29.89 15.61 29.96 14.36Q30.05 12.8 28.62 12.43Q19.43 9.75 16.01 -0.26Q15.39 -1.58 14.01 -1.5Q12.57 -1.41 12.21 -0.11Q11.05 4.18 7 7.89ZM3.15 14.21Q10.48 17.3 13.95 25.11Q17.08 17.61 24.94 14.28Q17.68 11.09 14.17 3.26Q12.51 6.91 9.03 10.1Q6.19 12.71 3.15 14.21Z"/></svg>
+          </div>
+          <h3 data-i18n="f3_title">Token 超值</h3>
+          <p data-i18n="f3_desc">支持 7+ 主流 AI 模型，从免费到高端任你选。DeepSeek 性价比之王、Gemini 每日免费额度、Claude 深度思考…… 按需选择。</p>
+          <div class="feature-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            <span data-i18n="f3_check">多模型自由切换，丰俭由人</span>
+          </div>
+        </div>
+        <div class="feature-card wide reveal">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+          </div>
+          <h3 data-i18n="f4_title">办公提效</h3>
+          <p data-i18n="f4_desc">写作、数据分析、文件整理、翻译、图表制作、会议纪要…… 内置 200+ 专业技能，一个搭子顶一个团队。</p>
+          <div class="feature-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            <span data-i18n="f4_check">200+ 技能覆盖全场景</span>
+          </div>
+        </div>
+        <div class="feature-card wide reveal">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+          </div>
+          <h3 data-i18n="f5_title">隐私安全</h3>
+          <p data-i18n="f5_desc">所有聊天记录、文件、个人偏好都存在本地，不会上传到任何云端服务器。你的隐私它比你自己还上心。</p>
+          <div class="feature-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            <span data-i18n="f5_check">数据不出你的电脑</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Steps ==================== -->
+  <section class="steps" id="steps">
+    <div class="container">
+      <div class="steps-header reveal">
+        <h2 data-i18n="steps_title">快速上手</h2>
+        <p class="steps-subtitle" data-i18n="steps_subtitle">三步开始使用，简单到离谱</p>
+      </div>
+      <div class="steps-grid">
+        <!-- Step 1 -->
+        <div class="step-card reveal">
+          <div class="step-number">STEP 1</div>
+          <h3 data-i18n="s1_title">下载安装</h3>
+          <div class="step-install-info">
+            <div class="install-line" data-i18n-html="s1_line1">Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small" target="_blank" rel="noopener">下载</a> 运行。</div>
+            <div class="install-line" data-i18n-html="s1_line2">macOS在终端界面输入以下命令：</div>
+            <code class="install-cmd">bash Downloads/zenflux_agent/scripts/auto_build_app.sh</code>
+          </div>
+          <div class="step-tree">
+            <div class="step-tree-btn-wrap">
+              <a href="https://github.com/malue-ai/dazee-small" class="step-github-btn" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.0099 0C5.36875 0 0 5.40833 0 12.0992C0 17.4475 3.43994 21.9748 8.21205 23.5771C8.80869 23.6976 9.02724 23.3168 9.02724 22.9965C9.02724 22.716 9.00757 21.7545 9.00757 20.7527C5.6667 21.474 4.97099 19.3104 4.97099 19.3104C4.43409 17.9082 3.63858 17.5478 3.63858 17.5478C2.54511 16.8066 3.71823 16.8066 3.71823 16.8066C4.93117 16.8868 5.56763 18.0486 5.56763 18.0486C6.64118 19.8913 8.37111 19.3707 9.06706 19.0501C9.16638 18.2688 9.48473 17.728 9.82275 17.4276C7.15817 17.1471 4.35469 16.1055 4.35469 11.458C4.35469 10.1359 4.8316 9.05428 5.58729 8.21304C5.46807 7.91263 5.0504 6.67043 5.70677 5.00787C5.70677 5.00787 6.72083 4.6873 9.00732 6.24981C9.98625 5.98497 10.9958 5.85024 12.0099 5.84911C13.024 5.84911 14.0577 5.98948 15.0123 6.24981C17.299 4.6873 18.3131 5.00787 18.3131 5.00787C18.9695 6.67043 18.5515 7.91263 18.4323 8.21304C19.2079 9.05428 19.6652 10.1359 19.6652 11.458C19.6652 16.1055 16.8617 17.1269 14.1772 17.4276C14.6148 17.8081 14.9924 18.5292 14.9924 19.6711C14.9924 21.2936 14.9727 22.5957 14.9727 22.9962C14.9727 23.3168 15.1915 23.6976 15.7879 23.5774C20.56 21.9745 23.9999 17.4475 23.9999 12.0992C24.0196 5.40833 18.6312 0 12.0099 0Z"/></svg>
+                GitHub
+              </a>
+              <!-- Green cursor arrow -->
+              <svg class="step-tree-cursor" viewBox="0 0 38 36" fill="none">
+                <path d="M3.9115 1.34766C2.36246 0.813958 0.895604 2.33274 1.48284 3.86228L12.1192 31.5663C12.7397 33.1824 15.0103 33.2259 15.6923 31.6347L20.2568 20.9843C20.4582 20.5141 20.8382 20.1433 21.3131 19.9533L33.4367 15.1039C35.0959 14.4402 35.0382 12.072 33.3487 11.4899L3.9115 1.34766Z" fill="#6BFAC8"/>
+                <path d="M21.4385 21.4907Q21.5434 21.246 21.7906 21.1471L33.9142 16.2976Q35.9882 15.4681 35.9338 13.235Q35.8794 11.0019 33.7675 10.2743L4.33032 0.132072Q2.39402 -0.535056 0.971261 0.93806Q-0.451497 2.41118 0.282549 4.32311L10.9189 32.0271Q11.6945 34.0473 13.858 34.0887Q16.0216 34.1302 16.874 32.1412L21.4385 21.4907ZM32.9592 13.9101L20.8356 18.7596Q19.5995 19.254 19.075 20.4778L14.5105 31.1283Q14.34 31.526 13.9073 31.5178Q13.4746 31.5095 13.3195 31.1054L2.68313 3.40145Q2.53632 3.01907 2.82087 2.72445Q3.10543 2.42982 3.49269 2.56325L32.9299 12.7055Q33.3522 12.851 33.3631 13.2976Q33.374 13.7442 32.9592 13.9101Z" fill="#6BFAC8"/>
+              </svg>
+            </div>
+            <!-- Tree branches from design -->
+            <svg class="step-tree-svg" viewBox="-64 -2 362 114" fill="none">
+              <!-- Left branch -->
+              <path d="M117.714 0.05Q117.715 0.025 117.715 0Q117.715-0.084 117.707-0.168Q117.698-0.252 117.682-0.335Q117.666-0.417 117.641-0.498Q117.617-0.578 117.584-0.656Q117.552-0.734 117.512-0.808Q117.473-0.883 117.426-0.953Q117.379-1.023 117.326-1.088Q117.272-1.153 117.213-1.213Q117.153-1.272 117.088-1.326Q117.023-1.379 116.953-1.426Q116.883-1.473 116.808-1.512Q116.734-1.552 116.656-1.584Q116.578-1.617 116.498-1.641Q116.417-1.666 116.335-1.682Q116.252-1.698 116.168-1.707Q116.084-1.715 116-1.715Q115.916-1.715 115.832-1.707Q115.748-1.698 115.665-1.682Q115.583-1.666 115.502-1.641Q115.422-1.617 115.344-1.584Q115.266-1.552 115.192-1.512Q115.117-1.473 115.047-1.426Q114.977-1.379 114.912-1.326Q114.847-1.272 114.787-1.213Q114.728-1.153 114.674-1.088Q114.621-1.023 114.574-0.953Q114.527-0.883 114.488-0.808Q114.448-0.734 114.416-0.656Q114.383-0.578 114.359-0.498Q114.334-0.417 114.318-0.335Q114.302-0.252 114.293-0.168Q114.285-0.084 114.285 0Q114.285 0.024 114.286 0.049Q114.271 20.143 102.354 36.328Q90.423 52.533 71.207 58.508L24.913 72.903Q13.036 76.596 5.661 86.613Q-1.699 96.609-1.714 109.017Q-1.715 109.043-1.715 109.068Q-1.715 109.152-1.707 109.236Q-1.698 109.32-1.682 109.402Q-1.666 109.485-1.641 109.566Q-1.617 109.646-1.584 109.724Q-1.552 109.802-1.512 109.876Q-1.473 109.951-1.426 110.021Q-1.379 110.091-1.326 110.156Q-1.272 110.221-1.213 110.28Q-1.153 110.34-1.088 110.394Q-1.023 110.447-0.953 110.494Q-0.883 110.541-0.808 110.58Q-0.734 110.62-0.656 110.652Q-0.578 110.684-0.498 110.709Q-0.417 110.733-0.335 110.75Q-0.252 110.766-0.168 110.775Q-0.084 110.783 0 110.783Q0.084 110.783 0.168 110.775Q0.252 110.766 0.335 110.75Q0.417 110.733 0.498 110.709Q0.578 110.684 0.656 110.652Q0.734 110.62 0.808 110.58Q0.883 110.541 0.953 110.494Q1.023 110.447 1.088 110.394Q1.153 110.34 1.213 110.28Q1.272 110.221 1.326 110.156Q1.379 110.091 1.426 110.021Q1.473 109.951 1.512 109.876Q1.552 109.802 1.584 109.724Q1.617 109.646 1.641 109.566Q1.666 109.485 1.682 109.402Q1.698 109.32 1.707 109.236Q1.715 109.152 1.715 109.068Q1.715 109.044 1.714 109.019Q1.729 97.736 8.422 88.646Q15.129 79.536 25.931 76.177L72.225 61.782Q92.516 55.473 105.115 38.361Q117.699 21.27 117.714 0.05Z" fill="#181818"/>
+              <!-- Right branch (mirrored) -->
+              <g transform="translate(234,0) scale(-1,1)">
+                <path d="M117.714 0.05Q117.715 0.025 117.715 0Q117.715-0.084 117.707-0.168Q117.698-0.252 117.682-0.335Q117.666-0.417 117.641-0.498Q117.617-0.578 117.584-0.656Q117.552-0.734 117.512-0.808Q117.473-0.883 117.426-0.953Q117.379-1.023 117.326-1.088Q117.272-1.153 117.213-1.213Q117.153-1.272 117.088-1.326Q117.023-1.379 116.953-1.426Q116.883-1.473 116.808-1.512Q116.734-1.552 116.656-1.584Q116.578-1.617 116.498-1.641Q116.417-1.666 116.335-1.682Q116.252-1.698 116.168-1.707Q116.084-1.715 116-1.715Q115.916-1.715 115.832-1.707Q115.748-1.698 115.665-1.682Q115.583-1.666 115.502-1.641Q115.422-1.617 115.344-1.584Q115.266-1.552 115.192-1.512Q115.117-1.473 115.047-1.426Q114.977-1.379 114.912-1.326Q114.847-1.272 114.787-1.213Q114.728-1.153 114.674-1.088Q114.621-1.023 114.574-0.953Q114.527-0.883 114.488-0.808Q114.448-0.734 114.416-0.656Q114.383-0.578 114.359-0.498Q114.334-0.417 114.318-0.335Q114.302-0.252 114.293-0.168Q114.285-0.084 114.285 0Q114.285 0.024 114.286 0.049Q114.271 20.143 102.354 36.328Q90.423 52.533 71.207 58.508L24.913 72.903Q13.036 76.596 5.661 86.613Q-1.699 96.609-1.714 109.017Q-1.715 109.043-1.715 109.068Q-1.715 109.152-1.707 109.236Q-1.698 109.32-1.682 109.402Q-1.666 109.485-1.641 109.566Q-1.617 109.646-1.584 109.724Q-1.552 109.802-1.512 109.876Q-1.473 109.951-1.426 110.021Q-1.379 110.091-1.326 110.156Q-1.272 110.221-1.213 110.28Q-1.153 110.34-1.088 110.394Q-1.023 110.447-0.953 110.494Q-0.883 110.541-0.808 110.58Q-0.734 110.62-0.656 110.652Q-0.578 110.684-0.498 110.709Q-0.417 110.733-0.335 110.75Q-0.252 110.766-0.168 110.775Q-0.084 110.783 0 110.783Q0.084 110.783 0.168 110.775Q0.252 110.766 0.335 110.75Q0.417 110.733 0.498 110.709Q0.578 110.684 0.656 110.652Q0.734 110.62 0.808 110.58Q0.883 110.541 0.953 110.494Q1.023 110.447 1.088 110.394Q1.153 110.34 1.213 110.28Q1.272 110.221 1.326 110.156Q1.379 110.091 1.426 110.021Q1.473 109.951 1.512 109.876Q1.552 109.802 1.584 109.724Q1.617 109.646 1.641 109.566Q1.666 109.485 1.682 109.402Q1.698 109.32 1.707 109.236Q1.715 109.152 1.715 109.068Q1.715 109.044 1.714 109.019Q1.729 97.736 8.422 88.646Q15.129 79.536 25.931 76.177L72.225 61.782Q92.516 55.473 105.115 38.361Q117.699 21.27 117.714 0.05Z" fill="#181818"/>
+              </g>
+            </svg>
+            <div class="platform-icons">
+              <div class="platform-item">
+                <div class="platform-icon">
+                  <svg viewBox="0 0 24 25" fill="currentColor"><path d="M19.792 18.7033C19.429 19.5418 18.9994 20.3136 18.5016 21.0232C17.8231 21.9906 17.2676 22.6602 16.8395 23.0321C16.1758 23.6424 15.4647 23.955 14.7032 23.9728C14.1566 23.9728 13.4973 23.8172 12.73 23.5017C11.9601 23.1876 11.2525 23.0321 10.6056 23.0321C9.92709 23.0321 9.19941 23.1876 8.42106 23.5017C7.64153 23.8172 7.01355 23.9817 6.53342 23.9979C5.80322 24.0291 5.07539 23.7076 4.3489 23.0321C3.88521 22.6276 3.30523 21.9343 2.61043 20.9521C1.86498 19.9033 1.25211 18.687 0.771975 17.3004C0.25777 15.8026 0 14.3523 0 12.9482C0 11.3398 0.347544 9.95259 1.04367 8.79011C1.59076 7.85636 2.31859 7.11979 3.22953 6.57906C4.14046 6.03834 5.12473 5.76279 6.18469 5.74516C6.76467 5.74516 7.52524 5.92457 8.4704 6.27715C9.41288 6.63091 10.0181 6.81032 10.2834 6.81032C10.4817 6.81032 11.154 6.60054 12.2937 6.18234C13.3714 5.7945 14.281 5.63391 15.0262 5.69717C17.0454 5.86012 18.5624 6.6561 19.5712 8.09013C17.7654 9.18432 16.8721 10.7169 16.8898 12.6829C16.9061 14.2142 17.4617 15.4886 18.5535 16.5004C19.0483 16.97 19.6009 17.333 20.2156 17.5907C20.0823 17.9774 19.9416 18.3477 19.792 18.7033ZM15.161 0.480137C15.161 1.68041 14.7225 2.8011 13.8484 3.83841C12.7937 5.07155 11.5179 5.78413 10.1343 5.67168C10.1167 5.52769 10.1065 5.37614 10.1065 5.21688C10.1065 4.06462 10.6081 2.83147 11.4989 1.82321C11.9436 1.3127 12.5092 0.888228 13.1951 0.549615C13.8796 0.216055 14.5269 0.031589 15.1358 0C15.1536 0.160458 15.161 0.320926 15.161 0.480137Z"/></svg>
+                </div>
+                <span>macOS</span>
+              </div>
+              <div class="platform-item">
+                <div class="platform-icon">
+                  <svg viewBox="-1.75 -1.75 19 18" fill="currentColor"><path d="M13.5 0H1.5C0.672 0 0 0.672 0 1.5V9C0 9.828 0.672 10.5 1.5 10.5H13.5C14.328 10.5 15 9.828 15 9V1.5C15 0.672 14.328 0 13.5 0Z"/><path d="M13.5-0.75L1.5-0.75Q0.568-0.75-0.091-0.091Q-0.75 0.568-0.75 1.5L-0.75 9Q-0.75 9.932-0.091 10.591Q0.568 11.25 1.5 11.25L6.75 11.25L6.75 12.75L4.5 12.75Q4.086 12.75 3.75 13.086Q3.75 13.414 3.75 13.5Q3.75 13.914 4.086 14.25L10.5 14.25Q10.914 14.25 11.25 13.914Q11.25 13.586 11.25 13.5Q11.25 13.086 10.914 12.75L8.25 12.75L8.25 11.25L13.5 11.25Q14.432 11.25 15.091 10.591Q15.75 9.932 15.75 9L15.75 1.5Q15.75 0.568 15.091-0.091Q14.432-0.75 13.5-0.75ZM7.5 9.75L13.5 9.75Q13.811 9.75 14.03 9.53Q14.25 9.311 14.25 9L14.25 1.5Q14.25 1.189 14.03 0.97Q13.811 0.75 13.5 0.75L1.5 0.75Q1.189 0.75 0.97 0.97Q0.75 1.189 0.75 1.5L0.75 9Q0.75 9.75 1.5 9.75L7.5 9.75Z"/></svg>
+                </div>
+                <span>Windows</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-card reveal">
+          <div class="step-number">STEP 2</div>
+          <h3 data-i18n="s2_title">配置模型</h3>
+          <p data-i18n="s2_desc">在设置页面填入 AI 模型的 API Key。推荐新手从 DeepSeek 或 Gemini（有免费额度）开始。</p>
+          <div class="step-apikey-wrap">
+            <svg class="step-apikey-arrow" viewBox="0 0 28 32" fill="none">
+              <path d="M22 2C12 2 4 6 4 16C4 22 8 28 16 28" stroke="#181818" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+              <path d="M12 24L16 28L12 32" stroke="#181818" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+            <div class="step-apikey">+ <span>API Key</span></div>
+          </div>
+          <div class="model-tags">
+            <span class="model-tag active">DeepSeek</span>
+            <span class="model-tag">Gemini</span>
+            <span class="model-tag">Claude</span>
+            <span class="model-tag">Nano Banana</span>
+            <span class="model-tag">千问</span>
+            <span class="model-tag">···</span>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-card reveal">
+          <div class="step-number">STEP 3</div>
+          <h3 data-i18n="s3_title">开聊！</h3>
+          <p data-i18n="s3_desc">直接在对话框打字，把小搭子当你最靠谱的同事。想写什么、找什么、分析什么，说一句就行。</p>
+          <div class="step-chat-mock">
+            <div class="chat-files-stagger">
+              <div class="chat-files-col chat-files-col-left">
+                <div class="chat-file-card"><span class="file-card-icon pdf-icon">A</span>PDF文件</div>
+                <div class="chat-file-card"><span class="file-card-icon doc-icon">W</span>WORD文件</div>
+              </div>
+              <div class="chat-files-col">
+                <div class="chat-file-card"><span class="file-card-icon csv-icon">C</span>CVS文件</div>
+                <div class="chat-file-card"><span class="file-card-icon xls-icon">X</span>EXCEL文件</div>
+              </div>
+            </div>
+            <div class="chat-toolbar">
+              <span class="toolbar-icon">+</span>
+              <span class="toolbar-icon">@</span>
+              <svg class="toolbar-icon" width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="10" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="10" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="10" y="10" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/></svg>
+              <span class="toolbar-spacer"></span>
+              <span class="chat-send-btn">●● 发送</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Footer ==================== -->
+  <footer class="footer">
+    <div class="footer-content">
+      <!-- Row 1: Brand + Social Media -->
+      <div class="footer-row-top">
+        <div class="footer-brand">
+          <div class="footer-brand-icon">
+            <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="var(--accent-light)"/><path d="M10 12h12v2H10zm0 4h8v2h-8zm0 4h10v2H10z" fill="#0D1117" fill-rule="evenodd"/></svg>
+          </div>
+          <div class="footer-logo">
+            <span>Dazee.ai</span>
+            <span class="beta">beta</span>
+          </div>
+        </div>
+        <div class="footer-social">
+          <a href="https://x.com/Dazee_AI" target="_blank" rel="noopener noreferrer" class="social-item">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            <div class="social-info"><span class="social-cta">Follow US</span><span class="social-handle">@Dazee_AI</span></div>
+          </a>
+          <a href="https://www.youtube.com/@Dazee_AI" target="_blank" rel="noopener noreferrer" class="social-item">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            <div class="social-info"><span class="social-cta">Follow US</span><span class="social-handle">@Dazee_AI</span></div>
+          </a>
+          <a href="https://discord.gg/Djt2Xd7m" target="_blank" rel="noopener noreferrer" class="social-item">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+            <div class="social-info"><span class="social-cta">Follow US</span><span class="social-handle">@Dazee.ai</span></div>
+          </a>
+          <a href="https://www.reddit.com/user/Consistent_Big_9638/" target="_blank" rel="noopener noreferrer" class="social-item">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg>
+            <div class="social-info"><span class="social-cta">Follow US</span><span class="social-handle">@Dazee.AI</span></div>
+          </a>
+        </div>
+      </div>
+
+      <!-- Row 2: Copyright + Legal Links -->
+      <div class="footer-row-bottom">
+        <span class="footer-copy-line">© 2026 Dazee.ai. All rights reserved.</span>
+        <div class="footer-links">
+          <a href="#">Terms of Service</a>
+          <a href="#">Privacy Policy</a>
+        </div>
+      </div>
+    </div>
+    <!-- Watermark SVG (from Dazee.vue component, color changed to green) -->
+    <div class="footer-watermark">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 1268 219">
+        <defs>
+          <linearGradient id="watermark_grad" x1="0.5" y1="0" x2="0.5" y2="1">
+            <stop offset="0%" stop-color="#6BFAC8" stop-opacity="1"/>
+            <stop offset="89%" stop-color="#6BFAC8" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M0,16.070581C0,10.608664,1.2604377,7.2475181,3.7813132,4.7266102Q7.5626268,0.63021898,16.385689,0.63021886L80.037796,0C116.17044,0,144.21519,8.7180386,162.91158,26.154085C181.81813,43.380177,190.6412,70.374336,190.6412,107.13722C190.6412,143.05969,181.81813,169.94893,162.91158,187.80524C144.005,205.45137,115.96027,214.27444,80.037796,214.27444L16.385689,213.64421C10.293584,213.64421,5.9870791,212.38376,3.4662037,209.8629C1.1554023,207.34203,0,203.98074,0,198.51897L0,16.070581ZM1210.9651,22.058302C1210.9651,16.596415,1212.8557,11.9748,1216.6371,8.1934872C1220.4185,4.2020893,1225.8793,2.2064073,1233.0227,2.2064073L1243.1063,2.2064073C1250.4578,2.2064073,1256.0259,4.2020893,1259.807,8.1934872C1263.5884,11.9748,1265.479,16.596415,1265.479,22.058302L1265.479,29.620899C1265.479,34.87286,1263.5884,39.494255,1259.807,43.485744C1256.0259,47.267056,1250.4578,49.157715,1243.1063,49.157715L1233.0227,49.157715C1225.8793,49.157715,1220.4185,47.267056,1216.6371,43.485744C1212.8557,39.494255,1210.9651,34.87286,1210.9651,29.620899L1210.9651,22.058302ZM3.9999998,198.51897Q3.9999998,204.45122,6.3553371,207.09419Q8.9905014,209.64421,16.385689,209.64421L16.425291,209.64441L80.037781,210.27444Q132.97505,210.27444,160.16507,184.89719Q186.6412,159.89178,186.6412,107.13722Q186.6412,53.18586,160.18347,29.079391Q133.29126,4,80.0774,3.999804L16.385689,4.6302195Q9.313942,4.630219,6.7205162,7.4397421L6.6662893,7.4984875L6.6097574,7.5550218Q4,10.16481,4,16.070581L3.9999998,198.51897ZM1243.1063,45.157715Q1252.4398,45.157715,1256.9414,40.69437Q1261.479,35.878407,1261.479,29.620899L1261.479,22.058302Q1261.479,15.522232,1256.9786,11.021936L1256.9403,10.983674L1256.9031,10.94439Q1252.4147,6.2064075,1243.1063,6.2064075L1233.0227,6.2064085Q1224.0297,6.2064075,1219.5409,10.944484L1219.5037,10.98372L1219.4655,11.021936Q1214.9651,15.522232,1214.9651,22.058302L1214.9651,29.620899Q1214.9651,35.878704,1219.5032,40.694862Q1224.0038,45.157715,1233.0227,45.157715L1243.1063,45.157715ZM84.764435,172.58357L64.597427,172.58357Q60.982807,172.58357,58.426792,170.02754Q55.870796,167.47153,55.870796,163.85692L55.870796,50.732624Q55.870796,47.117996,58.426796,44.561993Q60.982803,42.005981,64.597427,42.005981L84.764435,42.005981Q109.38884,42.005981,121.26833,57.030643Q134.1402,72.845078,134.1402,107.13722Q134.1402,141.37746,121.3037,157.5148Q109.38882,172.58357,84.764435,172.58357ZM84.764435,168.58357C99.889679,168.58357,111.02346,164.06709,118.16604,155.03386C125.51849,145.79074,130.1402,129.82509,130.1402,107.13722C130.1402,84.449333,125.51849,68.588936,118.16604,59.555687C111.02346,50.522442,99.889679,46.005981,84.764435,46.005981L64.597427,46.005981C61.987068,46.005981,59.870796,48.122257,59.870796,50.732624L59.870796,163.85692C59.870796,166.46729,61.987068,168.58357,64.597427,168.58357L84.764435,168.58357ZM266.00851,219.00095C246.26158,219.00095,231.03137,212.69876,219.05722,200.09439C207.29294,187.27985,202.04132,169.3186,202.04132,146.21066C202.04132,128.56454,205.40228,113.12418,213.38525,99.88958C221.57809,86.654984,232.39674,76.466553,247.10196,69.323967C262.01703,61.971516,279.13788,58.295132,298.46481,58.295132C314.43011,58.295132,328.50418,60.08086,340.68945,63.651997C348.39389,65.741173,355.68869,68.43882,362.58328,71.744949C370.37277,75.483093,374.72131,83.701149,374.72131,92.343964L374.72131,204.50592C374.72131,208.49741,373.98709,211.12323,372.5155,212.38365C371.04398,213.6441,368.104,214.27431,363.69247,214.27431L331.5513,214.27431C329.24152,214.27431,327.45486,213.9592,326.19443,213.32899C324.93402,212.48859,323.88467,211.22815,323.04333,209.54767L320.85648,204.50276C319.95529,202.42084,317.20438,201.94092,315.51538,203.45471C310.15189,208.25919,303.9433,211.86562,296.88925,214.27431C288.48624,217.4254,278.19254,219.00095,266.00851,219.00095ZM730.55261,151.88264L631.60828,151.88264C631.60828,153.26518,631.68695,154.59853,631.84436,155.88264C632.71533,162.98869,635.99646,168.58775,641.69177,172.67986C648.62415,177.51143,659.02277,179.92738,672.88757,179.92738C681.49957,179.92738,688.64307,179.19223,694.315,177.72162C700.19501,176.04114,706.07812,173.62518,711.96112,170.47409C714.48199,169.42383,716.16162,168.89854,717.00293,168.89854C718.89355,168.89854,720.46912,170.159,721.72949,172.67986L732.44324,192.84688C733.49261,194.94769,734.0188,196.52325,734.0188,197.57352C734.0188,199.46417,732.75836,201.24989,730.23755,202.93037C721.6225,208.60234,711.85406,212.69876,700.93231,215.21964C690.00751,217.74052,677.50714,219.00095,663.43427,219.00095C645.78815,219.00095,630.03271,216.06003,616.16797,210.17789C602.51105,204.29575,591.69336,195.47267,583.71167,183.70868C575.72675,171.9447,571.73749,157.55461,571.73749,140.53868C571.73749,113.85933,579.30011,93.48246,594.42535,79.407463C609.5506,65.332466,631.29315,58.295132,659.65302,58.295132C687.38263,58.295132,708.38788,65.227539,722.67487,79.092354C737.16992,92.746994,744.41742,111.7588,744.41742,136.12717C744.41742,146.63071,739.7948,151.88264,730.55261,151.88264ZM920.8009,151.88264L821.85657,151.88264C821.85657,153.26518,821.93524,154.59853,822.09265,155.88264C822.96362,162.98869,826.24487,168.58775,831.94006,172.67986C838.87244,177.51143,849.27106,179.92738,863.13593,179.92738C871.74786,179.92738,878.89136,179.19223,884.56335,177.72162C890.4433,176.04114,896.32642,173.62518,902.20947,170.47409C904.73035,169.42383,906.40985,168.89854,907.25116,168.89854C909.14185,168.89854,910.71741,170.159,911.97784,172.67986L922.69159,192.84688C923.74091,194.94769,924.26715,196.52325,924.26715,197.57352C924.26715,199.46417,923.00671,201.24989,920.48578,202.93037C911.87073,208.60234,902.10236,212.69876,891.1806,215.21964C880.2558,217.74052,867.75543,219.00095,853.68262,219.00095C836.03644,219.00095,820.28101,216.06003,806.4162,210.17789C792.7594,204.29575,781.94165,195.47267,773.9599,183.70868C765.9751,171.9447,761.98578,157.55461,761.98578,140.53868C761.98578,113.85933,769.5484,93.48246,784.67358,79.407463C799.79889,65.332466,821.54144,58.295132,849.90131,58.295132C877.63092,58.295132,898.63617,65.227539,912.92316,79.092354C927.41815,92.746994,934.66577,111.7588,934.66577,136.12717C934.66577,146.63071,930.04309,151.88264,920.8009,151.88264ZM1074.7405,219.00095C1054.9927,219.00095,1039.7634,212.69876,1027.7892,200.09439C1016.0262,187.27985,1010.7733,169.3186,1010.7733,146.21066C1010.7733,128.56454,1014.1356,113.12418,1022.1172,99.88958C1030.3101,86.654984,1041.1278,76.466553,1055.834,69.323967C1070.748,61.971516,1087.8711,58.295132,1107.1968,58.295132C1123.1635,58.295132,1137.2363,60.08086,1149.4214,63.651997C1157.1259,65.741173,1164.4207,68.43882,1171.3153,71.744949C1179.1047,75.483093,1183.4534,83.701149,1183.4534,92.343964L1183.4534,204.50592C1183.4534,208.49741,1182.7191,211.12323,1181.2476,212.38365C1179.776,213.6441,1176.8359,214.27431,1172.4246,214.27431L1140.2833,214.27431C1137.9735,214.27431,1136.1869,213.9592,1134.9265,213.32899C1133.666,212.48859,1132.6167,211.22815,1131.7753,209.54767L1129.5885,204.50276C1128.6873,202.42084,1125.9364,201.94092,1124.2474,203.45471C1118.8843,208.25919,1112.6766,211.86562,1105.6212,214.27431C1097.2173,217.4254,1086.9259,219.00095,1074.7405,219.00095ZM331.5513,210.27431Q329.2774,210.27431,328.20328,209.84908Q327.35294,209.18617,326.66574,207.84695L324.52649,202.91188Q323.013,199.41534,319.22354,198.6998Q315.59244,198.01416,312.84567,200.47601Q305.40759,207.13885,295.59668,210.48891L295.54044,210.50812L295.48477,210.52899Q283.55942,215.00095,266.00851,215.00095Q238.73567,215.00095,221.95723,197.3394Q206.04132,180.00174,206.04132,146.21066Q206.04132,119.80913,216.81039,101.9556Q228.73611,82.691467,248.84958,72.921997Q270.40723,62.295132,298.46481,62.295116Q321.83691,62.295132,339.56448,67.490547Q350.83551,70.547707,360.85376,75.351707Q370.72131,80.087112,370.72131,92.343964L370.72131,204.50592Q370.72131,208.65373,369.91345,209.34567Q368.82932,210.27431,363.69247,210.27431L331.5513,210.27431ZM1140.2833,210.27431Q1138.0094,210.27431,1136.9354,209.84908Q1136.0852,209.18634,1135.3979,207.84747L1133.2585,202.91194Q1131.7449,199.41531,1127.9556,198.6998Q1124.3245,198.01414,1121.5776,200.47604Q1114.1393,207.13957,1104.3289,210.48883L1104.2726,210.50806L1104.2169,210.52893Q1092.2902,215.00095,1074.7405,215.00095Q1047.4678,215.00095,1030.6892,197.33939Q1014.7733,179.99976,1014.7733,146.21066Q1014.7733,119.81224,1025.5426,101.95535Q1037.4686,82.690628,1057.5815,72.922043Q1079.1378,62.295132,1107.1968,62.295116Q1130.5692,62.295132,1148.2964,67.49054Q1159.5675,70.547714,1169.5858,75.351715Q1179.4534,80.087143,1179.4534,92.343964L1179.4534,204.50592Q1179.4534,208.65373,1178.6455,209.34569Q1177.5613,210.27431,1172.4246,210.27431L1140.2833,210.27431ZM695.41418,181.56763Q704.56152,178.95334,713.6756,174.09325Q716.55621,172.89854,717.00293,172.89854Q717.3667,172.89854,718.15173,174.46864L718.17383,174.51285L728.8866,194.67796Q730.0188,196.95049,730.0188,197.57352Q730.0188,198.26886,728.0188,199.60214Q715.71539,207.70236,700.03271,211.32211Q684.08972,215.00095,663.43427,215.00095Q637.77814,215.00095,617.73022,206.49557Q598.33948,198.14378,587.02173,181.46288Q575.73749,164.8381,575.73749,140.53868Q575.73749,102.26167,597.15027,82.335701Q618.68628,62.295132,659.65302,62.295143Q699.62256,62.295132,719.88916,81.962875Q740.41742,101.30149,740.41742,136.12717Q740.41742,147.88264,730.55261,147.88264L627.60828,147.88264L627.60828,151.88264Q627.60828,167.48627,639.35773,175.9283Q650.83417,183.92738,672.88757,183.92738Q686.31775,183.92738,695.31891,181.59358L695.3667,181.58119L695.41418,181.56763ZM885.66254,181.56763Q894.80963,178.95341,903.92377,174.09331Q906.80457,172.89854,907.25116,172.89854Q907.61505,172.89854,908.40015,174.46872L908.42224,174.51288L919.1355,194.67908Q920.26715,196.95079,920.26715,197.57352Q920.26715,198.26881,918.26709,199.60208Q905.96362,207.70238,890.28101,211.32211Q874.33801,215.00095,853.68262,215.00095Q828.02643,215.00095,807.97839,206.49557Q788.58777,198.14372,777.26996,181.46286Q765.98578,164.83795,765.98578,140.53868Q765.98578,102.26169,787.3985,82.335693Q808.93457,62.295132,849.90131,62.295143Q889.87085,62.295132,910.13745,81.962875Q930.66577,101.30168,930.66577,136.12717Q930.66577,147.88264,920.8009,147.88264L817.85657,147.88264L817.85657,151.88264Q817.85657,167.48608,829.60602,175.92827Q841.08246,183.92738,863.13593,183.92738Q876.5661,183.92738,885.56726,181.5936L885.61505,181.58119L885.66254,181.56763ZM410.69498,169.52861L468.08093,113.0276L468.08752,113.0211L469.40305,111.72588C470.40506,110.73676,469.70554,109.0276,468.297,109.0276L415.42163,109.0276C409.33057,109.0276,405.65323,107.76716,403.13235,105.24628C400.61148,102.72541,399.66614,98.733925,399.66614,93.272125L400.29636,78.777092C400.50433,73.26268,402.18701,69.323814,404.70789,66.802933C407.22876,64.282059,411.53632,63.021618,417.62738,63.021618L536.42365,63.021618C541.04626,63.021618,544.19739,63.862019,545.87695,65.542496C547.55963,67.013115,549.02802,69.743851,549.02802,73.735336C549.02802,75.927574,549.06189,77.973518,549.09344,79.875771C549.18573,85.447105,549.25757,89.785805,548.39777,92.957016C547.13733,97.158371,543.56714,102.09519,538.31427,107.76716L484.1489,164.58328L484.14645,164.58585L482.87396,165.92061C481.91919,166.9236,482.62817,168.58328,484.01465,168.58328L535.47833,168.58328C541.57257,168.58328,545.87695,169.84373,548.39777,172.36461C550.91864,174.88548,551.86401,178.87697,551.86401,184.33876L551.23376,198.83379C551.23376,204.08572,549.34314,207.97197,546.82227,210.49284C544.30139,213.01372,539.99701,214.27415,533.90277,214.27415L413.84607,214.27415C408.59637,214.27415,405.02301,213.53902,403.13235,212.06839C401.2417,210.38791,399.66614,207.34175,399.66614,202.93022C399.66614,200.02058,399.56332,197.37369,399.47073,194.98953C399.28253,190.14398,399.13647,186.38371,399.98126,183.70853C401.45282,179.71706,405.23416,174.9904,410.69498,169.52861ZM1208.1292,79.093117C1208.1292,73.631325,1209.3896,69.639832,1211.9105,67.11895C1214.4314,64.387901,1218.7389,63.022533,1224.83,63.022533L1250.984,63.022533C1257.0751,63.022533,1261.3827,64.387901,1263.9036,67.11895C1266.6355,69.639832,1268,73.631325,1268,79.093117L1268,198.51961C1268,203.98138,1266.6355,207.97287,1263.9036,210.49376C1261.3827,213.01462,1257.0751,214.27507,1250.984,214.27507L1224.83,214.27507C1218.7389,214.27507,1214.4314,213.01462,1211.9105,210.49376C1209.3896,207.97287,1208.1292,203.98138,1208.1292,198.51961L1208.1292,79.093117ZM404.29257,78.950844L403.66623,93.356819Q403.68036,100.13742,405.96078,102.41785Q408.57053,105.0276,415.42163,105.0276L468.297,105.0276Q472.0372,105.0276,473.45541,108.48947Q474.87213,111.94774,472.20941,114.57619L413.52365,172.35678Q405.53873,180.34311,403.77118,184.99377Q403.1665,187.07866,403.46771,194.83429Q403.66614,199.94312,403.66614,202.93022Q403.66614,207.08397,405.68427,208.98224Q407.51273,210.27415,413.84607,210.27415L533.90277,210.27415Q541.38409,210.27415,543.99384,207.66441Q547.23376,204.42448,547.23376,198.83379L547.23376,198.74687L547.86395,184.25406Q547.84985,177.47353,545.56927,175.19301Q542.95959,172.58328,535.47833,172.58328L484.01465,172.58328Q480.33597,172.58328,478.88892,169.20175Q477.44345,165.82391,479.97879,163.16052L535.37952,105.04923Q543.05072,96.765968,544.55035,91.860786Q545.24731,89.198624,545.09399,79.942017Q545.02802,75.959,545.02802,73.735336Q545.02802,70.112907,543.24469,68.554329L543.14313,68.465561L543.04773,68.370155Q541.69995,67.021622,536.42365,67.021622L417.62738,67.021629Q410.14606,67.021622,407.53632,69.631355Q404.53079,72.636894,404.29257,78.950844ZM1224.83,210.27507L1250.984,210.27507Q1258.4655,210.27507,1261.0752,207.66533L1261.132,207.60854L1261.1909,207.55406Q1264,204.96199,1264,198.51961L1264,79.093117Q1264,72.650719,1261.1909,70.058647L1261.0731,69.949875L1260.9644,69.832016Q1258.3711,67.022537,1250.984,67.022537L1224.83,67.022545Q1217.443,67.022537,1214.8497,69.832016L1214.7955,69.8908L1214.739,69.947372Q1212.1292,72.557243,1212.1292,79.093117L1212.1292,198.51961Q1212.1292,205.05547,1214.7389,207.66533Q1217.3486,210.27507,1224.83,210.27507ZM691.69775,124.6868L627.60828,124.6868L627.60828,120.6868Q627.60828,107.28757,636.12421,99.488091Q644.52722,91.478043,659.96808,91.478043Q675.43378,91.478043,683.52789,99.202553Q691.69775,107.00461,691.69775,120.6868L691.69775,124.6868ZM881.94598,124.6868L817.85657,124.6868L817.85657,120.6868Q817.85657,107.2873,826.37292,99.487656Q834.77588,91.478043,850.21643,91.478043Q865.68207,91.478043,873.77612,99.20253Q881.94598,107.00448,881.94598,120.6868L881.94598,124.6868ZM687.69775,120.6868C687.69775,119.29955,687.62787,117.96621,687.48822,116.6868C686.82416,110.6041,684.58203,105.74023,680.76532,102.09534C676.1427,97.683815,669.21027,95.478043,659.96808,95.478043C650.72284,95.478043,643.68646,97.78875,638.85583,102.41045C634.88446,106.03487,632.54663,110.79359,631.83881,116.6868C631.68512,117.96663,631.60828,119.29996,631.60828,120.6868L687.69775,120.6868ZM877.94598,120.6868C877.94598,119.29955,877.8761,117.96621,877.73645,116.6868C877.07245,110.6041,874.83038,105.74023,871.01361,102.09534C866.39099,97.683815,859.45862,95.478043,850.21643,95.478043C840.97113,95.478043,833.93469,97.78875,829.10406,102.41045C825.13275,106.03487,822.79492,110.79359,822.0871,116.6868C821.93341,117.96663,821.85657,119.29996,821.85657,120.6868L877.94598,120.6868ZM289.64175,180.14607Q260.11789,180.14607,260.11789,145.58044Q260.11789,123.01387,270.86078,110.19251Q282.14044,97.150017,300.67056,97.150017Q303.82114,97.150017,306.64688,97.465927Q312.78983,98.152428,316.51587,103.33388Q319.79581,107.89496,319.79581,113.95669L319.79581,153.14307Q319.79581,166.00208,311.47791,173.18629Q303.41916,180.14607,289.64175,180.14607ZM1098.3738,180.14607Q1068.8499,180.14607,1068.8499,145.58044Q1068.8499,123.01205,1079.5927,110.19272Q1090.871,97.150017,1109.4026,97.150017Q1112.5543,97.150017,1115.3802,97.465935Q1121.5226,98.152481,1125.2483,103.33405Q1128.5278,107.8951,1128.5278,113.95669L1128.5278,153.14307Q1128.5278,166.0042,1120.2096,173.18652Q1112.1497,180.14607,1098.3738,180.14607ZM289.64175,176.14607C297.83456,176.14607,304.2417,174.15047,308.86343,170.159C313.4848,166.1675,315.79581,160.49553,315.79581,153.14307L315.79581,113.95669C315.79581,107.86784,312.25369,102.11741,306.20264,101.44118C304.46637,101.24707,302.62238,101.15002,300.67056,101.15002C289.5365,101.15002,280.60849,105.03626,273.88626,112.80907C267.3739,120.58187,264.11789,131.50546,264.11789,145.58044C264.11789,165.95763,272.62582,176.14607,289.64175,176.14607ZM1098.3738,176.14607C1106.5665,176.14607,1112.9728,174.15047,1117.5953,170.159C1122.2181,166.1675,1124.5278,160.49553,1124.5278,153.14307L1124.5278,113.95669C1124.5278,107.86784,1120.986,102.11741,1114.9359,101.44118C1113.1996,101.24707,1111.3531,101.15002,1109.4026,101.15002C1098.2698,101.15002,1089.3396,105.03626,1082.6183,112.80907C1076.105,120.58187,1072.8499,131.50546,1072.8499,145.58044C1072.8499,165.95763,1081.3579,176.14607,1098.3738,176.14607ZM976.49573,171.73441C981.32635,171.73441,985.31879,173.52013,988.46985,177.09126C991.62097,180.45255,993.19647,184.6539,993.19647,189.69565L993.19647,196.62805C993.19647,201.45963,991.62097,205.66129,988.46985,209.23242C985.31879,212.5937,981.32635,214.27419,976.49573,214.27419L968.93298,214.27419C964.09937,214.27419,960.10992,212.5937,956.95886,209.23242C953.80774,205.66129,952.23224,201.45963,952.23224,196.62805L952.23224,189.69565C952.23224,184.6539,953.70068,180.45255,956.64374,177.09126C959.7948,173.52013,963.8913,171.73441,968.93298,171.73441L976.49573,171.73441ZM989.19647,196.62805Q989.19647,202.33244,985.5105,206.54041Q981.97845,210.27419,976.49573,210.27419L968.93298,210.27419Q963.45026,210.27419,959.91821,206.54041Q956.23224,202.33244,956.23224,196.62805L956.23224,189.69565Q956.23224,183.63336,959.6532,179.72626Q963.17554,175.73441,968.93298,175.73441L976.49573,175.73441Q981.93805,175.73441,985.47052,179.73778L985.51044,179.78299L985.55164,179.827Q989.19647,183.71492,989.19647,189.69565L989.19647,196.62805Z" fill-rule="evenodd" fill="url(#watermark_grad)" fill-opacity="1"/>
+      </svg>
+    </div>
+  </footer>
+
+  <!-- ==================== Scripts ==================== -->
+  <script>
+    /* Scroll Reveal */
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    /* ==================== i18n 中英切换 ==================== */
+    const I18N = {
+      zh: {
+        lang_label: 'ZH',
+        nav_getstarted: 'Get started',
+        hero_title: '小搭子',
+        hero_tagline: '养在电脑里，越用越懂你',
+        hero_desc: '简易安装后，小搭子就直接住在你的电脑里。它能看到你的屏幕、帮你管文件、产内容、做分析、设提醒。只需用自然语言告诉它想做什么，它就能动手帮你搞定！越用越懂你！',
+        hero_github: '在 GitHub 上查看',
+        hero_note: '小搭子完全开源，欢迎参与共建',
+        features_title: '五大核心优势',
+        features_subtitle: '让每一位用户都能轻松上手、高效使用、安心无忧',
+        f1_title: '一键安装',
+        f1_desc: '下载安装包 → 双击安装 → 填一个 API Key → 开聊！全程不到 3 分钟，无需任何技术背景。',
+        f1_check: '三步搞定，开箱即用',
+        f2_title: '小白友好',
+        f2_desc: '所有操作用自然语言完成，不需要学命令、记快捷键。出了问题它会说「我换个方法试试」，而不是给你看报错代码。',
+        f2_check: '说人话，不甩术语',
+        f3_title: 'Token 超值',
+        f3_desc: '支持 7+ 主流 AI 模型，从免费到高端任你选。DeepSeek 性价比之王、Gemini 每日免费额度、Claude 深度思考…… 按需选择。',
+        f3_check: '多模型自由切换，丰俭由人',
+        f4_title: '办公提效',
+        f4_desc: '写作、数据分析、文件整理、翻译、图表制作、会议纪要…… 内置 200+ 专业技能，一个搭子顶一个团队。',
+        f4_check: '200+ 技能覆盖全场景',
+        f5_title: '隐私安全',
+        f5_desc: '所有聊天记录、文件、个人偏好都存在本地，不会上传到任何云端服务器。你的隐私它比你自己还上心。',
+        f5_check: '数据不出你的电脑',
+        steps_title: '快速上手',
+        steps_subtitle: '三步开始使用，简单到离谱',
+        s1_title: '下载安装',
+        s1_line1: 'Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small" target="_blank" rel="noopener">下载</a> 运行。',
+        s1_line2: 'macOS在终端界面输入以下命令：',
+        s2_title: '配置模型',
+        s2_desc: '在设置页面填入 AI 模型的 API Key。推荐新手从 DeepSeek 或 Gemini（有免费额度）开始。',
+        s3_title: '开聊！',
+        s3_desc: '直接在对话框打字，把小搭子当你最靠谱的同事。想写什么、找什么、分析什么，说一句就行。',
+      },
+      en: {
+        lang_label: 'EN',
+        nav_getstarted: 'Get started',
+        hero_title: 'Dazee',
+        hero_tagline: 'Lives on your computer, learns as you go',
+        hero_desc: 'After a simple install, Dazee lives right on your computer. It can see your screen, manage files, create content, analyze data, and set reminders. Just tell it what you need in natural language — it gets things done!',
+        hero_github: 'View on GitHub',
+        hero_note: 'Fully open-source — join us and contribute!',
+        features_title: 'Five Core Advantages',
+        features_subtitle: 'Easy to start, efficient to use, worry-free',
+        f1_title: 'One-Click Install',
+        f1_desc: 'Download → Double-click install → Enter an API Key → Start chatting! Less than 3 minutes, no tech background needed.',
+        f1_check: 'Ready in 3 steps, works out of the box',
+        f2_title: 'Beginner Friendly',
+        f2_desc: 'All operations done in natural language — no commands or shortcuts to memorize. When something goes wrong, it says "Let me try another way" instead of showing error codes.',
+        f2_check: 'Speaks human, not jargon',
+        f3_title: 'Token Value',
+        f3_desc: '7+ mainstream AI models, from free to premium. DeepSeek for best value, Gemini with daily free quota, Claude for deep thinking… choose as you need.',
+        f3_check: 'Switch models freely, fit any budget',
+        f4_title: 'Productivity Boost',
+        f4_desc: 'Writing, data analysis, file management, translation, charts, meeting notes… 200+ built-in professional skills — one assistant replaces a whole team.',
+        f4_check: '200+ skills covering all scenarios',
+        f5_title: 'Privacy & Security',
+        f5_desc: 'All chat history, files, and preferences stored locally — never uploaded to any cloud server. It cares more about your privacy than you do.',
+        f5_check: 'Your data never leaves your computer',
+        steps_title: 'Quick Start',
+        steps_subtitle: 'Get started in 3 steps — ridiculously simple',
+        s1_title: 'Download & Install',
+        s1_line1: 'Windows: Click <a class="download-link" href="https://github.com/malue-ai/dazee-small" target="_blank" rel="noopener">Download</a> and run.',
+        s1_line2: 'macOS: Enter the following command in Terminal:',
+        s2_title: 'Configure Model',
+        s2_desc: 'Enter your AI model API Key in the settings page. Beginners should start with DeepSeek or Gemini (free quota available).',
+        s3_title: 'Start Chatting!',
+        s3_desc: 'Just type in the chat box — treat Dazee as your most reliable colleague. Writing, searching, analyzing — just say the word.',
+      }
+    };
+
+    let currentLang = localStorage.getItem('dazee_lang') || 'zh';
+
+    function applyLang(lang) {
+      const dict = I18N[lang];
+      if (!dict) return;
+      /* textContent 方式 */
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key] !== undefined) el.textContent = dict[key];
+      });
+      /* innerHTML 方式（含 HTML 标签的翻译） */
+      document.querySelectorAll('[data-i18n-html]').forEach(el => {
+        const key = el.getAttribute('data-i18n-html');
+        if (dict[key] !== undefined) el.innerHTML = dict[key];
+      });
+      /* 更新 html lang 属性 */
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      /* 更新 title */
+      document.title = lang === 'zh'
+        ? '小搭子 - 开源桌面 AI 助手 | Dazee.ai'
+        : 'Dazee - Open-Source Desktop AI Assistant | Dazee.ai';
+      currentLang = lang;
+      localStorage.setItem('dazee_lang', lang);
+    }
+
+    function toggleLang() {
+      applyLang(currentLang === 'zh' ? 'en' : 'zh');
+    }
+
+    /* 页面加载时应用已保存的语言 */
+    if (currentLang !== 'zh') applyLang(currentLang);
+  </script>
+</body>
+</html>

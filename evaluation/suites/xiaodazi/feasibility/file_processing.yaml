@@ -1,0 +1,119 @@
+# F2: 文件处理能力 - 小搭子可行性测评
+# 验证：读取 Excel、创建 Word、PDF 解析、文件转换、批量重命名
+
+id: xiaodazi_feasibility_file_processing
+name: 文件处理能力（F2）
+description: 验证小搭子文件处理能力，包括 Excel/Word/PDF/CSV 等
+category: xiaodazi_feasibility
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: feasibility
+  capability: F2_file_processing
+
+tasks:
+  - id: F2-01_read_excel
+    description: "读取 Excel - 分析这个 Excel 表格的数据"
+    category: file
+    input:
+      user_query: "分析这个 Excel 表格的数据，给出简要统计"
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      tool_calls: ["code_execution"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('code_execution')"
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["file", "excel", "F2"]
+
+  - id: F2-02_create_word
+    description: "创建 Word - 帮我写一份工作总结，保存为 Word"
+    category: file
+    input:
+      user_query: "帮我写一份简短的工作总结，保存为 Word 文档"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      tool_calls: ["code_execution"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('code_execution')"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 90
+    tags: ["file", "word", "docx", "F2"]
+
+  - id: F2-03_pdf_parse
+    description: "PDF 解析 - 帮我提取这个 PDF 的文字内容"
+    category: file
+    input:
+      user_query: "帮我提取这个 PDF 的文字内容"
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      tool_calls: ["code_execution"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('code_execution')"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["file", "pdf", "F2"]
+
+  - id: F2-04_csv_to_excel
+    description: "文件转换 - 把这个 CSV 转成 Excel"
+    category: file
+    input:
+      user_query: "把这个 CSV 转成 Excel 格式"
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      tool_calls: ["code_execution"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('code_execution')"
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+    trials: 2
+    timeout_seconds: 60
+    tags: ["file", "csv", "excel", "F2"]
+
+  - id: F2-05_batch_rename
+    description: "批量重命名 - 把这些文件按日期重命名"
+    category: file
+    input:
+      user_query: "把这些文件按修改日期重命名，格式为 YYYY-MM-DD_原名"
+      conversation_history: []
+      context: {}
+      files: []
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 90
+    tags: ["file", "rename", "nodes", "F2"]

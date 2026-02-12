@@ -1,0 +1,106 @@
+# F1: 桌面操作能力 - 小搭子可行性测评
+# 验证：打开应用、屏幕观察、UI 自动化、键盘输入、系统通知
+
+id: xiaodazi_feasibility_desktop_operations
+name: 桌面操作能力（F1）
+description: 验证小搭子桌面操作能力，包括打开应用、屏幕观察、UI 自动化等
+category: xiaodazi_feasibility
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: feasibility
+  capability: F1_desktop_operations
+
+tasks:
+  - id: F1-01_open_app
+    description: "打开应用 - 帮我打开访达"
+    category: desktop
+    input:
+      user_query: "帮我打开访达"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      tool_calls: ["nodes"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('nodes')"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 30
+    tags: ["desktop", "open_app", "F1"]
+
+  - id: F1-02_observe_screen
+    description: "屏幕观察 - 看看我屏幕上有什么"
+    category: desktop
+    input:
+      user_query: "看看我屏幕上有什么"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      tool_calls: ["observe_screen"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('observe_screen')"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 45
+    tags: ["desktop", "observe_screen", "F1"]
+
+  - id: F1-03_ui_automation
+    description: "UI 自动化 - 点击屏幕上的设置按钮"
+    category: desktop
+    input:
+      user_query: "点击屏幕上的「设置」按钮"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      tool_calls: []
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 60
+    tags: ["desktop", "peekaboo", "F1"]
+
+  - id: F1-04_keyboard_input
+    description: "键盘输入 - 在当前输入框输入 Hello World"
+    category: desktop
+    input:
+      user_query: "在当前输入框输入 Hello World"
+      conversation_history: []
+      context: {}
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 45
+    tags: ["desktop", "peekaboo", "F1"]
+
+  - id: F1-05_system_notify
+    description: "系统通知 - 提醒我5分钟后喝水"
+    category: desktop
+    input:
+      user_query: "提醒我5分钟后喝水"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      tool_calls: []
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 30
+    tags: ["desktop", "scheduled_task", "F1"]

@@ -1,0 +1,99 @@
+# E3: Token 消耗效率 - 小搭子效率性测评
+# 验证：按任务类型的 Token 是否在可接受上限内
+
+id: xiaodazi_efficiency_token_efficiency
+name: Token 消耗效率（E3）
+description: 评估小搭子 Token 使用是否在任务类型基线内
+category: xiaodazi_efficiency
+default_trials: 2
+
+metadata:
+  version: "1.0.0"
+  dimension: efficiency
+  capability: E3_token_efficiency
+
+tasks:
+  - id: E3-01_simple_qa_tokens
+    description: "简单问答 - Token 应 <= 5K"
+    category: token_efficiency
+    input:
+      user_query: "今天天气怎么样？"
+      conversation_history: []
+      context: {}
+    metadata:
+      task_type: simple_qa
+      max_tokens: 5000
+    graders:
+      - type: code
+        name: check_token_limit
+        check: "check_token_limit(5000)"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 2
+    timeout_seconds: 30
+    tags: ["efficiency", "token", "simple", "E3"]
+
+  - id: E3-02_search_summarize_tokens
+    description: "搜索+总结 - Token 应 <= 15K"
+    category: token_efficiency
+    input:
+      user_query: "搜索并总结 AI Agent 的 3 条最新进展"
+      conversation_history: []
+      context: {}
+    metadata:
+      task_type: search_summarize
+      max_tokens: 15000
+    graders:
+      - type: code
+        name: check_token_limit
+        check: "check_token_limit(15000)"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "token", "E3"]
+
+  - id: E3-03_file_processing_tokens
+    description: "文件处理 - Token 应 <= 20K"
+    category: token_efficiency
+    input:
+      user_query: "分析这个 Excel 表格并给出简要统计"
+      conversation_history: []
+      context: {}
+      files: []
+    metadata:
+      task_type: file_processing
+      max_tokens: 20000
+    graders:
+      - type: code
+        name: check_token_limit
+        check: "check_token_limit(20000)"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "token", "E3"]
+
+  - id: E3-04_content_creation_tokens
+    description: "内容创作 - Token 应 <= 25K"
+    category: token_efficiency
+    input:
+      user_query: "写一篇 500 字的关于远程办公的短文"
+      conversation_history: []
+      context: {}
+    metadata:
+      task_type: content_creation
+      max_tokens: 25000
+    graders:
+      - type: code
+        name: check_token_limit
+        check: "check_token_limit(25000)"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 2
+    timeout_seconds: 60
+    tags: ["efficiency", "token", "E3"]

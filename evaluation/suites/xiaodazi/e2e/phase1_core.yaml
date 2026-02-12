@@ -1,0 +1,219 @@
+# E2E Phase1 真实测评 - 6 个用例
+# 通过 HTTP API 调用真实服务，验证小搭子核心能力与差异化
+
+id: xiaodazi_e2e_phase1_core
+name: E2E Phase1 核心用例
+description: 端到端真实测评（A1/B1/D4/C1/B9/B10），HTTP API + 轮询 + 消息拉取
+category: xiaodazi_e2e
+default_trials: 1
+
+metadata:
+  version: "1.0.0"
+  dimension: e2e
+  runner: run_e2e_eval
+
+tasks:
+  # A1 - 格式混乱 Excel 分析（单轮）
+  - id: A1
+    description: "格式混乱 Excel 分析 - 销售趋势与最佳产品"
+    category: e2e_file
+    input:
+      user_query: "帮我分析这个表格的销售趋势，告诉我哪个产品卖得最好"
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/messy_sales.xlsx"
+    expected_outcome: {}
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "excel", "RVR-B"]
+    metadata:
+      expected_behavior: "RVR-B 回溯至少 1 次后成功"
+
+  # B1 - 跨会话记忆（3 个会话，4 轮）
+  # runner 按 multi_turn_sequence 顺序发消息，new_conversation=true 时新建会话
+  - id: B1
+    description: "跨会话记忆 - 毒舌风格延续与偏好记忆"
+    category: e2e_memory
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome: {}
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 180
+    tags: ["e2e", "memory", "multi_session"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "帮我写篇关于咖啡的文章"
+        - new_conversation: false
+          user_query: "不对，我喜欢毒舌+干货风格，重新写"
+        - new_conversation: true
+          user_query: "写篇关于茶文化的文章"
+        - new_conversation: true
+          user_query: "小搭子你记住了什么关于我的写作偏好？"
+      expected_behavior: "msg3 有毒舌风格，msg4 提到毒舌/干货偏好"
+
+  # D4 - 连续错误恢复（单轮）
+  - id: D4
+    description: "连续错误恢复 - CSV 转 Excel+柱状图+导出 PDF"
+    category: e2e_error_recovery
+    input:
+      user_query: "帮我把这个 CSV 数据做成 Excel，添加一个柱状图，然后导出为 PDF"
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/error_prone.csv"
+    expected_outcome: {}
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "error_recovery", "backtrack"]
+    metadata:
+      expected_behavior: "ErrorClassifier 分类 + BacktrackManager 回溯"
+
+  # C1 - 简单问答 Token 对比（双轮，同会话）
+  # 预算说明（按 provider 区分）：
+  #   Claude: 有 Prompt Caching，轮次2 system prompt 只计缓存读取 ~300 tokens → 双轮 ~12K
+  #   Qwen:   无 Prompt Caching，每轮全量发送 system prompt → 双轮 ~18K（优化后）
+  # 统一预算 25K（兼容无缓存 provider）
+  - id: C1
+    description: "简单问答 Token 对比 - 重复问题验证 prompt 缓存"
+    category: e2e_token
+    input:
+      user_query: "今天天气怎么样？"
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome: {}
+    graders:
+      - type: code
+        name: check_token_limit
+        check: "check_token_limit(25000)"
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 90
+    tags: ["e2e", "token", "cache"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "今天天气怎么样？"
+        - new_conversation: false
+          user_query: "今天天气怎么样？"
+      token_baseline: "轮次2 input_tokens 应显著低于轮次1（缓存命中）"
+
+  # ====================================================================
+  # B9/B10 — 文件修改回滚安全（小搭子最核心差异化能力）
+  #
+  # 双层验证：
+  #   Layer 1 (state): verify_rollback_e2e.py — 状态管理层确定性验证（Phase 0）
+  #   Layer 2 (agent): 本文件 — Agent 真实交互 + LLM-as-Judge 诊断
+  #
+  # 两个 Provider（qwen/claude）都要跑，评估 Agent 在回滚场景的表现差异。
+  # ====================================================================
+
+  # B9 - 文件修改异常退出自动回滚（单轮，含 3 个文件）
+  - id: B9
+    description: "文件修改异常退出自动回滚 — 端口批量修改（核心差异化）"
+    category: e2e_state_rollback
+    input:
+      user_query: >
+        我上传了 3 个配置文件（config.json、nginx.conf、README.md），它们属于同一个项目。
+        请直接修改这 3 个文件，把端口从 3000 改成 8080：
+        1. config.json：修改 app.port 字段
+        2. nginx.conf：修改 upstream 和 proxy_pass 端口
+        3. README.md：更新文档中的端口说明
+        这三个文件必须保持一致，如果某个文件修改失败，请把其他已修改的文件也恢复原样。
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/rollback_test/config.json"
+        - "docs/benchmark/data/rollback_test/nginx.conf"
+        - "docs/benchmark/data/rollback_test/README.md"
+    expected_outcome: {}
+    graders:
+      # Layer 1: 确定性检查 — Agent 执行过程无工具报错
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      # Layer 2: LLM-as-Judge — 通用管道诊断
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+      # Layer 3: LLM-as-Judge — 回滚安全专项诊断
+      - type: model
+        rubric: grade_rollback_safety
+        min_score: 3
+    trials: 1
+    timeout_seconds: 900
+    tags: ["e2e", "rollback", "state_safety", "differentiator"]
+    metadata:
+      expected_behavior: >
+        Agent 逐文件修改端口配置。理想结果：3 个文件全部正确修改（port 3000→8080）。
+        如果中途出错，StateConsistencyManager 应自动回滚已修改文件至原始内容，
+        Agent 应告知用户回滚结果并尝试替代方案（RVR-B 回溯）。
+        关键：无论成功还是失败，文件状态必须一致（全改或全不改），不能出现"改了一半"。
+      standalone_verification: "python scripts/verify_rollback_e2e.py --case B9"
+
+  # B10 - 文件修改用户中止选择性回滚（多轮）
+  - id: B10
+    description: "文件修改用户中止回滚 — 批量替换公司名中途取消（核心差异化）"
+    category: e2e_state_rollback
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/rollback_test/docs/about.md"
+        - "docs/benchmark/data/rollback_test/docs/product.md"
+        - "docs/benchmark/data/rollback_test/docs/team.md"
+        - "docs/benchmark/data/rollback_test/docs/contact.md"
+        - "docs/benchmark/data/rollback_test/docs/faq.md"
+    expected_outcome: {}
+    graders:
+      # Layer 1: LLM-as-Judge — 通用管道诊断
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+      # Layer 2: LLM-as-Judge — 回滚安全专项诊断（重点：用户中止处理）
+      - type: model
+        rubric: grade_rollback_safety
+        min_score: 3
+    trials: 1
+    timeout_seconds: 900
+    tags: ["e2e", "rollback", "user_abort", "HITL", "differentiator"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: >
+            我上传了 5 个公司文档（about.md、product.md、team.md、contact.md、faq.md），
+            请直接修改这些文件，把里面所有的"北极星科技"替换成"星辰大海科技"。
+        - new_conversation: false
+          user_query: "等一下，算了，我看了一下 about.md 里有些引用不应该改，帮我把所有文件恢复原样"
+      expected_behavior: >
+        轮次1：Agent 开始逐文件替换"北极星科技"→"星辰大海科技"。
+        轮次2：用户中止，Agent 应识别 wants_to_stop 意图，提供回滚选项
+        （全部回滚/保留已完成/选择性回滚），并清晰告知当前状态（哪些已改、哪些未改）。
+        关键：Agent 必须理解"恢复原样"的含义并给出可操作的方案，而不是说"我无法撤销"。
+      standalone_verification: "python scripts/verify_rollback_e2e.py --case B10"

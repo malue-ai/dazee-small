@@ -1,0 +1,617 @@
+# E2E Phase2 真实场景测评 — 面向开源宣发
+# 覆盖维度 F/G/H 的关键用例，高标准严要求
+#
+# 设计原则：
+#   1. 每个 query 来自真实用户场景（产品规划 5 大 Use Case）
+#   2. expected_outcome 包含可量化的验证点（grader 必须逐条检查）
+#   3. LLM-as-Judge 按真实场景评分，不妥协
+
+id: xiaodazi_e2e_phase2_scenarios
+name: E2E Phase2 开源宣发场景
+description: 面向挑剔开发者和用户的真实场景验证（G2/G3/G4/G1/F4/H1）
+category: xiaodazi_e2e
+default_trials: 1
+
+metadata:
+  version: "1.0.0"
+  dimension: e2e_scenarios
+  runner: run_e2e_eval
+
+tasks:
+
+  # ================================================================
+  # G2 — 表格搭子：端到端数据管道
+  # 金句："出错自己修"
+  # ================================================================
+  - id: G2
+    description: "表格搭子 — 格式混乱季度销售 Excel 全自动分析（核心 Demo）"
+    category: e2e_data_pipeline
+    input:
+      user_query: >
+        帮我分析这份季度销售数据。注意这个表格格式比较乱（日期格式不统一、有些金额带了人民币符号、还有空行），
+        你先帮我清洗干净，然后告诉我：
+        1. 哪个产品卖得最好？
+        2. 各地区销售额排名
+        3. 有没有异常数据？
+        最后输出一份简短的分析报告。
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/pipeline_test/quarterly_sales_raw.xlsx"
+    expected_outcome:
+      clean_rows: 195
+      zero_data_loss: true
+      date_format_unified: true
+      amount_all_numeric: true
+      report_contains: ["产品排名", "地区排名", "异常"]
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_data_pipeline_quality
+        min_score: 4
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "data_pipeline", "error_recovery", "demo"]
+    metadata:
+      expected_behavior: >
+        Agent 读取 Excel → 检测到格式问题 → 自动清洗（ErrorClassifier + BacktrackManager）→
+        统计分析 → 输出报告。关键验证：
+        1. 清洗后保留 195 行（仅去空行，零数据丢失）
+        2. 日期全部统一为标准格式
+        3. 金额全部转为数字（去掉 ¥ 和逗号）
+        4. 报告中的合计数必须与原始数据一致
+        5. 回溯次数 ≤ 3
+
+  # ================================================================
+  # G4 — 办公搭子：会议纪要到行动项
+  # 金句："说一句它就干"
+  # ================================================================
+  - id: G4
+    description: "办公搭子 — 会议纪要提取行动项+推算截止日期"
+    category: e2e_office
+    input:
+      user_query: >
+        帮我整理这份会议纪要，提取所有行动项。
+        每个行动项要包含：责任人、具体任务、截止日期。
+        注意有些截止日期是相对的（比如"下周三"），你要根据会议日期推算出具体日期。
+        最后整理成表格形式。
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/office_test/meeting_notes_raw.txt"
+    expected_outcome:
+      action_items_minimum: 4
+      must_have_owners: ["小王", "小陈", "小赵"]
+      deadline_inference: "'下周三' → 2026-02-17（从会议日期 2/10 周二推算）"
+      no_fabrication: true
+    graders:
+      - type: model
+        rubric: grade_action_item_extraction
+        min_score: 4
+    trials: 1
+    timeout_seconds: 300
+    tags: ["e2e", "office", "extraction", "demo"]
+    metadata:
+      expected_behavior: >
+        Agent 解析非结构化会议纪要 → 提取全部行动项 → 推算相对日期 → 结构化输出。
+        严格验证：
+        1. 至少提取 4 个行动项（原文有 5 个）
+        2. 责任人精确到人名（小王/小陈/小赵/全体）
+        3. "下周三"必须推算为 2026-02-17（会议日期 2/10 周二）
+        4. 不编造会议中未提到的行动项
+        5. 输出表格格式清晰
+
+  # ================================================================
+  # G3 — 研究搭子：论文润色 + 引用检查
+  # 金句："双击安装就能用"
+  # ================================================================
+  - id: G3
+    description: "研究搭子 — 论文初稿润色+引用遗漏检查"
+    category: e2e_research
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/research_test/my_draft.md"
+    expected_outcome:
+      polish_preserves_meaning: true
+      terminology_consistent: true
+      citation_gaps_found: true
+    graders:
+      - type: model
+        rubric: grade_research_quality
+        min_score: 4
+    trials: 1
+    timeout_seconds: 300
+    tags: ["e2e", "research", "academic"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: >
+            帮我润色这篇论文的摘要部分，保持学术风格，注意术语一致性
+            （比如 Agent 和智能体不要混用）。
+        - new_conversation: false
+          user_query: >
+            检查一下正文里有没有引用遗漏——就是提到了某个研究或观点但没有给出参考文献的地方。
+      expected_behavior: >
+        轮次1：学术风格润色摘要，保持原意，统一术语。
+        轮次2：检查全文引用完整性，标注遗漏点：
+        - 第 3 节「记忆衰减机制」提到概念但未引用来源
+        - 第 4 节「实验分析」引用数据但未列参考文献
+        关键：润色不改变原意，引用检查必须基于文本事实（不编造）。
+
+  # ================================================================
+  # G1 — 写稿搭子：风格学习与记忆（跨会话）
+  # 金句："用久越懂你"
+  # ================================================================
+  - id: G1
+    description: "写稿搭子 — 学习毒舌风格+跨会话验证风格记忆"
+    category: e2e_style_memory
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/style_test/coffee_sample.txt"
+    expected_outcome:
+      session2_has_style: true
+      style_keywords_present: ["毒舌", "干货", "犀利"]
+    graders:
+      - type: model
+        rubric: grade_style_memory
+        min_score: 3
+    trials: 1
+    timeout_seconds: 300
+    tags: ["e2e", "memory", "style", "multi_session", "demo"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "我是一个公众号作者，这是我的文章范文。帮我分析一下我的写作风格特点，然后记住它。"
+        - new_conversation: false
+          user_query: "用我的风格写一篇关于奶茶的短文（300字左右）"
+        - new_conversation: true
+          user_query: "写一篇关于健身房的短文（300字左右）"
+      expected_behavior: >
+        会话1轮次1：分析样本风格（毒舌、犀利、有干货、数据支撑、反转幽默）。
+        会话1轮次2：按分析出的风格写奶茶文章（验证即时学习）。
+        会话2轮次3：新会话，不重复提风格要求，验证跨会话记忆——
+        输出必须自动应用毒舌+干货风格（有犀利吐槽+数据/事实支撑）。
+        如果会话2回到通用温和风格 → 记忆失败。
+
+  # ================================================================
+  # F4 — 上下文工程极限验证
+  # 技术卖点：上下文不膨胀，数据引用 100% 准确
+  # ================================================================
+  - id: F4
+    description: "上下文工程 — 3份大文件+6轮对话，验证 scratchpad 卸载与数据一致性"
+    category: e2e_context_engineering
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/context_test/report_q1.txt"
+        - "docs/benchmark/data/context_test/report_q2.txt"
+        - "docs/benchmark/data/context_test/competitor_analysis.md"
+    expected_outcome:
+      q1_revenue_exact: "¥120万"
+      data_consistency: true
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_context_engineering
+        min_score: 4
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "context_engineering", "scratchpad", "developer"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "分析 Q1 报告，告诉我总收入和增长情况"
+        - new_conversation: false
+          user_query: "现在对比 Q1 和 Q2，哪个季度表现更好？"
+        - new_conversation: false
+          user_query: "结合竞品分析报告，评估我们在市场中的位置"
+        - new_conversation: false
+          user_query: "综合以上所有信息，写一段 500 字的战略分析摘要"
+      expected_behavior: >
+        4 轮对话，每轮引入新的大文件。关键验证：
+        1. 15KB+ 文件是否走 scratchpad（上下文只放摘要）
+        2. 第 4 轮报告引用的 Q1 收入必须精确为 ¥120 万
+        3. 上下文 token 不应逐轮线性膨胀（第 4 轮 ≤ 10K input tokens）
+        4. 旧轮次的工具结果应被折叠
+
+  # ================================================================
+  # H1 — LLM 服务降级（模拟测试）
+  # ================================================================
+  - id: H1
+    description: "LLM 服务降级 — API 错误时的降级策略与上下文保留"
+    category: e2e_robustness
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      graceful_degradation: true
+      context_preserved: true
+    graders:
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 180
+    tags: ["e2e", "robustness", "degradation"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "帮我写一段关于人工智能发展趋势的分析（200字）"
+        - new_conversation: false
+          user_query: "把刚才的分析翻译成英文"
+      expected_behavior: >
+        正常双轮对话。验证：
+        1. 轮次2翻译的内容与轮次1分析一致（上下文保留）
+        2. 响应格式清晰
+        注：完整降级测试需要注入 API 故障，此处仅验证正常多轮的上下文保留。
+
+  # ================================================================
+  # I1-I4 — RVR-B 回溯机制验证（毒药数据）
+  # 每个用例双重验证：check_backtrack_occurred (硬门槛) + grade_backtrack_quality (LLM 评估)
+  # ================================================================
+
+  - id: I1
+    description: "RVR-B PARAM_ADJUST — 毒药 CSV 格式修复回溯"
+    category: e2e_backtrack
+    input:
+      user_query: "帮我分析这个 CSV 文件的销售趋势，告诉我哪个产品卖得最好"
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/backtrack_test/poison_csv.csv"
+    expected_outcome:
+      backtrack_min: 1
+      backtrack_strategy: "PARAM_ADJUST"
+    graders:
+      - type: code
+        name: check_backtrack_occurred
+        check: "check_backtrack_occurred(1)"
+      - type: model
+        rubric: grade_backtrack_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "backtrack", "PARAM_ADJUST", "rvrb"]
+    metadata:
+      expected_behavior: >
+        Agent 首次读取 CSV → 在 N/A 日期行或 ERR#REF! 金额行遇到类型错误 →
+        ErrorClassifier: PARAMETER_ERROR → BacktrackManager: PARAM_ADJUST →
+        调整参数（errors='coerce' / dtype / 跳过坏行）→ 重试成功 → 输出分析。
+        关键：必须发生至少 1 次回溯。直接成功（0 回溯）= 测试失败。
+
+  - id: I2
+    description: "RVR-B TOOL_REPLACE — 扫描件内容提取回溯"
+    category: e2e_backtrack
+    input:
+      user_query: "帮我提取这份报告的所有关键数据，整理成结构化摘要"
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/backtrack_test/scanned_report.txt"
+    expected_outcome:
+      backtrack_min: 1
+      pages_extracted: 4
+    graders:
+      - type: code
+        name: check_backtrack_occurred
+        check: "check_backtrack_occurred(1)"
+      - type: model
+        rubric: grade_backtrack_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 300
+    tags: ["e2e", "backtrack", "TOOL_REPLACE", "rvrb"]
+    metadata:
+      expected_behavior: >
+        Agent 读取全部内容 → 发现第 4 页无有效数据 → 回溯处理 →
+        最终提取第 1-3、5 页数据 + 标注第 4 页为"扫描件/无文字"。
+
+  - id: I3
+    description: "RVR-B PLAN_REPLAN — 多步骤连锁失败回溯"
+    category: e2e_backtrack
+    input:
+      user_query: "把这个数据做成图表，然后导出 PDF 报告"
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/backtrack_test/multi_step_data.xlsx"
+    expected_outcome:
+      backtrack_min: 1
+    graders:
+      - type: code
+        name: check_backtrack_occurred
+        check: "check_backtrack_occurred(1)"
+      - type: model
+        rubric: grade_backtrack_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "backtrack", "PLAN_REPLAN", "rvrb"]
+    metadata:
+      expected_behavior: >
+        Step 1 读取成功 → Step 2 图表生成失败（日文列名字体问题）→
+        PARAM_ADJUST 尝试换字体 → 仍失败则升级为 PLAN_REPLAN →
+        重新规划（纯文本报告/ASCII 标签/跳过图表）。
+
+  - id: I4
+    description: "RVR-B 升级链压测 — 3 层递进失败"
+    category: e2e_backtrack
+    input:
+      user_query: "帮我解析这个 JSON 配置文件，列出所有配置项及其值"
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/backtrack_test/triple_poison.json"
+    expected_outcome:
+      backtrack_min: 2
+      no_infinite_loop: true
+    graders:
+      - type: code
+        name: check_backtrack_occurred
+        check: "check_backtrack_occurred(2, 5)"
+      - type: model
+        rubric: grade_backtrack_quality
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "backtrack", "escalation", "rvrb"]
+    metadata:
+      expected_behavior: >
+        3 层毒药：50 层嵌套 + Unicode 控制字符 + 自引用。
+        PARAM_ADJUST → 仍失败 → TOOL_REPLACE → 仍失败 → PLAN_REPLAN →
+        最终列出可解析配置项 或 优雅失败。
+        关键：至少 2 次回溯（升级链），不超过 5 次（死循环防护）。
+
+  # ================================================================
+  # P1-P5 — Playbook 在线学习全生命周期验证
+  # 亮点："越用越聪明" — Agent 从成功经验中学习可复用策略
+  # ================================================================
+
+  # ================================================================
+  # P1 — 策略提取 + 持久化验证
+  # 验证：提取触发 → JSON 落盘 → Mem0 索引 → WebSocket 推送
+  # ================================================================
+  - id: P1
+    description: "Playbook 提取 — 成功会话自动提取策略并持久化"
+    category: e2e_playbook_learning
+    input:
+      user_query: >
+        帮我分析这份产品反馈数据，找出用户最不满意的 3 个方面，
+        按问题类别统计数量和占比，给出改进建议。
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/playbook_test/product_feedback.xlsx"
+    expected_outcome:
+      extraction_triggered: true
+      playbook_status: "draft"
+      tool_sequence_not_empty: true
+      json_persisted: true
+      top_issue: "界面卡顿"
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_playbook_extraction
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "playbook", "extraction", "persistence"]
+    metadata:
+      expected_behavior: >
+        Agent 读取 product_feedback.xlsx → 使用数据分析工具 → 输出分析报告。
+        会话完成后：
+        1. playbook_extraction 后台任务触发（助手回复 >= 100 字符 + 工具调用 >= 1）
+        2. 新 PlaybookEntry 创建（status=draft, source=auto）
+        3. JSON 文件写入 data/instances/xiaodazi/playbooks/{id}.json
+        4. index.json 更新包含新 ID
+        5. playbook_suggestion 事件通过 WebSocket 推送
+        6. tool_sequence 包含实际使用的工具名
+        7. 分析结果正确：界面卡顿是 TOP1 问题（占比 ~35%）
+
+  # ================================================================
+  # P2 — 确认 + 索引匹配 + 策略注入
+  # 验证：approve → Mem0 语义匹配 → <playbook_hint> 注入 → 相似执行
+  # ================================================================
+  - id: P2
+    description: "Playbook 应用 — APPROVED 策略语义匹配并注入相似任务"
+    category: e2e_playbook_learning
+    input:
+      user_query: >
+        分析这份客户满意度调查数据，找出满意度最低的服务类别，
+        给出优先改进排序和具体建议。
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先创建并 approve 一个数据分析类策略（或复用 P1 提取的）"
+      files:
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      playbook_hint_injected: true
+      match_score_gte: 0.3
+      lowest_category: "售后服务"
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_playbook_application
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "playbook", "matching", "injection", "application"]
+    metadata:
+      setup_steps:
+        - description: "创建 APPROVED 策略（数据分析类）"
+          api_calls:
+            - note: "通过 P1 提取或直接 API 创建 APPROVED PlaybookEntry"
+            - note: "等待 Mem0 sync 完成"
+            - note: "验证 GET /api/v1/playbook?status=approved 返回 >= 1 条"
+      expected_behavior: >
+        前置：已有 APPROVED 的数据分析策略（包含 tool_sequence）。
+        1. PlaybookHintInjector 触发（Phase 2, priority 80）
+        2. Mem0 语义搜索："客户满意度分析" vs "产品反馈分析" → score >= 0.3
+        3. <playbook_hint> 注入 Agent 上下文
+        4. Agent 参考策略执行（工具序列有交集）
+        5. 正确识别"售后服务"为满意度最低类别
+        6. 分析质量不因策略注入而下降
+
+  # ================================================================
+  # P3 — 完整闭环（跨会话提取 → 确认 → 注入 → 相似执行）
+  # 最严格的端到端验证
+  # ================================================================
+  - id: P3
+    description: "Playbook 闭环 — 跨会话：提取→确认→注入→相似执行"
+    category: e2e_playbook_learning
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/playbook_test/product_feedback.xlsx"
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      session1_top_issue: "界面卡顿"
+      extraction_success: true
+      approve_success: true
+      session2_hint_injected: true
+      session2_lowest_category: "售后服务"
+    graders:
+      - type: code
+        name: check_no_tool_errors
+        check: "check_no_tool_errors()"
+      - type: model
+        rubric: grade_playbook_lifecycle
+        min_score: 3
+    trials: 1
+    timeout_seconds: 1800
+    tags: ["e2e", "playbook", "lifecycle", "cross_session", "demo"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "帮我分析这份产品反馈数据，按问题类别统计数量，给出 TOP3 问题和改进建议"
+          files: ["docs/benchmark/data/playbook_test/product_feedback.xlsx"]
+        - new_conversation: true
+          user_query: "分析这份客户满意度数据，找出最差的服务类别和改进优先级"
+          files: ["docs/benchmark/data/playbook_test/customer_survey.xlsx"]
+      inter_session_steps:
+        - description: "会话 1 完成后等待 playbook_extraction 后台任务"
+          wait_seconds: 10
+        - description: "获取提取的 playbook ID"
+          api_call: "GET /api/v1/playbook?status=draft&source=auto"
+        - description: "确认策略"
+          api_call: "POST /api/v1/playbook/{id}/action body={action:approve,reviewer:e2e_test}"
+        - description: "验证 APPROVED 状态"
+          api_call: "GET /api/v1/playbook?status=approved"
+      expected_behavior: >
+        会话 1：分析 product_feedback.xlsx → 正确识别 TOP1=界面卡顿 →
+        playbook_extraction 触发 → DRAFT 条目创建。
+        中间步骤：等待提取完成 → API approve → APPROVED。
+        会话 2：分析 customer_survey.xlsx → PlaybookHintInjector 匹配注入 →
+        <playbook_hint> 出现在上下文 → Agent 参考策略 →
+        正确识别"售后服务"为最低 → 工具调用与会话 1 相似。
+        关键：跨会话策略注入是闭环核心，未注入 = 闭环断裂。
+
+  # ================================================================
+  # P4 — 拒绝 / 忽略流程验证
+  # 验证：reject → 状态变更 → 后续不注入
+  # ================================================================
+  - id: P4
+    description: "Playbook 拒绝 — 被拒绝的策略不应注入到未来会话"
+    category: e2e_playbook_learning
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files:
+        - "docs/benchmark/data/playbook_test/product_feedback.xlsx"
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      reject_status: "rejected"
+      session2_hint_absent: true
+      session2_task_completed: true
+    graders:
+      - type: model
+        rubric: grade_playbook_crud
+        min_score: 3
+    trials: 1
+    timeout_seconds: 600
+    tags: ["e2e", "playbook", "reject", "negative_test"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "帮我分析这份产品反馈数据的问题分布"
+          files: ["docs/benchmark/data/playbook_test/product_feedback.xlsx"]
+        - new_conversation: true
+          user_query: "分析这份客户满意度数据，找出最差的类别"
+          files: ["docs/benchmark/data/playbook_test/customer_survey.xlsx"]
+      inter_session_steps:
+        - description: "等待提取"
+          wait_seconds: 10
+        - description: "拒绝策略"
+          api_call: "POST /api/v1/playbook/{id}/action body={action:reject,reviewer:e2e_test,notes:策略不适用}"
+        - description: "验证 REJECTED 状态"
+          api_call: "GET /api/v1/playbook/{id}"
+      expected_behavior: >
+        会话 1：正常完成 → 策略提取。
+        中间步骤：API reject → REJECTED。
+        会话 2：相似任务 → 验证无 <playbook_hint> 注入（REJECTED 策略不应被匹配）。
+        会话 2 仍能正常完成分析（不依赖策略）。
+        铁律：被拒绝策略仍注入 → 拒绝机制失效。
+
+  # ================================================================
+  # P5 — 删除 + 清理验证
+  # 验证：delete → JSON 清除 → index 清除 → 后续不命中
+  # ================================================================
+  - id: P5
+    description: "Playbook 删除 — 删除后 JSON 清除且不再匹配注入"
+    category: e2e_playbook_learning
+    input:
+      user_query: "分析这份客户满意度数据，找出改进方向"
+      conversation_history: []
+      context:
+        playbook_setup: "需要预先创建并 approve 一个策略，然后 DELETE 它"
+      files:
+        - "docs/benchmark/data/playbook_test/customer_survey.xlsx"
+    expected_outcome:
+      delete_success: true
+      json_file_absent: true
+      index_cleaned: true
+      hint_absent: true
+    graders:
+      - type: model
+        rubric: grade_playbook_crud
+        min_score: 3
+    trials: 1
+    timeout_seconds: 300
+    tags: ["e2e", "playbook", "delete", "cleanup", "negative_test"]
+    metadata:
+      setup_steps:
+        - description: "创建 APPROVED 策略（复用 P3 流程或 API 预置）"
+        - description: "DELETE /api/v1/playbook/{id}"
+        - description: "验证 JSON 文件已删除"
+        - description: "验证 index.json 不含该 ID"
+        - description: "验证 GET /api/v1/playbook 列表不含该条目"
+      expected_behavior: >
+        前置：已有 APPROVED 策略 → DELETE → 验证清理。
+        1. DELETE 返回 200 success
+        2. JSON 文件从 playbooks/ 目录消失
+        3. index.json 不含该 ID
+        4. API 列表不含该条目
+        5. 后续查询无 <playbook_hint> 注入
+        manager.delete() 已同步清理 Mem0 向量索引（_delete_from_mem0），
+        删除后 Mem0 搜索不应命中该条目。

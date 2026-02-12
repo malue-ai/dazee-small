@@ -1,0 +1,110 @@
+# 上下文压缩配置（三层防护策略）
+#
+# 核心原则：
+# 1. 用户体验和问答效果优先
+# 2. 自动处理 + 透明反馈（类似 Cursor）
+# 3. 非侵入式通知，不打断用户操作
+
+# 默认 QoS 等级
+default_qos_level: "pro"
+
+# QoS 等级对应的 token 预算
+qos_token_budgets:
+  free: 50000        # 免费用户
+  basic: 150000      # 基础付费
+  pro: 200000        # 专业版（默认）
+  enterprise: 1000000  # 企业版
+
+# L2 策略：历史消息压缩配置
+message_compression:
+  enabled: true                # 是否启用消息压缩
+  preserve_first_messages: 4   # 始终保留开头 N 条消息（任务上下文）
+  preserve_last_messages: 10   # 尽量保留最近 N 条消息（当前上下文）
+  preserve_tool_results: true  # 保留中间的 tool_result（含重要数据）
+  
+  # 🆕 双阈值压缩机制
+  thresholds:
+    pre_run: 0.80              # 80% 阈值 - 运行前预检查（Agent 启动前）
+    runtime: 0.92              # 92% 阈值 - 运行中实时检查（Agent 执行中）
+  
+  # LLM 摘要配置
+  summary:
+    enabled: false              # 是否使用 LLM 生成摘要（否则用简单截取）
+    model: "claude-3-haiku"     # 摘要生成模型（推荐使用轻量模型）
+    max_tokens: 500             # 摘要最大 token 数
+    persist_to_db: true         # 是否持久化摘要到数据库
+
+# 🆕 工具结果压缩配置
+tool_result_compression:
+  enabled: true                 # 是否启用工具结果压缩
+  threshold_chars: 1500         # 超过此字符数自动压缩
+  store_full_content: true      # 是否存储完整内容以便恢复
+  
+  # 工具可通过在返回 dict 中设置 _compression_hint 字段自主声明压缩策略：
+  #   "skip"   = 不压缩（读操作等 Agent 需要完整内容的场景）
+  #   "normal" = 按默认阈值压缩
+  #   "force"  = 使用较低阈值强制压缩（超大输出走 scratchpad）
+  #   不携带   = 走默认阈值逻辑
+  # 参见 core/tool/executor.py _maybe_compact() 和 tools/nodes_tool.py _action_run()
+
+  # 以下工具结果始终跳过压缩（兜底白名单）
+  skip_tools:
+    - plan_todo
+    - memory
+    - ask_user
+    - human_confirmation
+
+# L3 策略：后端预警配置
+backend_warning:
+  warning_threshold: 0.8     # 80% 时后端日志警告
+  enable_metrics: true       # 启用 token 使用统计
+
+# 🆕 V6.3: 用户通知配置
+user_notifications:
+  # 是否启用上下文管理通知
+  enable_notifications: true
+  
+  # 通知级别
+  # - silent: 完全静默（仅后端日志）
+  # - minimal: 仅关键操作（压缩/大量裁剪）
+  # - detailed: 所有操作（推荐，类似 Cursor）
+  notification_level: "detailed"
+  
+  # 🆕 上下文进度条配置
+  progress_bar:
+    enabled: true              # 是否显示进度条
+    position: "top"            # top / bottom / sidebar
+    show_percentage: true      # 显示百分比
+    show_tokens: true          # 显示 token 数值
+    update_frequency: "realtime"  # realtime / on_message
+    
+    # 颜色阈值（百分比）
+    color_thresholds:
+      green_max: 60            # 0-60% 绿色
+      yellow_max: 80           # 60-80% 黄色
+      orange_max: 95           # 80-95% 橙色
+      # 95-100% 红色
+  
+  # 裁剪/压缩通知配置
+  trimming_notifications:
+    show_tokens_saved: true    # 显示节省的 tokens
+    show_preserved_count: true # 显示保留的消息数
+    auto_dismiss_seconds: 5    # 自动消失时间（秒）
+    
+    # 通知样式
+    style:
+      position: "top"          # top / bottom
+      theme: "subtle"          # subtle / prominent
+      show_learn_more: true    # 显示"了解更多"链接
+
+# 失败经验总结（MVP）
+failure_summary:
+  enabled: true
+  trigger_on_stop_reasons:
+    - "max_turns_reached"
+  # 保留最近消息条数（None 则沿用 ContextStrategy）
+  keep_recent_messages: 20
+  # 输入/输出字符上限（控制成本）
+  max_input_chars: 12000
+  max_summary_chars: 1200
+  max_block_chars: 1000

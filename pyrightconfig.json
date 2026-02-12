@@ -1,0 +1,7 @@
+{
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": false,
+  "reportMissingModuleSource": false
+}
