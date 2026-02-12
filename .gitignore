@@ -60,6 +60,7 @@ coverage.xml
 
 # 配置文件（包含 API Key 等敏感信息）
 config.yaml
+.env
 
 # 实例敏感信息（API Keys）
 instances/*/.env
