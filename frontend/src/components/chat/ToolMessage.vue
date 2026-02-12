@@ -144,13 +144,6 @@ const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?
     descTemplate: () => '数据分析'
   },
   
-  // 图表生成
-  'Ontology_TextToChart_zen0': {
-    icon: GitBranch,
-    name: '流程图生成',
-    descTemplate: () => '生成流程图'
-  },
-  
   // 人工确认
   'request_human_confirmation': {
     icon: Hand,

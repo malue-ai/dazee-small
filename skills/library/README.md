@@ -21,8 +21,6 @@ skills/library/
 ├── slidespeak-generator/        # PPT 生成技能
 │   ├── SKILL.md
 │   └── scripts/
-├── ontology-builder/            # 本体构建技能
-│   └── SKILL.md
 └── ...                          # 其他内置技能
 ```
 

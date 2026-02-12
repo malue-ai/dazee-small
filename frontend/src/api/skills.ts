@@ -308,23 +308,6 @@ Uses SlideSpeak API to generate AI-powered presentations.
 - Multi-language support`
     },
     {
-      name: 'ontology-builder',
-      description: '构建知识本体和概念图，用于知识管理和可视化。',
-      priority: 'low',
-      preferred_for: ['knowledge graph', 'ontology', 'concept map', 'visualization'],
-      scripts: ['build_ontology.py'],
-      resources: [],
-      content: `# Ontology Builder Skill
-
-Builds knowledge ontologies and concept maps for knowledge management.
-
-## Use Cases
-
-- Knowledge graph construction
-- Concept relationship mapping
-- Domain modeling`
-    },
-    {
       name: 'slidespeak-editor',
       description: '编辑已有的 SlideSpeak 演示文稿，支持形状提取和样式修改。',
       priority: 'medium',

@@ -1,468 +1,334 @@
-# ZenFlux Agent — Xiaodazi Desktop Instance
+<p align="center">
+  <img src="frontend/src-tauri/icons/icon.png" width="80" alt="xiaodazi logo" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+<h1 align="center">xiaodazi (小搭子)</h1>
 
-English | [中文](README_zh.md)
+<p align="center">
+  A local-first desktop AI agent with 150+ skills, persistent memory, and multi-model support.
+</p>
 
-> A desktop AI agent designed as "A Little Partner living in your computer".
-> 100% Local Storage, Skills-First Capability System, Cross-Platform (macOS / Windows / Linux).
+<p align="center">
+  <a href="#quick-start">Quick Start</a> &nbsp;·&nbsp;
+  <a href="docs/architecture/README.md">Architecture</a> &nbsp;·&nbsp;
+  <a href="#known-issues">Known Issues</a> &nbsp;·&nbsp;
+  <a href="#contributing">Contributing</a>
+</p>
 
-## Technical Architecture
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/vue-3.4-green.svg" alt="Vue 3.4" />
+  <img src="https://img.shields.io/badge/tauri-2.10-orange.svg" alt="Tauri 2.10" />
+</p>
+
+---
+
+xiaodazi ("little buddy") is an open-source AI agent that **lives on your desktop**. It runs as a native Tauri application, keeps all data on your machine, and can operate your computer directly — managing files, automating apps, generating documents, and remembering your preferences across sessions.
+
+<!-- TODO: Add a 30-second demo GIF here showing intent understanding + skill loading + plan progress -->
+<!-- <p align="center"><img src="docs/assets/demo.gif" width="720" alt="demo" /></p> -->
+
+## Why xiaodazi?
+
+Most AI assistants are cloud-hosted chat interfaces. xiaodazi is different:
+
+| | Cloud AI Assistants | xiaodazi |
+|---|---|---|
+| **Data** | Stored on provider's servers | 100% local (SQLite, plain files) |
+| **Memory** | Forgets between sessions | Remembers preferences via editable `MEMORY.md` + semantic search |
+| **Skills** | Fixed capabilities | 150+ plug-and-play skills, add new ones by writing Markdown |
+| **Models** | Locked to one provider | Switch between Claude, GPT, Qwen, DeepSeek, Gemini, GLM, or Ollama |
+| **Errors** | Fails silently or retries | Classifies errors, backtracks from bad approaches, degrades gracefully |
+
+## Key Design Decisions
+
+### LLM-First — No keyword matching, ever
+
+All semantic tasks — intent classification, skill selection, complexity inference, backtrack decisions — are performed by the LLM. Hard-coded rules exist only for format validation, numeric calculations, and security boundaries.
+
+**Why it matters:** When a user says *"Don't make a PPT, just give me the key points"*, a keyword system matches "PPT" and loads the wrong tools. xiaodazi's LLM-driven intent analysis correctly loads zero PPT skills.
+
+### Skills as Markdown — 150+ and growing
+
+Each skill is a directory with a `SKILL.md` file. No Python code required for most skills — the LLM reads the instructions and uses built-in tools to execute them. Skills are classified on two axes:
+
+- **OS compatibility**: common / macOS / Windows / Linux
+- **Dependency level**: builtin (zero-config) / lightweight (pip) / external (CLI) / cloud_api (API key)
+
+Despite 150+ skills, **zero are loaded by default**. Each request activates only the skill groups matching the user's intent (typically 0–15 out of 150+). A simple "hi" costs 0 skill tokens; a complex research task costs ~1,200.
+
+### Local-First — Your data stays on your machine
+
+| Storage | Technology | Purpose |
+|---|---|---|
+| Messages & conversations | SQLite (WAL mode) | Async read/write, concurrent access |
+| Full-text search | SQLite FTS5 | BM25 ranking, zero-config |
+| Semantic vectors | sqlite-vec (optional) | Vector similarity, single file |
+| User memory | `MEMORY.md` | Plain text, user-editable |
+| File attachments | Local filesystem | Instance-isolated |
+
+No cloud database, no external vector store, no third-party analytics. LLM inference uses cloud APIs by default (Claude, OpenAI, etc.), with full local model support via Ollama or LM Studio for completely offline operation.
+
+## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Xiaodazi Desktop App (Tauri + Vue)                   │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                           UI Layer                                    │  │
-│  │  ┌─────────┐ ┌─────────┐ ┌┌─────────────────┐                          │  │
-│  │  │ Chat UI │ │ Projects│ │  Skills Market    │                          │  │
-│  │  └─────────┘ └─────────┘  └─────────────────┘                          │  │
-│  │                              ↕ postMessage                              │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐  │  │
-│  │  │            MCP Apps Client (Vue Component)                      │  │  │
-│  │  │  • iframe Lifecycle Mgmt • JSON-RPC Bridge • UI Resource Cache  │  │  │
-│  │  └─────────────────────────────────────────────────────────────────┘  │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐  │  │
-│  │  │         ProgressRenderer (Progress Display Component)           │  │  │
-│  │  │  • Friendly Messages • Progress Bar • Hide Tech Details         │  │  │
-│  │  └─────────────────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                   ↕ IPC
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Xiaodazi Agent Instance (Python/Rust)                  │
-│                                                                             │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │              Intent & Planning (Simplified IntentAnalyzer)            │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │      State Consistency & Termination (StateConsistencyManager)        │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │          Agent Engine (RVRBAgent + BacktrackManager + PlanTodo)       │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │     Skills-First Layer (SkillRegistry + 2D Classification OS x Dep)   │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │       OS Compatibility (MacOS/Windows/Linux LocalNode)                │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │  Local Knowledge (LocalKnowledgeManager: FTS5 + sqlite-vec)           │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │              MCP Apps Service Layer (UI Registry / ui:// / CSP)       │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                    Storage Layer (100% Local)                         │  │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐      │  │
-│  │  │ SQLite      │ │ SQLite FTS5 │ │ sqlite-vec  │ │ Skills Cache│      │  │
-│  │  │ (Msg/Sess)  │ │ (Full Text) │ │ (Vector)    │ │ (Lazy Load) │      │  │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘      │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
+│  Layer 1 — User Interface                                                   │
+│    Tauri 2.10 (Rust) · Vue 3.4 + TypeScript · Apple Liquid Design           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Layer 2 — API & Services                                                   │
+│    FastAPI (REST + SSE + WebSocket) · Multi-Channel Gateway                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Layer 3 — Agent Engine                                                     │
+│    Intent Analyzer (LLM, 4-layer cache, <200ms)                              │
+│    RVR-B Executor (React → Validate → Reflect → Backtrack)                   │
+│    Context Engineering (3-phase inject, KV-Cache 90%+ hit, scratchpad)       │
+│    Plan Manager (DAG tasks, real-time progress UI)                           │
+├──────────────────────────────────┬──────────────────────────────────────────┤
+│  Layer 4 — Capability            │  Layer 5 — Infrastructure                │
+│    150+ Skills (20 groups)       │    6 LLM Providers + Ollama               │
+│    Tool System (intent-pruned)   │    SQLite + FTS5 + sqlite-vec             │
+│    3-Layer Memory                │    Instance Isolation                     │
+│    Playbook Learning             │    3-Layer Evaluation                     │
+└──────────────────────────────────┴──────────────────────────────────────────┘
 ```
+
+**Lifecycle of a request:** User message → Intent analysis (<200ms, cached) → Skill & tool selection → RVR-B execution loop (stream tokens, call tools, validate, backtrack if needed) → Memory extraction → Response complete.
+
+For a full walkthrough, see [Architecture Documentation](docs/architecture/README.md) (12 deep-dive modules).
+
+## Quick Start
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/aspect-build/xiaodazi.git   # Replace with actual repo URL
+cd xiaodazi
+
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 2. Configure an LLM provider
+
+Create `config.yaml` in the project root (or use the Settings page after starting the frontend):
+
+```yaml
+api_keys:
+  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here   # Recommended
+  # OPENAI_API_KEY: sk-xxx                         # Or OpenAI
+  # DASHSCOPE_API_KEY: sk-xxx                      # Or Qwen
+  # GOOGLE_API_KEY: xxx                            # Or Gemini (free tier: 1500 req/day)
+```
+
+For fully offline use, install [Ollama](https://ollama.ai) and set:
+
+```yaml
+llm:
+  COT_AGENT_MODEL: ollama/llama3.1
+```
+
+### 3. Start
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Verify: `curl http://localhost:8000/health`
+
+### Frontend (optional)
+
+```bash
+cd frontend
+npm install && npm run dev
+# Open http://localhost:5174
+```
+
+### Desktop App (optional)
+
+Requires [Rust toolchain](https://rustup.rs/).
+
+```bash
+cd frontend
+npm run tauri:dev     # Development
+npm run tauri:build   # Production build
+```
+
+## What Makes xiaodazi Different
+
+### vs. Typical Agent Frameworks
+
+| Capability | xiaodazi | Typical frameworks |
+|---|---|---|
+| **Intent analysis** | LLM semantic analysis per request (4-layer cache, <200ms). Adjusts skill loading, planning depth, and token budget per request. | Route by session or fixed config. Same resource allocation for every request. |
+| **Error recovery** | RVR-B loop: classify error → backtrack from wrong approaches → clean context pollution → degrade gracefully with partial results. | Retry + model failover. Solves infra failures, not strategy failures. |
+| **Context management** | Proactive: 3-phase injection, progressive history decay, scratchpad file exchange (100x compression), KV-Cache optimization (90%+ hit). | Reactive: truncate or summarize when context overflows. Quality drops in a sudden step. |
+| **Skill loading** | 0 skills loaded by default. Intent-driven lazy allocation. Token cost scales with task complexity, not library size. | Load all capabilities upfront, or manual tool selection. |
+| **Planning** | Explicit DAG plan with UI progress widget and re-planning on failure. | Implicit chain-of-thought. No visibility, no recovery. |
+| **Evaluation** | 3-layer grading (code + LLM-as-Judge + human), 12-type failure classification, auto-regression. | External eval tools or manual testing. |
+| **Learning** | Playbook system: extract strategy → user confirms → apply to future tasks. Efficiency improves over time. | No built-in learning loop. |
+| **Configuration** | Write a `prompt.md` → framework auto-generates agent config + graded system prompts. | YAML/JSON config files, manual coordination. |
+
+### vs. Cloud AI Assistants (ChatGPT, Claude.ai, etc.)
+
+- **Privacy**: All data local. No conversations leave your machine (except LLM API calls, which you can eliminate with Ollama).
+- **Persistence**: Memory survives across sessions. The agent learns your preferences.
+- **Extensibility**: Add skills by writing Markdown. Add tools by implementing a Python class.
+- **Model freedom**: Not locked to one provider. Switch with one config change.
+- **Desktop integration**: Can manage files, automate apps, take screenshots — not just chat.
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Desktop shell | Tauri 2.10 (Rust) |
+| Frontend | Vue 3.4 + TypeScript + Tailwind CSS 4.1 + Pinia |
+| Backend | Python 3.12 + FastAPI + asyncio |
+| Communication | SSE + WebSocket + REST |
+| Storage | SQLite (WAL) + FTS5 + sqlite-vec |
+| LLM providers | Claude, OpenAI, Qwen, DeepSeek, Gemini, GLM, Ollama |
+| Memory | MEMORY.md + FTS5 + Mem0 |
+| Evaluation | Code graders + LLM-as-Judge + human review |
 
 ## Project Structure
 
 ```
-zenflux_agent/
-├── main.py                      # FastAPI Entry Point
-├── core/                        # Core Components
-│   ├── agent/                   # Agent Orchestration (RVRBAgent / BacktrackManager)
-│   ├── llm/                     # LLM Adapters (Claude / OpenAI / Gemini / Qwen)
-│   ├── memory/                  # Memory Mgmt (Mem0 / System / Working Memory)
-│   ├── planning/                # Planning System (PlanTodoTool / ProgressTransformer)
-│   ├── routing/                 # Intent Analysis & Routing
-│   ├── skill/                   # Skill Loaders (Dynamic / Lazy)
-│   ├── tool/                    # Tool Selection & Execution
-│   ├── events/                  # Event Management
-│   └── context/                 # Runtime Context
-├── infra/                       # Infrastructure
-│   ├── database/                # PostgreSQL (Cloud)
-│   ├── local_store/             # SQLite Local Storage (Desktop)   ← New
-│   │   ├── engine.py            #   Async Engine (aiosqlite + WAL)
-│   │   ├── models.py            #   ORM Models (Session / Msg / Skills Cache)
-│   │   ├── fts.py               #   FTS5 Full Text Index
-│   │   ├── vector.py            #   sqlite-vec Vector Search
-│   │   ├── skills_cache.py      #   Skills Lazy Cache
-│   │   ├── workspace.py         #   Workspace Manager (Unified Entry)
-│   │   └── crud/                #   CRUD Operations
-│   ├── cache/                   # Cache
-│   ├── storage/                 # File Storage (Local / S3)
-│   └── cache/                   # Cache Layer
-├── instances/                   # Instance Configs (see instances/README.md)
-│   ├── _template/               # Template (Starting point for new instances)
-│   └── xiaodazi/                # Xiaodazi (Main Desktop Instance)
-│       ├── config.yaml          #   Instance Config
-│       ├── prompt.md            #   Persona Prompt
-│       ├── config/              #   LLM Routing, Skills, Memory Config
-│       ├── skills/              #   70+ Built-in Skills
-│       └── prompt_results/      #   Auto-generated Scenario Prompts
-├── routers/                     # API Routers
-├── services/                    # Business Services
-├── tools/                       # Tool Implementations
-├── skills/                      # Global Skills Library
-├── config/                      # Config Files
-├── models/                      # Pydantic Data Models
-├── frontend/                    # Vue Frontend
-└── docs/                        # Documentation
-    └── architecture/
-        └── xiaodazi-desktop.md  # Desktop Architecture Design
+xiaodazi/
+├── frontend/            # Vue 3 + Tauri desktop app
+├── core/
+│   ├── agent/           # RVR-B execution, backtracking
+│   ├── routing/         # LLM-First intent analysis
+│   ├── context/         # Context engineering (inject, compress, cache)
+│   ├── tool/            # Tool registry, selector, executor
+│   ├── skill/           # Skill loader, group registry
+│   ├── memory/          # 3-layer memory (Markdown + FTS5 + Mem0)
+│   ├── playbook/        # Online learning (strategy extraction)
+│   ├── llm/             # 6 LLM providers + format adapters
+│   ├── planning/        # DAG task planning + progress tracking
+│   ├── termination/     # Adaptive termination strategies
+│   ├── state/           # Snapshot / rollback
+│   └── monitoring/      # Failure detection, token audit
+├── routers/             # FastAPI HTTP/WS endpoints
+├── services/            # Business logic (protocol-agnostic)
+├── tools/               # Built-in tool implementations
+├── skills/              # Shared skill library
+├── instances/           # Agent instance configs
+├── evaluation/          # E2E test suites + graders
+├── models/              # Pydantic data models
+└── infra/               # Storage infrastructure (SQLite, cache)
 ```
 
-## Quick Start (Developer Guide)
+## Extending xiaodazi
 
-### Prerequisites
+### Add a Skill (no code required)
 
-| Tool | Min Version | Recommended | Note |
-|---|---|---|---|
-| Python | 3.10+ | 3.12 | Backend Service |
-| Node.js | 18+ | 20 LTS | Frontend Build |
-| Rust | 1.70+ | latest stable | Tauri Desktop Shell (Optional) |
-| pnpm / npm | - | pnpm | Frontend Package Manager |
+Create a directory under `skills/` or `instances/xiaodazi/skills/` with a `SKILL.md`:
 
-### Step 1: Install Python
+```markdown
+# My Custom Skill
 
-```bash
-# macOS (Homebrew)
-brew install python@3.12
+## When to Use
+When the user asks to [describe the trigger scenario].
 
-# Ubuntu / Debian
-sudo apt update && sudo apt install python3.12 python3.12-venv python3-pip
+## Instructions
+1. First, [step one]
+2. Then, [step two]
+3. Finally, [step three]
 
-# Windows (winget)
-winget install Python.Python.3.12
-
-# Verify
-python3 --version  # Python 3.12.x
+## metadata
+os_compatibility: common
+dependency_level: builtin
 ```
 
-### Step 2: Create Virtual Environment & Install Dependencies
+The skill is automatically discovered, classified, and available on next request. See [Skill Ecosystem docs](docs/architecture/07-skill-ecosystem.md) for the full specification.
 
-```bash
-# Enter project root
-cd zenflux_agent
+### Add an LLM Provider
 
-# Create venv
-python3 -m venv .venv
+Implement a provider class in `core/llm/` following the existing adapters (Claude, OpenAI, Qwen, etc.). Register it in the `LLMRegistry`. See [LLM Multi-Model docs](docs/architecture/09-llm-multi-model.md).
 
-# Activate venv
-# macOS / Linux:
-source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
+### Add a Messaging Channel
 
-# Install dependencies
-pip install -r requirements.txt
-```
+Implement a gateway adapter in `core/gateway/`. The `ChatService` is protocol-agnostic — your adapter only handles message format conversion. Currently supported: Web, Telegram, Feishu.
 
-### Step 3: Configure Environment Variables
+## Known Issues
 
-Configuration is located in `config.yaml` in the user data directory. It is created automatically on first launch.
+We are honest about what doesn't work well yet. These are real problems, not edge cases.
 
-```bash
-# macOS: ~/Library/Application Support/com.zenflux.agent/config.yaml
-# Linux: ~/.local/share/zenflux-agent/config.yaml
-# Windows: %APPDATA%\zenflux-agent\config.yaml
-```
+### Stability
 
-**Method 1: Via Frontend Settings (Recommended)**
+- **Long session memory pressure** — In 80+ turn conversations with heavy tool usage, context compression occasionally discards information the agent needs later. We are tuning decay thresholds.
+- **Process crashes** — The Python backend can exit unexpectedly under concurrent file writes during snapshot or edge cases in SSE streaming. The Tauri shell does not yet auto-restart the sidecar. If the UI stops responding, restart the app.
+- **SQLite write contention** — When memory extraction, conversation save, and playbook extraction fire simultaneously, WAL mode handles most cases, but `database is locked` errors occur occasionally on slower disks.
 
-Launch the app and visit the settings page to enter your API Key.
+### Agent Quality
 
-**Method 2: Manual Edit**
+- **Backtracking timing** — The RVR-B loop sometimes backtracks too late (context already polluted) or too eagerly (abandoning an approach that would have succeeded). Error classification thresholds are still being calibrated.
+- **Planning granularity** — Plans are sometimes too coarse (one giant step) or too fine (20 micro-steps for a simple task). The complexity-to-depth mapping needs more real-world data.
 
-```yaml
-api_keys:
-  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here  # At least one LLM (Claude recommended)
-  # OPENAI_API_KEY: sk-xxx  # Optional
-  # DASHSCOPE_API_KEY: sk-xxx  # Optional (Qwen)
+### Platform
 
-llm:
-  COT_AGENT_MODEL: claude-sonnet-4-5-20250514  # Default Model
-  QOS_LEVEL: PRO  # Service Level
+- **macOS is the primary test platform.** Windows support exists but has received less testing — expect path issues, permission edge cases, and platform-specific skill failures. We welcome Windows bug reports.
+- **Single-machine only.** No remote access, no mobile app, no multi-device sync.
+- **Text only.** No voice input/output yet.
+- **3 channels** (Web, Telegram, Feishu). Discord, Slack, WhatsApp are planned.
 
-app:
-  LOG_LEVEL: INFO  # Log Level
-```
+### Ecosystem
 
-### Step 4: Start Backend Service
-
-```bash
-# Ensure venv is active
-source .venv/bin/activate
-
-# Start dev server (default http://localhost:8000)
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Verify:
-
-```bash
-curl http://localhost:8000/health
-```
-
-### Step 5: Install Node.js & Frontend Dependencies
-
-```bash
-# macOS (Homebrew)
-brew install node
-
-# Ubuntu / Debian (via NodeSource)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Windows (winget)
-winget install OpenJS.NodeJS.LTS
-
-# Verify
-node --version   # v20.x.x
-npm --version    # 10.x.x
-```
-
-Install frontend dependencies:
-
-```bash
-cd frontend
-npm install
-```
-
-### Step 6: Start Frontend Dev Server
-
-```bash
-# In frontend/ directory
-npm run dev
-
-# Frontend runs at http://localhost:5174 by default
-```
-
-### Step 7 (Optional): Tauri Desktop App Development
-
-To develop the Tauri desktop app, install the Rust toolchain:
-
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# macOS extras
-xcode-select --install
-
-# Ubuntu / Debian extras
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-
-# Verify
-rustc --version  # rustc 1.70+
-```
-
-Start Tauri dev mode (Frontend + Backend + Desktop Shell):
-
-```bash
-cd frontend
-npm run tauri:dev
-```
-
-Build desktop app:
-
-```bash
-cd frontend
-npm run tauri:build
-```
-
-### Common Commands
-
-```bash
-# ---- Backend ----
-source .venv/bin/activate            # Activate venv
-uvicorn main:app --reload            # Start backend (dev)
-pytest tests/unit/ -v                # Unit tests
-pytest tests/integration/ -v         # Integration tests
-
-# ---- Frontend ----
-cd frontend
-npm run dev                          # Start frontend dev
-npm run build                        # Build frontend
-npm run type-check                   # TypeScript check
-npm run lint                         # ESLint check
-
-# ---- Desktop ----
-cd frontend
-npm run tauri:dev                    # Tauri dev
-npm run tauri:build                  # Tauri build
-```
-
-### Troubleshooting
-
-**Q: `pip install` fails on system dependencies?**
-
-Some packages (Pillow, sqlite-vec) need system libs:
-
-```bash
-# macOS
-brew install libjpeg libpng
-
-# Ubuntu / Debian
-sudo apt install libjpeg-dev libpng-dev
-```
-
-**Q: Frontend page is blank?**
-
-Ensure backend is running at `http://localhost:8000`.
-
-**Q: Tauri build fails?**
-
-Update Rust: `rustup update`
-
-**Q: "Claude API Key is empty" on startup?**
-
-Ensure `.env` exists in root with `ANTHROPIC_API_KEY=...` OR configure `config.yaml` in user data directory.
-
-**Q: Port conflicts?**
-
-Backend default 8000, Frontend 5174. To change:
-
-```bash
-# Backend
-uvicorn main:app --port 9000 --reload
-
-# Frontend
-npm run dev -- --port 3000
-```
-
-## Core Mechanisms
-
-### 1. Storage Layer (100% Local)
-
-| Component | Tech | Note |
-|---|---|---|
-| Msg/Session | SQLite + aiosqlite | WAL mode, Async I/O |
-| Full Text | SQLite FTS5 | BM25, unicode61 tokenizer |
-| Vector | sqlite-vec | Optional, graceful degradation |
-| Skills Cache | SQLite Table | Lazy load + mtime check |
-
-Entry: `infra/local_store/workspace.py` → `LocalWorkspace`
-
-### 2. Skills-First System
-
-2D Classification (OS × Dependency Complexity):
-
-```
-                    Dependency →
-           ┌──────────┬─────────────┬──────────┬───────────┐
-           │ builtin  │ lightweight │ external │ cloud_api │
-    OS ↓   │ (Builtin)│ (Light)     │ (Ext App)│ (Cloud)   │
-┌──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ common   │summarize │excel-       │obsidian  │notion     │
-│ (All)    │canvas    │analyzer     │          │gemini-img │
-├──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ darwin   │screenshot│apple-notes  │peekaboo  │           │
-├──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ win32    │screenshot│outlook-cli  │powershell│           │
-├──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ linux    │screenshot│notify-send  │xdotool   │           │
-└──────────┴──────────┴─────────────┴──────────┴───────────┘
-
-State: ready → need_auth → need_setup → unavailable
-```
-
-### 3. Zero-Config / Low-Config Design
-
-**LLM Configuration** (BYOK - Bring Your Own Key):
-
-| Priority | Plan | Setup Time | Use Case |
-|---|---|---|---|
-| 1 | Gemini (Free tier) | 3 mins | Most Users |
-| 2 | Local (Ollama) | 10 mins | Privacy / Offline |
-| 3 | OpenAI / Claude | API Key | Pro Users |
-
-**Local Knowledge Retrieval**:
-
-| Level | Scheme | Config | Dependency |
-|---|---|---|---|
-| Level 1 | SQLite FTS5 | Zero | Builtin |
-| Level 2 | sqlite-vec | One-click | LLM API |
-| Level 3 | External Vector DB | Manual | Chroma/Qdrant |
-
-### 4. State Consistency
-
-```
-Start Task → Snapshot (File Backup + Env State)
-    ↓
-Execute → Op Log (with Undo definition)
-    ↓
-  ┌─ Success → Commit (Clear Snapshot)
-  └─ Fail/Interrupt → HITL Ask → Rollback / Keep / Continue
-```
-
-### 5. Multi-Dimensional Termination
-
-```
-LLM Self-Termination
-    + HITL (Human Intervention)
-    + User Stop
-    + Safety Net (max_turns=100 / 30min timeout)
-    + Long Task Confirmation (>20 turns)
-```
-
-### 6. OS Compatibility
-
-| Platform | Node | Capabilities |
-|---|---|---|
-| macOS | `MacOSLocalNode` | AppleScript / screencapture / pbcopy |
-| Windows | `WindowsLocalNode` | PowerShell / WinAPI / clip |
-| Linux | `LinuxLocalNode` | X11 & Wayland / xdotool / xclip |
-
-### 7. MCP Apps UI Integration
-
-> "Other agents return text, Xiaodazi returns UI."
-
-Tool Execution → Return `_meta.ui` result → Frontend renders iframe → User interacts
+- **Most skills are declarative.** Of 150+ skills, only ~17 have executable scripts. The rest are prompt-only — their effectiveness depends on the underlying LLM's capability.
+- **No skill versioning or marketplace.** Skills are local files. Community sharing requires manual copying.
+- **External dependency fragility.** Skills depending on CLI tools (ffmpeg, pandoc) can break when those tools update. Runtime checking detects "not installed" but not "installed but incompatible."
 
 ## Roadmap
 
-| Phase | Content | Duration |
-|---|---|---|
-| Phase 1 | Basic Instance (Structure / Persona / Skills) | 2 Weeks |
-| Phase 2 | Adaptive Terminator / HITL | 1 Week |
-| Phase 3 | OS Compatibility (LocalNodes) | 2 Weeks |
-| Phase 4 | MCP Apps Integration | 2 Weeks |
-| Phase 5 | Tauri Shell (IPC / Packaging) | 2 Weeks |
-
-## Instance Configuration
-
-ZenFlux Agent uses **Instances** to isolate config and data.
-
-**Detailed Guide**: [instances/README.md](instances/README.md)
-
-Quick view:
-- `config.yaml`: Basic config, LLM, Switches.
-- `prompt.md`: Persona definition.
-- `config/skills.yaml`: Skills list.
-
-Create new instance:
-```bash
-cp -r instances/_template instances/my-agent
-# Edit config.yaml and prompt.md
-AGENT_INSTANCE=my-agent uvicorn main:app --host 0.0.0.0 --port 8000
-```
+- [ ] Windows platform hardening
+- [ ] Sidecar auto-restart and health monitoring
+- [ ] Importance-aware context compression
+- [ ] Skill dependency version checking
+- [ ] Skill marketplace / community registry
+- [ ] Parallel tool execution
+- [ ] Voice input/output
+- [ ] Additional messaging channels (Discord, Slack, WhatsApp)
+- [ ] CI/CD pipeline
 
 ## Documentation
 
-- [Instance Configuration](instances/README.md)
-- [Desktop Architecture](docs/architecture/xiaodazi-desktop.md)
-- [V4 Architecture](docs/architecture/00-ARCHITECTURE-V4.md)
-- [Memory Protocol](docs/architecture/01-MEMORY-PROTOCOL.md)
-- [Event Protocol](docs/architecture/03-EVENT-PROTOCOL.md)
+| Document | Description |
+|---|---|
+| **[Architecture Overview](docs/architecture/README.md)** | Full 5-layer architecture with 12 deep-dive modules |
+| [Frontend & Desktop](docs/architecture/01-frontend-and-desktop.md) | Tauri + Vue 3, Apple Liquid design, HITL interactions |
+| [API & Services](docs/architecture/02-api-and-services.md) | Three-layer architecture, preprocessing pipeline |
+| [Intent Analysis](docs/architecture/03-intent-and-routing.md) | LLM-First semantic analysis, 4-layer caching |
+| [Agent Execution](docs/architecture/04-agent-execution.md) | RVR-B loop, backtracking, adaptive termination |
+| [Context Engineering](docs/architecture/05-context-engineering.md) | 3-phase injection, compression, KV-Cache |
+| [Tool System](docs/architecture/06-tool-system.md) | 2-layer registry, intent-driven pruning |
+| [Skill Ecosystem](docs/architecture/07-skill-ecosystem.md) | 150+ skills, 2D classification, lazy allocation |
+| [Memory System](docs/architecture/08-memory-system.md) | 3-layer memory, dual-write, fusion search |
+| [LLM Multi-Model](docs/architecture/09-llm-multi-model.md) | 6 providers, format adapters, failover |
+| [Instance & Config](docs/architecture/10-instance-and-config.md) | Prompt-driven schema, instance isolation |
+| [Evaluation](docs/architecture/11-evaluation.md) | 3-layer grading, E2E pipeline, failure detection |
+| [Playbook Learning](docs/architecture/12-playbook-learning.md) | Closed-loop strategy learning |
+
+## Contributing
+
+We welcome contributions of all kinds:
+
+- **Skill authoring** — The lowest-barrier way to contribute. Write a `SKILL.md`, open a PR.
+- **Bug reports** — Especially on Windows. Every crash report improves the project.
+- **Prompt tuning** — Help improve intent analysis accuracy or agent response quality.
+- **Documentation** — Tutorials, examples, translations.
+- **Code** — See the [Architecture docs](docs/architecture/README.md) to understand the codebase before diving in.
+
+<!-- TODO: Add CONTRIBUTING.md with detailed PR workflow, code style, and branch naming conventions -->
 
 ## License
 
-MIT License
+[MIT](LICENSE) — Copyright (c) 2025-2026 ZenFlux
 
 ## Authors
 
-- **Liu Yi** (ironliuyi) - liuyi@zenflux.cn
-- **Wang Kangcheng** - wangkangcheng@zenflux.cn
-- **Zeng Mengqi** - zengmengqi@zenflux.cn
-- **Xie Haipeng** - xiehaipeng@zenflux.cn
+- **Yi Liu** ([@ironliuyi](https://github.com/ironliuyi)) — liuyi@zenflux.cn
+- **Kangcheng Wang** — wangkangcheng@zenflux.cn
+- **Mengqi Zeng** — zengmengqi@zenflux.cn
+- **Haipeng Xie** — xiehaipeng@zenflux.cn

@@ -99,7 +99,7 @@ class SkillInstallRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "skill_name": "ontology-builder",
+                    "skill_name": "excel-analyzer",
                     "agent_id": "dazee_agent",
                 }
             ]
@@ -116,7 +116,7 @@ class SkillUninstallRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "skill_name": "ontology-builder",
+                    "skill_name": "excel-analyzer",
                     "agent_id": "dazee_agent"
                 }
             ]

@@ -45,7 +45,7 @@ class LocalWorkspace:
         results = await workspace.search("天气")
 
         # Skills 缓存
-        skill = await workspace.get_skill("ontology-builder")
+        skill = await workspace.get_skill("excel-analyzer")
 
         await workspace.shutdown()
     """

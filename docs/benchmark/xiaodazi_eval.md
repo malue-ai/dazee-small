@@ -206,7 +206,7 @@ overall = 0.6 * feasibility_score + 0.4 * efficiency_score
 ### 运行测评
 
 ```bash
-source /Users/liuyi/Documents/langchain/liuy/bin/activate
+source .venv/bin/activate
 python scripts/run_xiaodazi_eval.py --suite feasibility  # 仅可行性
 python scripts/run_xiaodazi_eval.py --suite efficiency    # 仅效率性
 python scripts/run_xiaodazi_eval.py --all                 # 全量

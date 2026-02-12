@@ -51,16 +51,11 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   // 数据分析
   // wenshu_analytics / wenshu_api 已移除（云端工具）
 
-  // 流程图/图表
-  'Ontology_TextToChart_zen0': '流程图生成',
+  // 图表生成
   'nano_banana': '图表生成',
 
   // 人工确认
-  'request_human_confirmation': '等待确认',
-
-  // Dify/Coze 集成
-  'dify_api': 'Dify 服务',
-  'coze_api': 'Coze 服务'
+  'request_human_confirmation': '等待确认'
 }
 
 /**
