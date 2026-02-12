@@ -1,0 +1,21 @@
+SystemDiskSize: 100
+RuntimeType: Container
+ServiceType: private
+ArtifactSourceType: DockerCompose
+ServiceBuildRegion: ap-southeast-1
+RepoName: malue-ai/dazee-small
+DockerComposeEnvPath: .env
+RegionId: cn-hangzhou
+CustomParameters:
+- NoEcho: true
+  Type: String
+  Description: ''
+  Required: false
+  AllowedPattern: ''
+  Label: DASHSCOPE_API_KEY
+  ConstraintDescription: ''
+  Name: sk-1650eb369f834d77a4148898ce04a6c6
+DockerComposeYamlPath: docker-compose.yaml
+Owner: ironliuyi
+Branch: main
+Platform: github
