@@ -156,6 +156,28 @@ if ($hasMSVC) {
     Ok "MSVC Build Tools installed (may need restart if Rust compile fails)"
 }
 
+# --- CMake (required by llama-cpp-python compilation) ---
+Refresh-Path
+if (Test-Cmd "cmake") {
+    Ok "CMake: $((cmake --version | Select-Object -First 1).Trim())"
+} else {
+    Info "Installing CMake (required by llama-cpp-python)..."
+    if ($hasWinget) {
+        & winget install Kitware.CMake --accept-source-agreements --accept-package-agreements --silent
+    } else {
+        $cmakeUrl = "https://github.com/Kitware/CMake/releases/download/v3.31.4/cmake-3.31.4-windows-x86_64.msi"
+        $cmakeTmp = Join-Path $env:TEMP "cmake-installer.msi"
+        Info "  Downloading CMake..."
+        Invoke-WebRequest -Uri $cmakeUrl -OutFile $cmakeTmp -UseBasicParsing
+        Start-Process msiexec -ArgumentList "/i", "$cmakeTmp", "/quiet", "/norestart", "ADD_CMAKE_TO_PATH=System" -Wait
+        Remove-Item $cmakeTmp -Force -ErrorAction SilentlyContinue
+    }
+    Refresh-Path
+    if (-not (Test-Cmd "cmake")) { Fail "CMake install failed. Please install manually: https://cmake.org/download/" }
+    $installed = $true
+    Ok "CMake installed"
+}
+
 # --- Rust ---
 Refresh-Path
 if ((Test-Cmd "rustc") -and (Test-Cmd "cargo")) {
@@ -230,13 +252,36 @@ if (-not $mirrorSet) {
 # --- Install Python dependencies ---
 Info "Installing Python dependencies (this may take a few minutes)..."
 $reqFile = Join-Path $ProjectRoot "requirements.txt"
-& $VenvPip install -r $reqFile 2>&1 | ForEach-Object {
+& $VenvPip install -r $reqFile 2>&1 | Tee-Object -Variable pipOutput | ForEach-Object {
     $line = $_.ToString()
     if ($line -match "error|ERROR|Failed|Could not") { Warn "  $line" }
 }
+# Check pip exit code (Tee-Object preserves $LASTEXITCODE)
+if ($LASTEXITCODE -ne 0) {
+    Warn "pip install exited with code $LASTEXITCODE - some packages may have failed"
+}
 
 # Verify critical packages are installed
-$criticalPkgs = @("fastapi", "uvicorn", "pydantic")
+$criticalPkgs = @(
+    # Web framework
+    "fastapi", "uvicorn", "pydantic",
+    # LLM clients
+    "anthropic", "openai",
+    # Async I/O
+    "aiofiles", "aiohttp", "httpx",
+    # Database
+    "aiosqlite", "sqlalchemy",
+    # Core utilities
+    "yaml", "tiktoken", "numpy", "json5",
+    # Memory system
+    "sqlite_vec",
+    # File processing
+    "PIL",
+    # Scheduling
+    "apscheduler",
+    # WebSocket
+    "websockets"
+)
 $missingPkgs = @()
 foreach ($pkg in $criticalPkgs) {
     $chk = & $VenvPy -c "import $pkg" 2>&1
@@ -245,7 +290,7 @@ foreach ($pkg in $criticalPkgs) {
 if ($missingPkgs.Count -gt 0) {
     Fail "Critical packages missing: $($missingPkgs -join ', '). pip install failed - check your network connection."
 }
-Ok "Python deps verified"
+Ok "Python deps verified ($($criticalPkgs.Count) critical packages)"
 
 # --- Install PyInstaller ---
 Info "Checking PyInstaller..."
@@ -275,8 +320,13 @@ if ($currentRegistry -match "npmmirror|taobao|cnpm") {
 }
 
 # --- Install npm deps ---
+# Use .package-lock.json as integrity marker (created only after successful npm install)
 $nm = Join-Path $FrontendDir "node_modules"
-if (-not (Test-Path $nm)) {
+$lockMarker = Join-Path $nm ".package-lock.json"
+if ((-not (Test-Path $nm)) -or (-not (Test-Path $lockMarker))) {
+    if ((Test-Path $nm) -and (-not (Test-Path $lockMarker))) {
+        Warn "node_modules exists but appears incomplete, reinstalling..."
+    }
     Info "Installing frontend npm deps..."
     Push-Location $FrontendDir
     & npm install
