@@ -40,6 +40,26 @@ api_keys:
   # 获取地址: https://aistudio.google.com/
   # GEMINI_API_KEY: ""
 
+  # DeepSeek API Key（可选）
+  # 获取地址: https://platform.deepseek.com/
+  # DEEPSEEK_API_KEY: ""
+  # DEEPSEEK_BASE_URL: ""
+
+  # Moonshot / Kimi API Key（可选）
+  # 获取地址: https://platform.moonshot.cn/
+  # MOONSHOT_API_KEY: ""
+  # MOONSHOT_BASE_URL: ""
+
+  # MiniMax API Key（可选）
+  # 获取地址: https://platform.minimaxi.com/
+  # MINIMAX_API_KEY: ""
+  # MINIMAX_BASE_URL: ""
+
+  # 智谱 GLM (Zhipu AI) API Key（可选）
+  # 获取地址: https://open.bigmodel.cn/
+  # ZHIPUAI_API_KEY: ""
+  # ZHIPUAI_BASE_URL: ""
+
   # Claude 多供应商 API Key（可选，多模型容灾）
   # CLAUDE_API_KEY_VENDOR_A: ""
   # CLAUDE_API_KEY_VENDOR_B: ""
