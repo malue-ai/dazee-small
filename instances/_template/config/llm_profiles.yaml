@@ -7,13 +7,13 @@
 #
 # 模型分配：
 #
-#   ┌──────────┬───────────────────────────┬──────────────────────────┬──────────────────────────┬──────────────────────────┐
-#   │ 角色     │ qwen                      │ claude                   │ deepseek                 │ glm                      │
-#   ├──────────┼───────────────────────────┼──────────────────────────┼──────────────────────────┼──────────────────────────┤
-#   │ 主 Agent │ qwen3-max                 │ claude-opus-4-6          │ deepseek-reasoner        │ glm-5                    │
-#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │ deepseek-reasoner        │ glm-5                    │
-#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │ deepseek-chat            │ glm-4.5-flash            │
-#   └──────────┴───────────────────────────┴──────────────────────────┴──────────────────────────┴──────────────────────────┘
+#   ┌──────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────────────┐
+#   │ 角色     │ qwen             │ claude           │ deepseek         │ glm              │ minimax                  │
+#   ├──────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────────────┤
+#   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.1             │
+#   │ heavy    │ qwen3-max        │ claude-sonnet-4-5│ deepseek-reasoner│ glm-5            │ MiniMax-M2.1             │
+#   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.1-lightning   │
+#   └──────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────────────┘
 #
 
 # ==================== Provider 模板 ====================
@@ -90,6 +90,22 @@ provider_templates:
       provider: "glm"
       model: "glm-4.5-flash"
       api_key_env: "ZHIPUAI_API_KEY"
+
+  minimax:
+    agent_model: "MiniMax-M2.1"                 # 主 Agent：MiniMax M2.1 旗舰（Anthropic API 兼容）
+    agent_llm:
+      max_tokens: 32768
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: false                     # MiniMax 不支持 prompt cache
+    heavy:
+      provider: "minimax"
+      model: "MiniMax-M2.1"
+      api_key_env: "MINIMAX_API_KEY"
+    light:
+      provider: "minimax"
+      model: "MiniMax-M2.1-lightning"
+      api_key_env: "MINIMAX_API_KEY"
 
 # ==================== 各调用点配置 ====================
 #

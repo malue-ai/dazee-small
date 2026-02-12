@@ -121,6 +121,12 @@ from .glm import (
     create_glm_service,
 )
 
+# MiniMax 实现
+from .minimax import (
+    MiniMaxLLMService,
+    create_minimax_service,
+)
+
 # 千问实现
 from .qwen import (
     QwenConfig,
@@ -216,6 +222,7 @@ def create_llm_service(
         LLMProvider.QWEN: "qwen3-max",
         LLMProvider.DEEPSEEK: "deepseek-reasoner",
         LLMProvider.GLM: "glm-5",
+        LLMProvider.MINIMAX: "MiniMax-M2.1",
     }
 
     if model is None:
@@ -239,6 +246,7 @@ def create_llm_service(
                 LLMProvider.QWEN: "DASHSCOPE_API_KEY",
                 LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
                 LLMProvider.GLM: "ZHIPUAI_API_KEY",
+                LLMProvider.MINIMAX: "MINIMAX_API_KEY",
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 
@@ -288,6 +296,7 @@ __all__ = [
     "QwenConfig",
     "DeepSeekLLMService",
     "GLMLLMService",
+    "MiniMaxLLMService",
     # ========== 适配器 ==========
     "BaseAdaptor",
     "ClaudeAdaptor",
@@ -311,4 +320,5 @@ __all__ = [
     "create_qwen_service",
     "create_deepseek_service",
     "create_glm_service",
+    "create_minimax_service",
 ]

@@ -1975,24 +1975,27 @@ def _register_preset_models() -> None:
         )
     )
 
-    # ==================== MiniMax 系列 ====================
+    # ==================== MiniMax 系列（Anthropic API 兼容） ====================
 
     _MINIMAX_COMMON = dict(
-        adapter=AdapterType.OPENAI,
-        base_url="https://api.minimax.chat/v1",
+        adapter=AdapterType.CLAUDE,
+        base_url="https://api.minimaxi.com/anthropic",
         api_key_env="MINIMAX_API_KEY",
         provider="minimax",
     )
 
+    # --- MiniMax M2 系列 ---
+
     ModelRegistry.register(
         ModelConfig(
-            model_name="MiniMax-Text-01",
+            model_name="MiniMax-M2.1",
             model_type=ModelType.LLM,
-            display_name="MiniMax Text 01",
-            description="MiniMax 旗舰文本模型（4M 上下文）",
+            display_name="MiniMax M2.1",
+            description="MiniMax 旗舰模型，多语言编程，~60 tps",
             capabilities=ModelCapabilities(
-                supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=32768, max_input_tokens=1000000,
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768,
             ),
             pricing=ModelPricing(input_per_million=0.15, output_per_million=1.10),
             **_MINIMAX_COMMON,
@@ -2001,15 +2004,32 @@ def _register_preset_models() -> None:
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="abab6.5s-chat",
+            model_name="MiniMax-M2.1-lightning",
             model_type=ModelType.LLM,
-            display_name="MiniMax abab6.5s",
-            description="MiniMax 快速模型",
+            display_name="MiniMax M2.1 Lightning",
+            description="MiniMax 极速版，~100 tps",
             capabilities=ModelCapabilities(
-                supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=8192, max_input_tokens=245760,
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768,
             ),
-            pricing=ModelPricing(input_per_million=0.14, output_per_million=0.14),
+            pricing=ModelPricing(input_per_million=0.10, output_per_million=0.70),
+            **_MINIMAX_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="MiniMax-M2",
+            model_type=ModelType.LLM,
+            display_name="MiniMax M2",
+            description="MiniMax Agent/Coding 专精模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768,
+            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=1.10),
             **_MINIMAX_COMMON,
         )
     )

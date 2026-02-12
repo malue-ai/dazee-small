@@ -200,6 +200,7 @@ class LLMProvider(Enum):
     QWEN = "qwen"  # 通义千问（阿里云）
     DEEPSEEK = "deepseek"  # DeepSeek（深度求索）
     GLM = "glm"  # GLM（智谱AI）
+    MINIMAX = "minimax"  # MiniMax（Anthropic API 兼容）
 
 
 class ToolType(Enum):
