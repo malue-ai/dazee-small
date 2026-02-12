@@ -484,6 +484,15 @@ SUPPORTED_PROVIDERS = {
         "adapter": "openai",
         "validate_method": "openai",
     },
+    "glm": {
+        "display_name": "智谱 GLM (Zhipu AI)",
+        "icon": "🔮",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key_env": "ZHIPUAI_API_KEY",
+        "description": "智谱 GLM 系列，支持 Thinking、Function Calling 和视觉",
+        "adapter": "openai",
+        "validate_method": "openai",
+    },
 }
 
 
