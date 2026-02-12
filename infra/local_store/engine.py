@@ -40,8 +40,13 @@ def _get_default_db_dir() -> str:
 
 
 def _get_default_db_name() -> str:
-    """Resolve DB name lazily."""
-    return os.getenv("LOCAL_STORE_DB", "instance.db")
+    """Resolve DB name lazily (instance-aware)."""
+    env_override = os.getenv("LOCAL_STORE_DB")
+    if env_override:
+        return env_override
+    # 默认使用 {instance_id}.db（与 LocalWorkspace 保持一致）
+    instance = os.getenv("AGENT_INSTANCE", "default")
+    return f"{instance}.db"
 
 
 def _resolve_db_path(db_dir: Optional[str] = None, db_name: Optional[str] = None) -> Path:
@@ -248,9 +253,30 @@ def is_vec_available() -> bool:
 
 async def close_local_engine():
     """关闭 SQLite 引擎（应用退出时调用）"""
-    global _engine, _session_factory
+    global _engine, _session_factory, _vec_available
     if _engine is not None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
+        _vec_available = False
         logger.info("SQLite 引擎已关闭")
+
+
+async def reload_local_engine() -> None:
+    """
+    重新加载 SQLite 引擎（用于依赖变更后重新检测扩展）
+    
+    Use case: 用户在运行时安装了 sqlite-vec 依赖，需要重新检测扩展可用性。
+    关闭旧引擎并清理全局状态，下次 get_local_engine() 时会重新初始化。
+    """
+    global _engine, _session_factory, _vec_available
+    if _engine is not None:
+        await _engine.dispose()
+        logger.info("SQLite 引擎已关闭，准备重新加载")
+    _engine = None
+    _session_factory = None
+    _vec_available = False
+    
+    # 立即触发重新初始化
+    await get_local_engine()
+    logger.info(f"SQLite 引擎已重新加载 (vec_available={_vec_available})")

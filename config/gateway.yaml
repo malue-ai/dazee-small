@@ -1,1 +1,17 @@
-
+gateway:
+  enabled: true
+channels:
+  telegram:
+    enabled: true
+    bot_token: 8333188571:AAF7ViOA2E8VQ32IaPqT2cukaR0XyahOHWc
+    allowed_users: []
+    allowed_groups: []
+  feishu:
+    enabled: true
+    app_id: cli_a901ed6324f89bc0
+    app_secret: MbPIk4d4jlrAluZ0oeyaGb0trToPveAi
+bindings:
+  - channel: telegram
+    agent_id: xiaodazi
+  - channel: feishu
+    agent_id: xiaodazi

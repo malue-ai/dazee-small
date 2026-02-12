@@ -842,7 +842,7 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
     await ws.connect(requestBody, {
       onEvent: handleStreamEvent,
       onConnected: () => {
-        console.log('✅ 创建项目引导对话已连接')
+        // WebSocket connected
       },
       onDisconnected: () => {
         isGenerating.value = false

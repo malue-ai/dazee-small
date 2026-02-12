@@ -274,10 +274,9 @@ export function useChat() {
       const result = await ws.connect(requestBody, {
         onEvent: (event) => handleStreamEvent(event, assistantMsg, targetConvId, sendAgentId),
         onConnected: () => {
-          console.log(`✅ WebSocket 流开始 (${targetConvId})`)
+          // WebSocket connected
         },
         onDisconnected: () => {
-          console.log(`✅ WebSocket 流结束 (${targetConvId})`)
           // 重置停止状态 (如果是当前会话)
           if (conversationStore.currentId === targetConvId) {
             isStopping.value = false
@@ -531,7 +530,6 @@ export function useChat() {
 
     // 处理 session 开始事件
     if (type === 'session_start') {
-      console.log('🚀 Session 开始:', data.session_id)
       if (data.session_id && convId) {
         sessionStore.setCurrentSessionId(data.session_id)
         sessionStore.markRunning(convId, data.session_id)
@@ -602,16 +600,14 @@ export function useChat() {
           const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
           
           if (hitlData && hitlData.status === 'pending') {
-            console.log('🤝 收到 HITL pending 状态:', hitlData)
             const request = normalizeHITLRequestFromHitlData(hitlData)
             if (request && !hitl.showModal.value) {
               hitl.show(request)
             }
           } else if (hitlData && (hitlData.timed_out || hitlData.status === 'timed_out')) {
-            console.log('⏱️ HITL 超时，关闭弹窗')
             hitl.hide()
           } else if (hitlData && hitlData.status === 'completed' && hitlData.success) {
-            console.log('✅ HITL 已完成:', hitlData.response)
+            // HITL completed successfully
           }
         } catch (e) {
           console.warn('⚠️ 解析 hitl_data 失败:', e)
@@ -626,7 +622,6 @@ export function useChat() {
         const conv = conversationStore.conversations.find(c => c.id === (data.conversation_id || convId))
         if (conv) {
           conv.title = data.title
-          console.log(`🏷️ 对话标题已更新: ${data.title}`)
         }
       }
     }
@@ -643,7 +638,6 @@ export function useChat() {
 
        // Safety net: 消息结束时如果 HITL 弹窗仍在显示则关闭
        if (hitl.showModal.value) {
-         console.log('🔒 消息结束，关闭残留 HITL 弹窗')
          hitl.hide()
        }
 
@@ -792,7 +786,6 @@ export function useChat() {
       try {
         const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
         if (hitlData && (hitlData.timed_out || hitlData.status === 'timed_out')) {
-          console.log('⏱️ HITL 超时，关闭弹窗')
           hitl.hide()
         }
       } catch {
@@ -941,7 +934,6 @@ export function useChat() {
     // Safety net: Agent 生成新内容块时，如果 HITL 弹窗仍在显示则关闭
     // 说明 HITL 工具已返回（超时或其他原因），Agent 继续执行
     if (hitl.showModal.value) {
-      console.log('🔄 Agent 继续执行，关闭残留 HITL 弹窗')
       hitl.hide()
     }
 
@@ -1113,13 +1105,11 @@ export function useChat() {
       if (!userId) return false
 
       if (sessionStore.hasActiveSessions) {
-        console.log('🔄 发现活跃 Session')
         return false // 暂时返回 false，不自动重连
       }
 
       return false
     } catch (error) {
-      console.log('ℹ️ 无活跃 Session 或检查失败')
       return false
     }
   }
