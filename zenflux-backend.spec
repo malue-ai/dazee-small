@@ -48,7 +48,6 @@ datas = [
     # 智能体实例配置（仅打包发行实例，排除开发/测试时创建的临时实例）
     (str(project_root / 'instances' / '_template'), 'instances/_template'),
     (str(project_root / 'instances' / 'xiaodazi'), 'instances/xiaodazi'),
-    (str(project_root / 'instances' / 'README.md'), 'instances'),
     # Skill 库
     (str(project_root / 'skills' / 'library'), 'skills/library'),
 ]
