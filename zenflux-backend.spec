@@ -45,8 +45,9 @@ datas = [
     (str(project_root / 'config'), 'config'),
     # 提示词
     (str(project_root / 'prompts'), 'prompts'),
-    # 智能体实例配置
-    (str(project_root / 'instances'), 'instances'),
+    # 智能体实例配置（仅打包发行实例，排除开发/测试时创建的临时实例）
+    (str(project_root / 'instances' / '_template'), 'instances/_template'),
+    (str(project_root / 'instances' / 'xiaodazi'), 'instances/xiaodazi'),
     # Skill 库
     (str(project_root / 'skills' / 'library'), 'skills/library'),
 ]
@@ -178,7 +179,7 @@ except NameError:
 hiddenimports += collect_submodules('apscheduler')
 
 # 文件处理（utils/file_handler.py try/except, core/knowledge/file_indexer.py lazy import）
-hiddenimports += ['PyPDF2', 'docx']
+hiddenimports += ['PyPDF2', 'pypdf', 'docx', 'pptx', 'openpyxl']
 
 # HuggingFace Hub（core/knowledge/embeddings.py 延迟导入 hf_hub_download）
 hiddenimports += collect_submodules('huggingface_hub')

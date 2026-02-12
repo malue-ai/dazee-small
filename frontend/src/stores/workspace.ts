@@ -301,7 +301,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       await workspaceApi.stopProject(convId, projectName)
       showPreview.value = false
-      console.log('✅ 项目已停止')
     } catch (error) {
       console.error('❌ 停止项目失败:', error)
       throw error

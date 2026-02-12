@@ -17,7 +17,7 @@ echo.
 echo ============================================================
 echo.
 
-powershell -ExecutionPolicy Bypass -File "%~dp0scripts\build_app_windows.ps1"
+powershell -ExecutionPolicy Bypass -File "%~dp0build_app_windows.ps1"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

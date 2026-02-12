@@ -835,6 +835,11 @@ async def _reload_semantic_components() -> None:
     Called after setup_semantic_search() so changes take effect without restart.
     Destroys existing singletons; they'll be re-created with new config on next use.
     """
+    # 0. 重新加载 SQLite 引擎（重新检测 sqlite-vec 扩展）
+    #    必须在 KnowledgeManager 之前，因为 KnowledgeManager 初始化时会调用 is_vec_available()
+    from infra.local_store.engine import reload_local_engine
+    await reload_local_engine()
+    
     # 1. Reset KnowledgeManager singleton → re-reads instance config on next use
     from services.knowledge_service import reload_knowledge_manager
     await reload_knowledge_manager()

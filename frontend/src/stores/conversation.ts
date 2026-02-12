@@ -84,7 +84,6 @@ export const useConversationStore = defineStore('conversation', () => {
   async function fetchList(limit = 20, offset = 0, agentId?: string): Promise<Conversation[]> {
     // 防止重复请求
     if (loading.value) {
-      console.log('🔄 会话列表正在加载中，跳过重复请求')
       return conversations.value
     }
 
@@ -122,7 +121,6 @@ export const useConversationStore = defineStore('conversation', () => {
       conversations.value = [conversation, ...conversations.value]
       conversationsTotal.value += 1
       
-      console.log('✅ 会话创建成功:', conversation.id)
       return conversation
     } catch (error) {
       console.error('❌ 创建会话失败:', error)
@@ -141,7 +139,6 @@ export const useConversationStore = defineStore('conversation', () => {
     
     // 如果有缓存且不强制刷新，使用缓存
     if (!force && messagesMap.value[conversationId] && messagesMap.value[conversationId].length > 0) {
-      console.log('✅ 使用缓存消息:', conversationId)
       // 恢复分页状态（这里简化处理，假设缓存是最新的）
       // 如果需要精确的分页恢复，需要将 hasMore 等也存入 Map
       return
@@ -167,10 +164,7 @@ export const useConversationStore = defineStore('conversation', () => {
       // 从 conversation_metadata 中提取 plan
       if (result.conversation_metadata?.plan) {
         conversationPlan.value = result.conversation_metadata.plan as PlanData
-        console.log('📋 从会话元数据加载 Plan:', conversationPlan.value?.name)
       }
-      
-      console.log('✅ 历史消息已加载:', messagesMap.value[conversationId].length, '条, has_more:', hasMore.value)
     } catch (error) {
       console.error('❌ 加载消息失败:', error)
       throw error
@@ -209,7 +203,6 @@ export const useConversationStore = defineStore('conversation', () => {
         hasMore.value = result.has_more
         nextCursor.value = result.next_cursor
         
-        console.log('✅ 加载更多消息:', newMessages.length, '条, has_more:', hasMore.value)
         return true
       }
       
@@ -236,8 +229,6 @@ export const useConversationStore = defineStore('conversation', () => {
       if (conv) {
         conv.title = title
       }
-      
-      console.log('✅ 会话标题已更新')
     } catch (error) {
       console.error('❌ 更新会话失败:', error)
       throw error
@@ -265,7 +256,6 @@ export const useConversationStore = defineStore('conversation', () => {
     // 再调后端接口
     try {
       await chatApi.deleteConversation(conversationId)
-      console.log('✅ 会话已删除')
       return true
     } catch (error) {
       console.warn('⚠️ 后端删除会话失败（本地已清理）:', error)
