@@ -322,6 +322,11 @@
     .step-install-info .download-link {
       color: #000; text-decoration: underline; font-weight: 400;
     }
+    .install-tip {
+      font-size: 0.8125rem; color: #8B949E; line-height: 1.6;
+      margin-top: 0.25rem; margin-bottom: 0.5rem;
+    }
+    .install-tip strong { color: #3B3E41; }
     .install-cmd {
       display: block; margin-top: 0.25rem; padding: 0.375rem 0.5rem; border-radius: 0.375rem;
       background: rgba(0,0,0,0.04); border: 0.0625rem solid rgba(0,0,0,0.08);
@@ -738,6 +743,7 @@
           <h3 data-i18n="s1_title">下载安装</h3>
           <div class="step-install-info">
             <div class="install-line" data-i18n-html="s1_line1">Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small/releases/download/v0.1.0/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">下载</a> 运行。</div>
+            <div class="install-tip" data-i18n-html="s1_tip">⚠️ 若弹出"Windows 已保护你的电脑"提示，点击 <strong>更多信息</strong> → <strong>仍要运行</strong> 即可。</div>
             <div class="install-line" data-i18n-html="s1_line2">macOS在终端界面输入以下命令：</div>
             <code class="install-cmd">bash Downloads/zenflux_agent/scripts/auto_build_app.sh</code>
           </div>
@@ -931,6 +937,7 @@
         steps_subtitle: '三步开始使用，简单到离谱',
         s1_title: '下载安装',
         s1_line1: 'Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small/releases/download/v0.1.0/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">下载</a> 运行。',
+        s1_tip: '⚠️ 若弹出"Windows 已保护你的电脑"提示，点击 <strong>更多信息</strong> → <strong>仍要运行</strong> 即可。',
         s1_line2: 'macOS在终端界面输入以下命令：',
         s2_title: '配置模型',
         s2_desc: '在设置页面填入 AI 模型的 API Key。推荐新手从 DeepSeek 或 Gemini（有免费额度）开始。',
@@ -966,6 +973,7 @@
         steps_subtitle: 'Get started in 3 steps — ridiculously simple',
         s1_title: 'Download & Install',
         s1_line1: 'Windows: Click <a class="download-link" href="https://github.com/malue-ai/dazee-small/releases/download/v0.1.0/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">Download</a> and run.',
+        s1_tip: '⚠️ If you see "Windows protected your PC", click <strong>More info</strong> → <strong>Run anyway</strong>.',
         s1_line2: 'macOS: Enter the following command in Terminal:',
         s2_title: 'Configure Model',
         s2_desc: 'Enter your AI model API Key in the settings page. Beginners should start with DeepSeek or Gemini (free quota available).',
