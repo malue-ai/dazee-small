@@ -1165,12 +1165,11 @@ function formatContextWindow(tokens: number): string {
 /** 获取 Provider 首字母或特殊标识 */
 function getProviderInitial(name: string): string {
   const initials: Record<string, string> = {
-    'anthropic': 'A',
+    'claude': 'A',
     'openai': 'O',
     'qwen': '通',
-    'doubao': '豆',
     'deepseek': 'DS',
-    'zhipu': '智',
+    'glm': '智',
     'kimi': 'K',
     'minimax': 'M',
   }

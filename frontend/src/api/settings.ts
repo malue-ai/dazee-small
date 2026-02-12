@@ -32,6 +32,7 @@ export interface SettingsData {
 export interface SettingsStatus {
   configured: boolean
   missing: string[]
+  configured_providers: string[]
   summary: {
     [group: string]: {
       configured: number

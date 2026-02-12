@@ -50,18 +50,26 @@ def _load_dotenv_fallback() -> None:
 
 # ==================== 配置结构定义 ====================
 
-# 必填配置项（至少需要一个 LLM API Key）
-REQUIRED_KEYS = ["ANTHROPIC_API_KEY"]
+# _LLM_API_KEY_NAMES: 在 SETTINGS_SCHEMA 之后动态生成，见下方
 
 # 可选配置项（按分组）
 SETTINGS_SCHEMA = {
     "api_keys": {
-        "ANTHROPIC_API_KEY": {"label": "Anthropic API Key", "required": True, "secret": True},
+        "ANTHROPIC_API_KEY": {"label": "Anthropic API Key", "required": False, "secret": True},
         "ANTHROPIC_BASE_URL": {"label": "Anthropic Base URL", "required": False, "secret": False},
         "OPENAI_API_KEY": {"label": "OpenAI API Key", "required": False, "secret": True},
         "OPENAI_BASE_URL": {"label": "OpenAI Base URL", "required": False, "secret": False},
         "DASHSCOPE_API_KEY": {"label": "DashScope API Key", "required": False, "secret": True},
+        "DASHSCOPE_BASE_URL": {"label": "DashScope Base URL", "required": False, "secret": False},
         "GEMINI_API_KEY": {"label": "Gemini API Key", "required": False, "secret": True},
+        "DEEPSEEK_API_KEY": {"label": "DeepSeek API Key", "required": False, "secret": True},
+        "DEEPSEEK_BASE_URL": {"label": "DeepSeek Base URL", "required": False, "secret": False},
+        "MOONSHOT_API_KEY": {"label": "Moonshot (Kimi) API Key", "required": False, "secret": True},
+        "MOONSHOT_BASE_URL": {"label": "Moonshot Base URL", "required": False, "secret": False},
+        "MINIMAX_API_KEY": {"label": "MiniMax API Key", "required": False, "secret": True},
+        "MINIMAX_BASE_URL": {"label": "MiniMax Base URL", "required": False, "secret": False},
+        "ZHIPUAI_API_KEY": {"label": "Zhipu AI (GLM) API Key", "required": False, "secret": True},
+        "ZHIPUAI_BASE_URL": {"label": "Zhipu AI Base URL", "required": False, "secret": False},
     },
     "llm": {
         "COT_AGENT_MODEL": {"label": "默认模型", "required": False, "secret": False,
@@ -109,6 +117,12 @@ SETTINGS_SCHEMA = {
     },
 }
 
+# 从 Schema 自动提取所有 LLM API Key 名称（secret=True 且以 _API_KEY 结尾）
+_LLM_API_KEY_NAMES = [
+    key for key, meta in SETTINGS_SCHEMA["api_keys"].items()
+    if meta.get("secret") and key.endswith("_API_KEY")
+]
+
 # 缓存
 _settings_cache: Optional[Dict[str, Any]] = None
 
@@ -121,7 +135,8 @@ def load_config_to_env() -> None:
     Load config.yaml and inject values into os.environ.
 
     Falls back to loading .env from project root if config.yaml is missing
-    or does not provide an ANTHROPIC_API_KEY.
+    or no LLM API key is found.
+    Also validates SETTINGS_SCHEMA covers all SUPPORTED_PROVIDERS api_key_env.
     """
     config_path = get_user_config_path()
 
@@ -156,12 +171,36 @@ def load_config_to_env() -> None:
             os.environ[section_key] = str(section_data)
             injected_count += 1
 
-    # 若注入后仍无 ANTHROPIC_API_KEY，回退到 .env（兼容仅用 .env 的开发方式）
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    # 若注入后仍无任何 LLM API Key，回退到 .env（兼容仅用 .env 的开发方式）
+    has_any_key = any(os.environ.get(k) for k in _LLM_API_KEY_NAMES)
+    if not has_any_key:
         _load_dotenv_fallback()
 
     if injected_count > 0:
         logger.info(f"从 config.yaml 注入 {injected_count} 个环境变量")
+
+    # 交叉校验：SUPPORTED_PROVIDERS 的 api_key_env 应在 SETTINGS_SCHEMA 中注册
+    _validate_schema_provider_sync()
+
+
+def _validate_schema_provider_sync() -> None:
+    """
+    Validate that all SUPPORTED_PROVIDERS api_key_env values are registered
+    in SETTINGS_SCHEMA. Logs warnings at startup to prevent silent key-loss bugs.
+    """
+    try:
+        from routers.models import SUPPORTED_PROVIDERS
+    except ImportError:
+        return  # routers not loaded yet (e.g. unit test), skip
+
+    schema_keys = set(SETTINGS_SCHEMA.get("api_keys", {}).keys())
+    for provider_name, meta in SUPPORTED_PROVIDERS.items():
+        api_key_env = meta.get("api_key_env", "")
+        if api_key_env and api_key_env not in schema_keys:
+            logger.warning(
+                f"⚠️ Provider '{provider_name}' 的 api_key_env='{api_key_env}' "
+                f"未在 SETTINGS_SCHEMA['api_keys'] 中注册，API Key 将无法通过设置页面持久化"
+            )
 
 
 async def _load_settings() -> Dict[str, Any]:
@@ -292,17 +331,21 @@ async def get_settings_status() -> Dict[str, Any]:
         {"configured": bool, "missing": [...], "summary": {...}}
     """
     settings = await _load_settings()
-    missing = []
 
-    for key in REQUIRED_KEYS:
-        # 从配置文件和环境变量两个来源检查
+    # 检查是否至少配置了一个 LLM API Key（从配置文件和环境变量两个来源检查）
+    has_any_llm_key = False
+    configured_providers: List[str] = []
+    for key in _LLM_API_KEY_NAMES:
         found = False
         for group_data in settings.values():
             if isinstance(group_data, dict) and group_data.get(key):
                 found = True
                 break
-        if not found and not os.getenv(key):
-            missing.append(key)
+        if not found:
+            found = bool(os.getenv(key))
+        if found:
+            has_any_llm_key = True
+            configured_providers.append(key)
 
     # 汇总各组配置状态
     summary = {}
@@ -319,8 +362,9 @@ async def get_settings_status() -> Dict[str, Any]:
         summary[group_key] = {"configured": configured, "total": total}
 
     return {
-        "configured": len(missing) == 0,
-        "missing": missing,
+        "configured": has_any_llm_key,
+        "missing": [] if has_any_llm_key else ["ANY_LLM_API_KEY"],
+        "configured_providers": configured_providers,
         "summary": summary,
     }
 
