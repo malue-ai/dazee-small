@@ -38,16 +38,40 @@ except Exception:
 # ==================== 数据文件（只读资源）====================
 # 这些文件会被打包到临时目录，运行时通过 sys._MEIPASS 访问
 
+# ---- 敏感文件黑名单（含 API Key / Token，禁止打包）----
+_SENSITIVE_FILES = {
+    'activated_models.yaml',   # 用户模型配置（含 API Key）
+    'custom_models.yaml',      # 用户自定义模型（含 API Key）
+    'gateway.yaml',            # 网关配置（含 bot_token、app_secret）
+    '.env',                    # 环境变量
+    '.env.local',              # 本地环境变量
+    '.DS_Store',               # macOS 系统文件
+}
+
+def _collect_safe_datas(src_dir: Path, dest_prefix: str) -> list:
+    """递归收集目录下的文件，自动排除敏感文件"""
+    result = []
+    for f in src_dir.rglob('*'):
+        if not f.is_file():
+            continue
+        if f.name in _SENSITIVE_FILES:
+            print(f"  [SKIP] 敏感文件已排除: {f.relative_to(project_root)}")
+            continue
+        rel = f.parent.relative_to(src_dir)
+        dest = dest_prefix if str(rel) == '.' else f'{dest_prefix}/{rel}'
+        result.append((str(f), dest))
+    return result
+
 datas = [
     # 版本号（单一来源）
     (str(project_root / 'VERSION'), '.'),
-    # 配置文件
-    (str(project_root / 'config'), 'config'),
+    # 配置文件（自动排除含 API Key 的敏感文件）
+    *_collect_safe_datas(project_root / 'config', 'config'),
     # 提示词
     (str(project_root / 'prompts'), 'prompts'),
     # 智能体实例配置（仅打包发行实例，排除开发/测试时创建的临时实例）
     (str(project_root / 'instances' / '_template'), 'instances/_template'),
-    (str(project_root / 'instances' / 'xiaodazi'), 'instances/xiaodazi'),
+    *_collect_safe_datas(project_root / 'instances' / 'xiaodazi', 'instances/xiaodazi'),
     # Skill 库
     (str(project_root / 'skills' / 'library'), 'skills/library'),
 ]

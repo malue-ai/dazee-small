@@ -243,12 +243,21 @@ def _get_channel_status(channel_id: str) -> str:
     return adapter.get_status().value
 
 
+# Default channel skeleton (used when gateway.yaml doesn't exist yet)
+_DEFAULT_CHANNELS: Dict[str, Dict[str, Any]] = {
+    "telegram": {"enabled": False, "bot_token": "", "allowed_users": [], "allowed_groups": []},
+    "feishu": {"enabled": False, "app_id": "", "app_secret": ""},
+}
+
+
 @router.get("/config")
 async def get_gateway_config() -> Dict[str, Any]:
     """
     Get gateway configuration for the settings UI.
 
-    Returns raw config with secrets masked and channel metadata attached.
+    Returns raw config with channel metadata attached.
+    When gateway.yaml doesn't exist, returns default channel skeletons
+    so the frontend can render the configuration form.
     """
     from core.gateway.loader import load_gateway_config_raw
 
@@ -258,8 +267,11 @@ async def get_gateway_config() -> Dict[str, Any]:
     gateway_section = raw.get("gateway", {})
     enabled = gateway_section.get("enabled", False)
 
-    # Channels with metadata and masked secrets
+    # Channels with metadata — fall back to defaults when config file is missing
     channels_raw = raw.get("channels", {})
+    if not channels_raw:
+        channels_raw = _DEFAULT_CHANNELS
+
     channels = []
     for channel_id, channel_data in channels_raw.items():
         if isinstance(channel_data, dict):

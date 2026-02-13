@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Dazee.ai Official Website -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -166,7 +167,7 @@
 
     /* ==================== Hero ==================== */
     .hero {
-      padding: 8rem 0 4rem;
+      padding: 7rem 0 3rem;
       background: var(--green-gradient);
       text-align: center;
       position: relative;
@@ -180,15 +181,15 @@
     }
     .hero-title {
       font-size: 5rem; font-weight: 800; line-height: 1.1;
-      color: var(--text-dark); margin-bottom: 0.75rem;
+      color: var(--text-dark); margin-bottom: 0.5rem;
     }
     .hero-tagline {
       font-size: 1.125rem; font-weight: 600; color: var(--accent);
-      margin-bottom: 1.5rem;
+      margin-bottom: 1rem;
     }
     .hero-desc {
       font-size: 1rem; color: var(--text-body); max-width: 42rem;
-      margin: 0 auto 2.5rem; line-height: 1.8;
+      margin: 0 auto 1.75rem; line-height: 1.8;
     }
     .hero-downloads {
       display: flex; justify-content: center; gap: 0.75rem; margin-bottom: 1.25rem;
@@ -206,12 +207,33 @@
       display: inline-flex; align-items: center; gap: 0.5rem;
       padding: 0.625rem 1.5rem; border-radius: 3rem;
       background: var(--text-dark); color: #fff; font-size: 0.875rem; font-weight: 600;
-      transition: all 0.25s; text-decoration: none; margin-bottom: 1.5rem;
+      transition: all 0.25s; text-decoration: none; margin-bottom: 0.75rem;
     }
     .hero-github:hover { background: #2a2a4e; transform: translateY(-0.125rem); }
     .hero-github svg { width: 1.125rem; height: 1.125rem; }
     .hero-note {
       font-size: 0.8125rem; color: var(--text-muted);
+    }
+    .hero-community {
+      display: inline-flex; gap: 2.5rem; margin-top: 1.25rem;
+      padding: 1.25rem 2rem; border-radius: 1rem;
+      background: #fff; border: 1px solid var(--border-light);
+      box-shadow: 0 0.125rem 0.5rem rgba(0,0,0,0.04);
+    }
+    .community-group { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+    .community-group-title { font-size: 0.8125rem; font-weight: 700; color: var(--text-dark); }
+    .community-icons { display: flex; gap: 0.625rem; }
+    .community-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 2.5rem; height: 2.5rem; border-radius: 50%;
+      transition: all 0.2s; text-decoration: none;
+    }
+    .community-icon:hover { transform: translateY(-0.125rem); opacity: 0.85; }
+    .community-icon svg { width: 1.375rem; height: 1.375rem; }
+    .community-icon.discord { background: #5865F2; color: #fff; }
+    .community-icon.wechat { background: #07C160; color: #fff; }
+    @media (max-width: 767px) {
+      .hero-community { gap: 1.5rem; padding: 1rem 1.5rem; flex-wrap: wrap; justify-content: center; }
     }
 
     @media (max-width: 767px) {
@@ -321,6 +343,11 @@
     .step-install-info .download-link {
       color: #000; text-decoration: underline; font-weight: 400;
     }
+    .install-tip {
+      font-size: 0.8125rem; color: #8B949E; line-height: 1.6;
+      margin-top: 0.25rem; margin-bottom: 0.5rem;
+    }
+    .install-tip strong { color: #3B3E41; }
     .install-cmd {
       display: block; margin-top: 0.25rem; padding: 0.375rem 0.5rem; border-radius: 0.375rem;
       background: rgba(0,0,0,0.04); border: 0.0625rem solid rgba(0,0,0,0.08);
@@ -341,7 +368,7 @@
       width: 12rem; height: 3.8rem; display: block; margin: 0 auto;
     }
     .platform-icons { display: inline-flex; gap: 3.5rem; }
-    .platform-item { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-width: 4.25rem; }
+    .platform-item { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-width: 4.25rem; text-decoration: none; color: inherit; cursor: pointer; }
     /* 48px dark rounded square with white icon */
     .platform-icon {
       width: 3rem; height: 3rem; border-radius: 0.75rem;
@@ -639,11 +666,11 @@
         简易安装后，小搭子就直接住在你的电脑里。它能看到你的屏幕、帮你管文件、产内容、做分析、设提醒。只需用自然语言告诉它想做什么，它就能动手帮你搞定！越用越懂你！
       </p>
       <div class="hero-downloads animate d3">
-        <a href="#" class="hero-download-btn">
+        <a href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_aarch64.dmg" class="hero-download-btn" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
           macOS
         </a>
-        <a href="#" class="hero-download-btn">
+        <a href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_x64-setup.exe" class="hero-download-btn" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .15V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm17 .25V22l-10-1.91V13.1l10 .15z"/></svg>
           Windows
         </a>
@@ -653,6 +680,30 @@
         <span data-i18n="hero_github">在 GitHub 上查看</span>
       </a>
       <p class="hero-note animate d4" data-i18n="hero_note">小搭子完全开源，欢迎参与共建</p>
+      <div class="hero-community animate d4">
+        <div class="community-group">
+          <span class="community-group-title" data-i18n="community_seed">种子用户交流群：</span>
+          <div class="community-icons">
+            <a href="https://discord.gg/BGV74WSM" class="community-icon discord" target="_blank" rel="noopener" title="Discord">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+            </a>
+            <a href="https://qr61.cn/o2ZUl0/qTBidhM" class="community-icon wechat" target="_blank" rel="noopener" title="WeChat">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05a6.128 6.128 0 01-.253-1.736c0-3.54 3.195-6.42 7.135-6.42.207 0 .407.021.61.033C16.468 4.458 12.895 2.188 8.69 2.188zm-2.6 4.408a1.07 1.07 0 011.07 1.07 1.07 1.07 0 01-1.07 1.069 1.07 1.07 0 01-1.069-1.07 1.07 1.07 0 011.07-1.069zm5.82 0a1.07 1.07 0 011.069 1.07 1.07 1.07 0 01-1.07 1.069 1.07 1.07 0 01-1.069-1.07 1.07 1.07 0 011.07-1.069zM16.885 10c-3.39 0-6.15 2.473-6.15 5.52 0 3.047 2.76 5.52 6.15 5.52a7.53 7.53 0 002.085-.293.68.68 0 01.56.076l1.47.858a.263.263 0 00.134.043.226.226 0 00.226-.226c0-.057-.023-.11-.037-.165l-.301-1.14a.47.47 0 01.165-.519C22.807 18.593 24 16.707 24 15.52c0-3.047-2.76-5.52-6.15-5.52h-1.965zm-2.36 3.278a.847.847 0 01.846.847.847.847 0 01-.847.846.847.847 0 01-.846-.846.847.847 0 01.847-.847zm4.395 0a.847.847 0 01.846.847.847.847 0 01-.846.846.847.847 0 01-.846-.846.847.847 0 01.846-.847z"/></svg>
+            </a>
+          </div>
+        </div>
+        <div class="community-group">
+          <span class="community-group-title" data-i18n="community_dev">开发者交流群：</span>
+          <div class="community-icons">
+            <a href="https://discord.gg/eucmPWXsHh" class="community-icon discord" target="_blank" rel="noopener" title="Discord">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+            </a>
+            <a href="https://qr61.cn/o2ZUl0/qj9VemY" class="community-icon wechat" target="_blank" rel="noopener" title="WeChat">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05a6.128 6.128 0 01-.253-1.736c0-3.54 3.195-6.42 7.135-6.42.207 0 .407.021.61.033C16.468 4.458 12.895 2.188 8.69 2.188zm-2.6 4.408a1.07 1.07 0 011.07 1.07 1.07 1.07 0 01-1.07 1.069 1.07 1.07 0 01-1.069-1.07 1.07 1.07 0 011.07-1.069zm5.82 0a1.07 1.07 0 011.069 1.07 1.07 1.07 0 01-1.07 1.069 1.07 1.07 0 01-1.069-1.07 1.07 1.07 0 011.07-1.069zM16.885 10c-3.39 0-6.15 2.473-6.15 5.52 0 3.047 2.76 5.52 6.15 5.52a7.53 7.53 0 002.085-.293.68.68 0 01.56.076l1.47.858a.263.263 0 00.134.043.226.226 0 00.226-.226c0-.057-.023-.11-.037-.165l-.301-1.14a.47.47 0 01.165-.519C22.807 18.593 24 16.707 24 15.52c0-3.047-2.76-5.52-6.15-5.52h-1.965zm-2.36 3.278a.847.847 0 01.846.847.847.847 0 01-.847.846.847.847 0 01-.846-.846.847.847 0 01.847-.847zm4.395 0a.847.847 0 01.846.847.847.847 0 01-.846.846.847.847 0 01-.846-.846.847.847 0 01.846-.847z"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -736,13 +787,14 @@
           <div class="step-number">STEP 1</div>
           <h3 data-i18n="s1_title">下载安装</h3>
           <div class="step-install-info">
-            <div class="install-line" data-i18n-html="s1_line1">Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small" target="_blank" rel="noopener">下载</a> 运行。</div>
+            <div class="install-line" data-i18n-html="s1_line1">Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">下载</a> 运行。</div>
+            <div class="install-tip" data-i18n-html="s1_tip">⚠️ 若弹出"Windows 已保护你的电脑"提示，点击 <strong>更多信息</strong> → <strong>仍要运行</strong> 即可。</div>
             <div class="install-line" data-i18n-html="s1_line2">macOS在终端界面输入以下命令：</div>
             <code class="install-cmd">bash Downloads/zenflux_agent/scripts/auto_build_app.sh</code>
           </div>
           <div class="step-tree">
             <div class="step-tree-btn-wrap">
-              <a href="https://github.com/malue-ai/dazee-small" class="step-github-btn" target="_blank" rel="noopener">
+              <a href="https://github.com/malue-ai/dazee-small/releases" class="step-github-btn" target="_blank" rel="noopener">
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.0099 0C5.36875 0 0 5.40833 0 12.0992C0 17.4475 3.43994 21.9748 8.21205 23.5771C8.80869 23.6976 9.02724 23.3168 9.02724 22.9965C9.02724 22.716 9.00757 21.7545 9.00757 20.7527C5.6667 21.474 4.97099 19.3104 4.97099 19.3104C4.43409 17.9082 3.63858 17.5478 3.63858 17.5478C2.54511 16.8066 3.71823 16.8066 3.71823 16.8066C4.93117 16.8868 5.56763 18.0486 5.56763 18.0486C6.64118 19.8913 8.37111 19.3707 9.06706 19.0501C9.16638 18.2688 9.48473 17.728 9.82275 17.4276C7.15817 17.1471 4.35469 16.1055 4.35469 11.458C4.35469 10.1359 4.8316 9.05428 5.58729 8.21304C5.46807 7.91263 5.0504 6.67043 5.70677 5.00787C5.70677 5.00787 6.72083 4.6873 9.00732 6.24981C9.98625 5.98497 10.9958 5.85024 12.0099 5.84911C13.024 5.84911 14.0577 5.98948 15.0123 6.24981C17.299 4.6873 18.3131 5.00787 18.3131 5.00787C18.9695 6.67043 18.5515 7.91263 18.4323 8.21304C19.2079 9.05428 19.6652 10.1359 19.6652 11.458C19.6652 16.1055 16.8617 17.1269 14.1772 17.4276C14.6148 17.8081 14.9924 18.5292 14.9924 19.6711C14.9924 21.2936 14.9727 22.5957 14.9727 22.9962C14.9727 23.3168 15.1915 23.6976 15.7879 23.5774C20.56 21.9745 23.9999 17.4475 23.9999 12.0992C24.0196 5.40833 18.6312 0 12.0099 0Z"/></svg>
                 GitHub
               </a>
@@ -762,18 +814,18 @@
               </g>
             </svg>
             <div class="platform-icons">
-              <div class="platform-item">
+              <a class="platform-item" href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_aarch64.dmg" target="_blank" rel="noopener">
                 <div class="platform-icon">
                   <svg viewBox="0 0 24 25" fill="currentColor"><path d="M19.792 18.7033C19.429 19.5418 18.9994 20.3136 18.5016 21.0232C17.8231 21.9906 17.2676 22.6602 16.8395 23.0321C16.1758 23.6424 15.4647 23.955 14.7032 23.9728C14.1566 23.9728 13.4973 23.8172 12.73 23.5017C11.9601 23.1876 11.2525 23.0321 10.6056 23.0321C9.92709 23.0321 9.19941 23.1876 8.42106 23.5017C7.64153 23.8172 7.01355 23.9817 6.53342 23.9979C5.80322 24.0291 5.07539 23.7076 4.3489 23.0321C3.88521 22.6276 3.30523 21.9343 2.61043 20.9521C1.86498 19.9033 1.25211 18.687 0.771975 17.3004C0.25777 15.8026 0 14.3523 0 12.9482C0 11.3398 0.347544 9.95259 1.04367 8.79011C1.59076 7.85636 2.31859 7.11979 3.22953 6.57906C4.14046 6.03834 5.12473 5.76279 6.18469 5.74516C6.76467 5.74516 7.52524 5.92457 8.4704 6.27715C9.41288 6.63091 10.0181 6.81032 10.2834 6.81032C10.4817 6.81032 11.154 6.60054 12.2937 6.18234C13.3714 5.7945 14.281 5.63391 15.0262 5.69717C17.0454 5.86012 18.5624 6.6561 19.5712 8.09013C17.7654 9.18432 16.8721 10.7169 16.8898 12.6829C16.9061 14.2142 17.4617 15.4886 18.5535 16.5004C19.0483 16.97 19.6009 17.333 20.2156 17.5907C20.0823 17.9774 19.9416 18.3477 19.792 18.7033ZM15.161 0.480137C15.161 1.68041 14.7225 2.8011 13.8484 3.83841C12.7937 5.07155 11.5179 5.78413 10.1343 5.67168C10.1167 5.52769 10.1065 5.37614 10.1065 5.21688C10.1065 4.06462 10.6081 2.83147 11.4989 1.82321C11.9436 1.3127 12.5092 0.888228 13.1951 0.549615C13.8796 0.216055 14.5269 0.031589 15.1358 0C15.1536 0.160458 15.161 0.320926 15.161 0.480137Z"/></svg>
                 </div>
                 <span>macOS</span>
-              </div>
-              <div class="platform-item">
+              </a>
+              <a class="platform-item" href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">
                 <div class="platform-icon">
                   <svg viewBox="-1.75 -1.75 19 18" fill="currentColor"><path d="M13.5 0H1.5C0.672 0 0 0.672 0 1.5V9C0 9.828 0.672 10.5 1.5 10.5H13.5C14.328 10.5 15 9.828 15 9V1.5C15 0.672 14.328 0 13.5 0Z"/><path d="M13.5-0.75L1.5-0.75Q0.568-0.75-0.091-0.091Q-0.75 0.568-0.75 1.5L-0.75 9Q-0.75 9.932-0.091 10.591Q0.568 11.25 1.5 11.25L6.75 11.25L6.75 12.75L4.5 12.75Q4.086 12.75 3.75 13.086Q3.75 13.414 3.75 13.5Q3.75 13.914 4.086 14.25L10.5 14.25Q10.914 14.25 11.25 13.914Q11.25 13.586 11.25 13.5Q11.25 13.086 10.914 12.75L8.25 12.75L8.25 11.25L13.5 11.25Q14.432 11.25 15.091 10.591Q15.75 9.932 15.75 9L15.75 1.5Q15.75 0.568 15.091-0.091Q14.432-0.75 13.5-0.75ZM7.5 9.75L13.5 9.75Q13.811 9.75 14.03 9.53Q14.25 9.311 14.25 9L14.25 1.5Q14.25 1.189 14.03 0.97Q13.811 0.75 13.5 0.75L1.5 0.75Q1.189 0.75 0.97 0.97Q0.75 1.189 0.75 1.5L0.75 9Q0.75 9.75 1.5 9.75L7.5 9.75Z"/></svg>
                 </div>
                 <span>Windows</span>
-              </div>
+              </a>
             </div>
           </div>
         </div>
@@ -909,6 +961,8 @@
         hero_desc: '简易安装后，小搭子就直接住在你的电脑里。它能看到你的屏幕、帮你管文件、产内容、做分析、设提醒。只需用自然语言告诉它想做什么，它就能动手帮你搞定！越用越懂你！',
         hero_github: '在 GitHub 上查看',
         hero_note: '小搭子完全开源，欢迎参与共建',
+        community_seed: '种子用户交流群：',
+        community_dev: '开发者交流群：',
         features_title: '五大核心优势',
         features_subtitle: '让每一位用户都能轻松上手、高效使用、安心无忧',
         f1_title: '一键安装',
@@ -929,7 +983,8 @@
         steps_title: '快速上手',
         steps_subtitle: '三步开始使用，简单到离谱',
         s1_title: '下载安装',
-        s1_line1: 'Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small" target="_blank" rel="noopener">下载</a> 运行。',
+        s1_line1: 'Windows 点击 <a class="download-link" href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">下载</a> 运行。',
+        s1_tip: '⚠️ 若弹出"Windows 已保护你的电脑"提示，点击 <strong>更多信息</strong> → <strong>仍要运行</strong> 即可。',
         s1_line2: 'macOS在终端界面输入以下命令：',
         s2_title: '配置模型',
         s2_desc: '在设置页面填入 AI 模型的 API Key。推荐新手从 DeepSeek 或 Gemini（有免费额度）开始。',
@@ -944,6 +999,8 @@
         hero_desc: 'After a simple install, Dazee lives right on your computer. It can see your screen, manage files, create content, analyze data, and set reminders. Just tell it what you need in natural language — it gets things done!',
         hero_github: 'View on GitHub',
         hero_note: 'Fully open-source — join us and contribute!',
+        community_seed: 'Seed Users:',
+        community_dev: 'Developers:',
         features_title: 'Five Core Advantages',
         features_subtitle: 'Easy to start, efficient to use, worry-free',
         f1_title: 'One-Click Install',
@@ -964,7 +1021,8 @@
         steps_title: 'Quick Start',
         steps_subtitle: 'Get started in 3 steps — ridiculously simple',
         s1_title: 'Download & Install',
-        s1_line1: 'Windows: Click <a class="download-link" href="https://github.com/malue-ai/dazee-small" target="_blank" rel="noopener">Download</a> and run.',
+        s1_line1: 'Windows: Click <a class="download-link" href="https://github.com/malue-ai/dazee-small/releases/latest/download/ZenFlux.Agent_0.1.0_x64-setup.exe" target="_blank" rel="noopener">Download</a> and run.',
+        s1_tip: '⚠️ If you see "Windows protected your PC", click <strong>More info</strong> → <strong>Run anyway</strong>.',
         s1_line2: 'macOS: Enter the following command in Terminal:',
         s2_title: 'Configure Model',
         s2_desc: 'Enter your AI model API Key in the settings page. Beginners should start with DeepSeek or Gemini (free quota available).',

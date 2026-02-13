@@ -68,13 +68,7 @@ const routes = [
     meta: { layout: 'none' }
   },
 
-  // ==================== 引导页（首次使用） ====================
-  {
-    path: '/onboarding',
-    name: 'onboarding',
-    component: () => import('@/views/onboarding/OnboardingView.vue'),
-    meta: { layout: 'none' }
-  }
+  // 引导教程由 GuideOverlay + guideStore 在 ChatView 中自动触发，无需独立路由
 ]
 
 const router = createRouter({

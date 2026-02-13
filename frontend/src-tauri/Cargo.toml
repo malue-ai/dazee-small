@@ -1,6 +1,6 @@
 [package]
 name = "zenflux-agent"
-version = "0.7.5"
+version = "0.1.0"
 description = "ZenFlux Agent - AI-powered local execution client"
 authors = ["ZenFlux Team"]
 edition = "2021"

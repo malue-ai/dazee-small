@@ -315,13 +315,15 @@ onMounted(() => {
 })
 
 watch(() => guideStore.currentStep, (step) => {
-  if (step === 1 && settingsBtnRef.value) {
-    guideStore.setTarget(settingsBtnRef.value)
-  } else if (step === 6 && createProjectBtnRef.value) {
-    guideStore.setTarget(createProjectBtnRef.value)
-  } else if (step === 11) {
-    setupGuideStep11()
-  }
+  nextTick(() => {
+    if (step === 1 && settingsBtnRef.value) {
+      guideStore.setTarget(settingsBtnRef.value)
+    } else if (step === 6 && createProjectBtnRef.value) {
+      guideStore.setTarget(createProjectBtnRef.value)
+    } else if (step === 11) {
+      setupGuideStep11()
+    }
+  })
 })
 
 // 监听 agents 列表变化：步骤 11 时 Agent 列表可能异步加载完成，
