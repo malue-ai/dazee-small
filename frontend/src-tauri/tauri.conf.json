@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ZenFlux Agent",
-  "version": "0.7.5",
+  "version": "0.1.0",
   "identifier": "com.zenflux.agent",
   "build": {
     "beforeBuildCommand": "npm run build",
@@ -77,7 +77,10 @@
         "headerImage": null,
         "sidebarImage": null,
         "installMode": "currentUser",
-        "languages": ["SimpChinese", "English"],
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
         "displayLanguageSelector": false
       }
     }
