@@ -1,13 +1,13 @@
 # ============================================================
-# ZenFlux Agent - Multi-stage Docker Build
+# xiaodazi - Multi-stage Docker Build
 # ============================================================
 #
 # Stage 1: Build frontend (Vue 3 + Vite)
 # Stage 2: Run backend (FastAPI + uvicorn) + serve frontend via Nginx
 #
 # Usage:
-#   docker build -t zenflux-agent .
-#   docker run -p 8000:8000 --env-file .env zenflux-agent
+#   docker build -t xiaodazi .
+#   docker run -p 8000:8000 --env-file .env xiaodazi
 #
 # ============================================================
 
@@ -59,7 +59,7 @@ RUN mkdir -p /app/data
 
 # ==================== Environment ====================
 # Data persistence
-ENV ZENFLUX_DATA_DIR=/app/data
+ENV XIAODAZI_DATA_DIR=/app/data
 
 # Default instance
 ENV AGENT_INSTANCE=xiaodazi

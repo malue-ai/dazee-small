@@ -16,7 +16,7 @@ fn debug_log(msg: &str) {
     eprintln!("{}", msg);
     if let Ok(data_dir) = std::env::var("HOME") {
         let log_path = format!(
-            "{}/Library/Application Support/com.zenflux.agent/sidecar-debug.log",
+            "{}/Library/Application Support/com.xiaodazi.app/sidecar-debug.log",
             data_dir
         );
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -655,7 +655,7 @@ fn main() {
 
                 let sidecar_result = app.handle()
                     .shell()
-                    .sidecar("zenflux-backend")
+                    .sidecar("xiaodazi-backend")
                     .map(|cmd| {
                         cmd.args([
                             "--port",
@@ -821,7 +821,7 @@ fn main() {
                 .icon(tauri::include_image!("./icons/32x32.png"))
                 .icon_as_template(true)
                 .menu(&tray_menu)
-                .tooltip("ZenFlux Agent")
+                .tooltip("xiaodazi")
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {

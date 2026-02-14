@@ -69,11 +69,11 @@ onUnmounted(() => {
       <div class="flex flex-col items-center gap-5 splash-enter">
         <!-- Logo Mark -->
         <div class="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
-          <span class="text-2xl font-bold text-white tracking-tight">Z</span>
+          <span class="text-2xl font-bold text-white tracking-tight">D</span>
         </div>
         <!-- Brand Name -->
         <span class="text-lg font-semibold text-foreground tracking-wide">
-          ZenFlux
+          xiaodazi
         </span>
         <!-- 状态文字 -->
         <span class="text-xs text-muted-foreground mt-1">

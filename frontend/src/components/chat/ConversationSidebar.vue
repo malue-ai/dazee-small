@@ -7,7 +7,7 @@
     <div class="h-14 flex items-center justify-between px-4 pt-2">
       <div class="flex items-center gap-2 font-semibold text-foreground" v-if="!collapsed">
         <Sparkles class="w-5 h-5 text-primary fill-primary/20" />
-        <span class="tracking-tight">ZenFlux</span>
+        <span class="tracking-tight">xiaodazi</span>
       </div>
       <button 
         @click="emit('toggle-collapse')" 

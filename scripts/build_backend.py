@@ -3,7 +3,7 @@ PyInstaller 后端构建脚本（onedir 模式）
 
 将 Python FastAPI 后端打包为目录结构，
 并将产物复制到 frontend/src-tauri/binaries/ 目录：
-  - 主可执行文件 → binaries/zenflux-backend-{target-triple}
+  - 主可执行文件 → binaries/xiaodazi-backend-{target-triple}
   - 依赖目录    → binaries/_internal/
 
 Tauri 构建后需要 build_app.sh 将 _internal/ 复制到
@@ -23,7 +23,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 BINARIES_DIR = PROJECT_ROOT / "frontend" / "src-tauri" / "binaries"
-SPEC_FILE = PROJECT_ROOT / "zenflux-backend.spec"
+SPEC_FILE = PROJECT_ROOT / "xiaodazi-backend.spec"
 
 
 def get_target_triple() -> str:
@@ -55,7 +55,7 @@ def get_binary_name() -> str:
     """获取带平台后缀的二进制文件名"""
     triple = get_target_triple()
     ext = ".exe" if platform.system().lower() == "windows" else ""
-    return f"zenflux-backend-{triple}{ext}"
+    return f"xiaodazi-backend-{triple}{ext}"
 
 
 def clean_build() -> None:
@@ -75,13 +75,13 @@ def build() -> Path:
     执行 PyInstaller 构建（onedir 模式）
 
     产物:
-        dist/zenflux-backend/
-          zenflux-backend        # 主可执行文件
+        dist/xiaodazi-backend/
+          xiaodazi-backend       # 主可执行文件
           _internal/             # 所有依赖
 
     复制到:
         frontend/src-tauri/binaries/
-          zenflux-backend-{target-triple}   # sidecar 主程序
+          xiaodazi-backend-{target-triple}   # sidecar 主程序
           _internal/                        # 依赖目录（build_app.sh 后续处理）
 
     Returns:
@@ -114,14 +114,14 @@ def build() -> Path:
         print("构建失败")
         sys.exit(1)
 
-    # onedir 模式产物：目录 dist/zenflux-backend/
-    dist_dir = PROJECT_ROOT / "dist" / "zenflux-backend"
+    # onedir 模式产物：目录 dist/xiaodazi-backend/
+    dist_dir = PROJECT_ROOT / "dist" / "xiaodazi-backend"
     if not dist_dir.is_dir():
         print(f"错误: 构建产物目录不存在: {dist_dir}")
         sys.exit(1)
 
     # 找到主可执行文件
-    exe_name = "zenflux-backend"
+    exe_name = "xiaodazi-backend"
     if platform.system().lower() == "windows":
         exe_name += ".exe"
     source_exe = dist_dir / exe_name
@@ -196,7 +196,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("ZenFlux Backend Builder (onedir)")
+    print("xiaodazi Backend Builder (onedir)")
     print("=" * 60)
 
     if args.clean:

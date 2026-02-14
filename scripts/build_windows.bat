@@ -1,9 +1,9 @@
 @echo off
-title ZenFlux Agent - Windows Build
+title xiaodazi - Windows Build
 
 echo.
 echo ============================================================
-echo   ZenFlux Agent - Windows One-Click Build
+echo   xiaodazi - Windows One-Click Build
 echo ============================================================
 echo.
 echo   This script will:

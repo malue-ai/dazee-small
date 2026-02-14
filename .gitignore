@@ -70,7 +70,7 @@ instances/*_backup/.env
 frontend/src-tauri/gen/
 
 frontend/src-tauri/binaries/_internal/
-frontend/src-tauri/binaries/zenflux-backend-*
+frontend/src-tauri/binaries/xiaodazi-backend-*
 
 # Project specific
 workspace_*/
