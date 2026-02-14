@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "ZenFlux Agent",
+  "productName": "xiaodazi",
   "version": "0.1.0",
-  "identifier": "com.zenflux.agent",
+  "identifier": "com.xiaodazi.app",
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "ZenFlux Agent",
+        "title": "xiaodazi",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -33,7 +33,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/YOUR_ORG/zenflux-agent/releases/latest/download/latest.json"
+        "https://github.com/YOUR_ORG/xiaodazi/releases/latest/download/latest.json"
       ],
       "pubkey": ""
     }
@@ -41,9 +41,9 @@
   "bundle": {
     "active": true,
     "category": "DeveloperTool",
-    "copyright": "© 2024 ZenFlux",
+    "copyright": "© 2024 xiaodazi",
     "externalBin": [
-      "binaries/zenflux-backend"
+      "binaries/xiaodazi-backend"
     ],
     "resources": {
       "binaries/_internal": "_internal"
@@ -55,8 +55,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "longDescription": "ZenFlux Agent - AI-powered desktop assistant with local execution capabilities.",
-    "shortDescription": "ZenFlux Agent Desktop",
+    "longDescription": "xiaodazi - AI-powered desktop assistant with local execution capabilities.",
+    "shortDescription": "xiaodazi Desktop",
     "targets": "all",
     "macOS": {
       "entitlements": "entitlements.plist",

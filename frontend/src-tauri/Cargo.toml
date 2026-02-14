@@ -1,8 +1,8 @@
 [package]
-name = "zenflux-agent"
+name = "xiaodazi"
 version = "0.1.0"
-description = "ZenFlux Agent - AI-powered local execution client"
-authors = ["ZenFlux Team"]
+description = "xiaodazi - AI-powered local execution client"
+authors = ["xiaodazi Team"]
 edition = "2021"
 
 [build-dependencies]

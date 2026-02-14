@@ -1,5 +1,5 @@
 # ============================================================
-# ZenFlux Agent - Docker Compose (ComputeNest 部署)
+# xiaodazi - Docker Compose (ComputeNest 部署)
 # ============================================================
 #
 # 使用方式：
@@ -15,7 +15,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: zenflux-backend
+    container_name: xiaodazi-backend
     restart: unless-stopped
     environment:
       # LLM API Keys（从 .env 注入）
@@ -42,8 +42,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ALLOWED_ORIGINS=*
     volumes:
-      - zenflux-data:/app/data
-      - zenflux-workspace:/app/workspace
+      - xiaodazi-data:/app/data
+      - xiaodazi-workspace:/app/workspace
     expose:
       - "8000"
     healthcheck:
@@ -58,7 +58,7 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend.Dockerfile
-    container_name: zenflux-frontend
+    container_name: xiaodazi-frontend
     restart: unless-stopped
     ports:
       - "${APP_PORT:-80}:80"
@@ -67,7 +67,7 @@ services:
         condition: service_healthy
 
 volumes:
-  zenflux-data:
+  xiaodazi-data:
     driver: local
-  zenflux-workspace:
+  xiaodazi-workspace:
     driver: local

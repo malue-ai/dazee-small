@@ -1,5 +1,5 @@
 """
-Zenflux Agent - FastAPI 服务
+xiaodazi - FastAPI 服务
 基于 Claude 的智能体 Web API
 Build: 2026-01-16 v2
 """
@@ -70,7 +70,7 @@ from infra.local_store import close_all_workspaces
 
 # ==================== 常量定义 ====================
 
-APP_NAME = "Zenflux Agent API"
+APP_NAME = "xiaodazi API"
 APP_DESCRIPTION = "基于 Claude Sonnet 4.5 的智能体框架"
 
 
@@ -388,7 +388,7 @@ async def _stop_gateway(manager) -> None:
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # ===== 启动阶段 =====
-    print("🚀 Zenflux Agent API 启动中...")
+    print("🚀 xiaodazi API 启动中...")
     
     # 打包模式：首次启动时将 bundle 内的种子实例复制到用户数据目录
     from utils.app_paths import ensure_instances_initialized, is_frozen
@@ -421,7 +421,7 @@ async def lifespan(app: FastAPI):
     await _stop_scheduler(scheduler)
     await close_all_workspaces()
     
-    print("👋 Zenflux Agent API 已关闭")
+    print("👋 xiaodazi API 已关闭")
 
 
 # ==================== FastAPI 应用 ====================
@@ -511,7 +511,7 @@ async def root() -> Dict[str, Any]:
             "models": "/api/v1/models",
             "chat_ws": "ws://host/api/v1/ws/chat"
         },
-        "github": "https://github.com/your-repo/zenflux-agent"
+        "github": "https://github.com/your-repo/xiaodazi"
     }
     
     return response

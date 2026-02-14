@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# ZenFlux Agent 桌面应用一键构建脚本
+# xiaodazi 桌面应用一键构建脚本
 #
 # 构建流程:
 #   1. 检查依赖
@@ -86,7 +86,7 @@ if [ "$CLEAN" = true ]; then
   rm -rf "$PROJECT_ROOT/build" "$PROJECT_ROOT/dist"
   rm -rf "$FRONTEND_DIR/dist"
   rm -rf "$FRONTEND_DIR/src-tauri/target"
-  rm -rf "$FRONTEND_DIR/src-tauri/binaries/zenflux-backend-*"
+  rm -rf "$FRONTEND_DIR/src-tauri/binaries/xiaodazi-backend-*"
   rm -rf "$FRONTEND_DIR/src-tauri/binaries/_internal"
   info "清理完成"
 fi
@@ -102,7 +102,7 @@ else
   info "Step 1/3: 跳过 Python 后端构建"
   
   # 检查 sidecar 二进制是否存在
-  BINARY_COUNT=$(ls "$FRONTEND_DIR/src-tauri/binaries/zenflux-backend-"* 2>/dev/null | wc -l)
+  BINARY_COUNT=$(ls "$FRONTEND_DIR/src-tauri/binaries/xiaodazi-backend-"* 2>/dev/null | wc -l)
   if [ "$BINARY_COUNT" -eq 0 ]; then
     warn "binaries/ 目录中没有 sidecar 二进制文件"
     warn "如果要构建完整应用，请去掉 --skip-backend 参数"
@@ -216,8 +216,8 @@ if [ "$(uname)" = "Darwin" ]; then
   fi
   info "已签名 $SIGN_COUNT 个动态库"
 
-  # 3d. 签名 sidecar 主程序（zenflux-backend）
-  SIDECAR_PATH=$(find "$MACOS_DIR" -maxdepth 1 -name "zenflux-backend*" -type f | head -1)
+  # 3d. 签名 sidecar 主程序（xiaodazi-backend）
+  SIDECAR_PATH=$(find "$MACOS_DIR" -maxdepth 1 -name "xiaodazi-backend*" -type f | head -1)
   if [ -n "$SIDECAR_PATH" ]; then
     info "签名 sidecar: $(basename "$SIDECAR_PATH")"
     if [ -f "$ENTITLEMENTS" ]; then
@@ -255,8 +255,8 @@ if [ "$(uname)" = "Darwin" ]; then
   DMG_FILENAME="$(basename "$APP_PATH" .app)_${VERSION}_${ARCH}.dmg"
   DMG_PATH="$DMG_DIR/$DMG_FILENAME"
   VOL_NAME=$(basename "$APP_PATH" .app)
-  TMP_DMG="/tmp/zenflux_dmg_tmp.dmg"
-  TMP_MOUNT="/tmp/zenflux_dmg_mount"
+  TMP_DMG="/tmp/xiaodazi_dmg_tmp.dmg"
+  TMP_MOUNT="/tmp/xiaodazi_dmg_mount"
 
   # 确保输出目录存在
   mkdir -p "$DMG_DIR"

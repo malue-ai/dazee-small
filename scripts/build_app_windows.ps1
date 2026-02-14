@@ -391,7 +391,7 @@ if ($Clean) {
     ) | ForEach-Object {
         if (Test-Path $_) { Remove-Item $_ -Recurse -Force; Write-Host "  cleaned: $_" }
     }
-    Get-ChildItem (Join-Path $BinariesDir "zenflux-backend-*") -ErrorAction SilentlyContinue | Remove-Item -Force
+    Get-ChildItem (Join-Path $BinariesDir "xiaodazi-backend-*") -ErrorAction SilentlyContinue | Remove-Item -Force
     $intDir = Join-Path $BinariesDir "_internal"
     if (Test-Path $intDir) { Remove-Item $intDir -Recurse -Force }
     Info "Clean done"
@@ -408,7 +408,7 @@ if (-not $SkipBackend) {
     Info "Backend build done"
 } else {
     Info "Step 1/3: Skipped backend build"
-    $sidecar = Join-Path $BinariesDir "zenflux-backend-x86_64-pc-windows-msvc.exe"
+    $sidecar = Join-Path $BinariesDir "xiaodazi-backend-x86_64-pc-windows-msvc.exe"
     if (-not (Test-Path $sidecar)) { Warn "No sidecar binary found in binaries/" }
 }
 

@@ -2,9 +2,9 @@
 """
 PyInstaller 打包配置（onedir 模式）
 
-将 ZenFlux Agent FastAPI 后端打包为目录结构：
-  dist/zenflux-backend/
-    zenflux-backend        # 主可执行文件
+将 xiaodazi FastAPI 后端打包为目录结构：
+  dist/xiaodazi-backend/
+    xiaodazi-backend       # 主可执行文件
     _internal/             # 所有依赖（.so/.dylib/数据文件）
 
 使用 onedir 而非 onefile 的原因：
@@ -12,7 +12,7 @@ PyInstaller 打包配置（onedir 模式）
   解压到 /tmp 的动态库。onedir 模式允许在构建阶段对所有
   文件进行代码签名，从而通过 Spotlight/Finder 启动时的安全检查。
 
-执行: pyinstaller zenflux-backend.spec --noconfirm
+执行: pyinstaller xiaodazi-backend.spec --noconfirm
 """
 
 import sys
@@ -284,7 +284,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='zenflux-backend',
+    name='xiaodazi-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -299,7 +299,7 @@ exe = EXE(
     entitlements_file=None,
 )
 
-# COLLECT 将所有依赖文件收集到 dist/zenflux-backend/ 目录
+# COLLECT 将所有依赖文件收集到 dist/xiaodazi-backend/ 目录
 coll = COLLECT(
     exe,
     a.binaries,
@@ -308,5 +308,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='zenflux-backend',
+    name='xiaodazi-backend',
 )

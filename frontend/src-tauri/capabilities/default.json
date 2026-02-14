@@ -13,7 +13,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/zenflux-backend",
+          "name": "binaries/xiaodazi-backend",
           "sidecar": true,
           "args": true
         }
@@ -23,7 +23,7 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/zenflux-backend",
+          "name": "binaries/xiaodazi-backend",
           "sidecar": true,
           "args": true
         }

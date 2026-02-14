@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# ZenFlux Agent 全自动构建脚本（零依赖启动）
+# xiaodazi 全自动构建脚本（零依赖启动）
 #
 # 与 build_app.sh 的区别：
 #   build_app.sh     — 假设环境已就绪，缺依赖直接报错退出
@@ -506,7 +506,7 @@ if [ "$CLEAN" = true ]; then
   rm -rf "$PROJECT_ROOT/build" "$PROJECT_ROOT/dist"
   rm -rf "$FRONTEND_DIR/dist"
   rm -rf "$FRONTEND_DIR/src-tauri/target"
-  rm -rf "$FRONTEND_DIR/src-tauri/binaries/zenflux-backend-*"
+  rm -rf "$FRONTEND_DIR/src-tauri/binaries/xiaodazi-backend-*"
   rm -rf "$FRONTEND_DIR/src-tauri/binaries/_internal"
   info "清理完成"
 fi
@@ -604,7 +604,7 @@ build_for_arch() {
   else
     info "Step 1/3: 跳过 Python 后端构建 [$arch]"
 
-    BINARY_COUNT=$(ls "$FRONTEND_DIR/src-tauri/binaries/zenflux-backend-"* 2>/dev/null | wc -l)
+    BINARY_COUNT=$(ls "$FRONTEND_DIR/src-tauri/binaries/xiaodazi-backend-"* 2>/dev/null | wc -l)
     if [ "$BINARY_COUNT" -eq 0 ]; then
       warn "binaries/ 目录中没有 sidecar 二进制文件"
       warn "如果要构建完整应用，请去掉 --skip-backend 参数"
@@ -713,7 +713,7 @@ build_for_arch() {
   info "已签名 $sign_count 个动态库"
 
   # 3d. 签名 sidecar
-  local sidecar_path=$(find "$macos_dir" -maxdepth 1 -name "zenflux-backend*" -type f | head -1)
+  local sidecar_path=$(find "$macos_dir" -maxdepth 1 -name "xiaodazi-backend*" -type f | head -1)
   if [ -n "$sidecar_path" ]; then
     info "签名 sidecar: $(basename "$sidecar_path")"
     if [ -f "$entitlements" ]; then
@@ -746,8 +746,8 @@ build_for_arch() {
   local dmg_filename="$(basename "$app_path" .app)_${version}_${tauri_arch}.dmg"
   local dmg_path="$dmg_dir/$dmg_filename"
   local vol_name=$(basename "$app_path" .app)
-  local tmp_dmg="/tmp/zenflux_dmg_tmp_${arch}.dmg"
-  local tmp_mount="/tmp/zenflux_dmg_mount_${arch}"
+  local tmp_dmg="/tmp/xiaodazi_dmg_tmp_${arch}.dmg"
+  local tmp_mount="/tmp/xiaodazi_dmg_mount_${arch}"
 
   mkdir -p "$dmg_dir"
 

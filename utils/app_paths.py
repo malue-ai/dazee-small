@@ -11,9 +11,9 @@
 - user_data_dir: 可写数据（数据库、日志、用户配置）
   - 开发时 = 项目根目录
   - 打包后 = 平台标准用户数据目录
-    - macOS: ~/Library/Application Support/com.zenflux.agent/
-    - Windows: %APPDATA%/zenflux_agent/
-    - Linux: ~/.local/share/zenflux_agent/
+    - macOS: ~/Library/Application Support/com.xiaodazi.app/
+    - Windows: %APPDATA%/xiaodazi/
+    - Linux: ~/.local/share/xiaodazi/
 """
 
 import os
@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Optional
 
 # 应用标识
-APP_ID = "com.zenflux.agent"
-APP_NAME = "zenflux_agent"
+APP_ID = "com.xiaodazi.app"
+APP_NAME = "xiaodazi"
 
 # 命令行参数键（Tauri sidecar 传入）
 _CLI_DATA_DIR_KEY = "--data-dir"
@@ -89,7 +89,7 @@ def get_user_data_dir() -> Path:
         return _user_data_dir
 
     # 2. 环境变量
-    env_dir = os.getenv("ZENFLUX_DATA_DIR")
+    env_dir = os.getenv("XIAODAZI_DATA_DIR") or os.getenv("ZENFLUX_DATA_DIR")
     if env_dir:
         _user_data_dir = Path(env_dir)
         _user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,7 @@ def get_cli_port() -> int:
             return int(port_str)
         except ValueError:
             pass
-    return int(os.getenv("ZENFLUX_PORT", "18900"))
+    return int(os.getenv("XIAODAZI_PORT") or os.getenv("ZENFLUX_PORT", "18900"))
 
 
 # ==================== 全局共享路径 ====================
@@ -362,16 +362,16 @@ def _get_cli_arg(key: str) -> Optional[str]:
 def _get_platform_data_dir() -> Path:
     """获取平台标准用户数据目录"""
     if sys.platform == "darwin":
-        # macOS: ~/Library/Application Support/com.zenflux.agent/
+        # macOS: ~/Library/Application Support/com.xiaodazi.app/
         return Path.home() / "Library" / "Application Support" / APP_ID
     elif sys.platform == "win32":
-        # Windows: %APPDATA%/zenflux_agent/
+        # Windows: %APPDATA%/xiaodazi/
         appdata = os.getenv("APPDATA")
         if appdata:
             return Path(appdata) / APP_NAME
         return Path.home() / "AppData" / "Roaming" / APP_NAME
     else:
-        # Linux/其他: ~/.local/share/zenflux_agent/
+        # Linux/其他: ~/.local/share/xiaodazi/
         xdg_data = os.getenv("XDG_DATA_HOME")
         if xdg_data:
             return Path(xdg_data) / APP_NAME
