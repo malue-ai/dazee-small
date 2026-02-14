@@ -219,28 +219,40 @@ class InstanceMemoryManager:
                     f"采用 last-write-wins 策略覆盖旧记忆"
                 )
 
-        # Layer 1: 写入 MEMORY.md
+        # Layer 1: 写入 MEMORY.md（source of truth）
         section = _SECTION_MAP.get(category, "历史经验")
+        replace = category == "identity"
         if project_id:
             await self._file_layer.append_project_memory(
                 project_id, section, content
             )
+            fts_action = "appended"
+            fts_old = ""
         else:
-            await self._file_layer.append_to_section(section, content)
+            result = await self._file_layer.append_to_section(
+                section, content, replace_by_key=replace
+            )
+            fts_action = result.action
+            fts_old = result.old_content
 
-        # Layer 2: 更新 FTS5 索引
-        await self._fts5_index_entry(content, category)
+        # Layer 2: FTS5 CRUD based on MEMORY.md write result
+        if fts_action == "replaced" and fts_old:
+            await self._fts5_delete_by_content(fts_old)
+            await self._fts5_index_entry(content, category)
+        elif fts_action == "appended":
+            await self._fts5_index_entry(content, category)
+        # skipped: no FTS5 change needed
 
         # Layer 3: 写入 Mem0 向量存储
         mem0_ok = False
         if self._mem0_enabled:
             mem0_ok = await self._mem0_add(content, category)
 
-        # Log with layer status — "degraded" means Mem0 was expected but failed
+        # Log with layer status
         degraded = self._mem0_enabled and not mem0_ok
         logger.info(
             f"记忆已保存: [{category}] {content[:50]}... "
-            f"(fts5=ok, mem0={'ok' if mem0_ok else 'skip' if not self._mem0_enabled else 'FAIL'})"
+            f"(fts5={fts_action}, mem0={'ok' if mem0_ok else 'skip' if not self._mem0_enabled else 'FAIL'})"
         )
         if degraded:
             logger.warning(
@@ -276,22 +288,31 @@ class InstanceMemoryManager:
         if not valid:
             return
 
-        # Phase 1: Fast writes (L1 file + L2 FTS5) — sequential, ~1ms each
+        # Phase 1: Write to MEMORY.md (source of truth) + FTS5 CRUD
+        # Identity entries use replace-by-key; FTS5 is updated based
+        # on the write result (appended → insert, replaced → delete old + insert new).
         ok = 0
         for mem in valid:
             content = mem["content"]
             category = mem["category"]
             section = _SECTION_MAP.get(category, "历史经验")
+            replace = category == "identity"
             try:
-                await self._file_layer.append_to_section(section, content)
-                await self._fts5_index_entry(content, category)
+                result = await self._file_layer.append_to_section(
+                    section, content, replace_by_key=replace
+                )
+                # FTS5 CRUD based on MEMORY.md write result
+                if result.action == "replaced" and result.old_content:
+                    await self._fts5_delete_by_content(result.old_content)
+                    await self._fts5_index_entry(content, category)
+                elif result.action == "appended":
+                    await self._fts5_index_entry(content, category)
+                # skipped: no FTS5 change
                 ok += 1
             except Exception as e:
                 logger.warning(f"L1/L2 写入失败（跳过）: {e}")
 
-        # Phase 2: Mem0 batch write (optional, best-effort)
-        # Combine all fragments into one message for a single Mem0 add() call.
-        # This turns 16× (embedding + LLM + DB) into 1× — ~5s instead of ~80s.
+        # Phase 3: Mem0 batch write (optional, best-effort)
         mem0_ok = False
         if self._mem0_enabled and valid:
             try:
@@ -377,11 +398,13 @@ class InstanceMemoryManager:
 
     async def _sync_markdown_to_fts5(self, md_content: str) -> None:
         """
-        Detect if MEMORY.md was externally edited and re-index to FTS5.
+        Opportunistic sync: re-index MEMORY.md to FTS5 when content changes.
 
-        Uses a simple content hash to detect changes.
-        Only re-indexes when the hash differs from last sync.
-        Uses a SINGLE session for all writes (pool_size=1 safe).
+        Handles the case where users manually edit MEMORY.md outside the app.
+        Normal writes go through remember/remember_batch which do targeted
+        FTS5 CRUD; this method is only a fallback for external edits.
+
+        Uses content hash to detect changes — skips if unchanged.
         """
         if not md_content or not self._enabled:
             return
@@ -587,6 +610,28 @@ class InstanceMemoryManager:
                 await session.commit()
         except Exception as e:
             logger.warning(f"FTS5 索引写入失败: {e}")
+
+    async def _fts5_delete_by_content(self, content: str) -> None:
+        """Delete FTS5 entry by exact content match (for CRUD Update)."""
+        await self._ensure_fts()
+        if not self._fts_initialized:
+            return
+
+        try:
+            from sqlalchemy import text as sa_text
+
+            async with await self._get_fts_session() as session:
+                await session.execute(
+                    sa_text(
+                        f"DELETE FROM {self._fts_config.table_name} "
+                        f"WHERE {self._fts_config.content_column} = :content"
+                    ),
+                    {"content": content},
+                )
+                await session.commit()
+            logger.debug(f"FTS5 删除: {content[:50]}...")
+        except Exception as e:
+            logger.warning(f"FTS5 删除失败（非致命）: {e}")
 
     async def _file_layer_search(
         self, query: str, limit: int

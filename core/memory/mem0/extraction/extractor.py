@@ -149,23 +149,41 @@ FRAGMENT_EXTRACTION_PROMPT = """你是 Dazee 智能助理的记忆分析系统�
 
 判断标准：**下次新对话开始时，这条信息是否仍然有用？**
 
+### identity 类格式要求（严格）
+
+identity 类条目**必须**使用 `KEY: VALUE` 格式，KEY 固定为以下之一：
+- 称呼、姓名、职业、公司、所在地
+
+**禁止**输出自由文本描述（如"用户坚持被称呼为XX"），只输出结构化的 KEY: VALUE。
+**禁止**存储原始用户指令（如"以后你要叫我XX"），提炼为 KEY: VALUE 事实。
+**禁止**将 AI 助手的属性当成用户属性（如助手的昵称不是用户的昵称）。
+
 <example>
 对话: "叫我良哥，帮我分析这份销售数据"
 long_term_memories:
-  ✅ {{"content": "称呼: 良哥", "category": "identity"}} → 下次还要叫良哥
+  ✅ {{"content": "称呼: 良哥", "category": "identity"}}
+  ❌ {{"content": "用户坚持被称呼为良哥", "category": "identity"}} → 禁止自由文本
+  ❌ {{"content": "叫我良哥", "category": "identity"}} → 禁止存储原始指令
   ❌ "正在分析销售数据" → 任务结束就没用了
 </example>
 
 <example>
 对话: "我喜欢毒舌但有干货的风格，重新写"
 long_term_memories:
-  ✅ {{"content": "我喜欢毒舌但有干货的风格", "category": "preference"}} → 下次写作仍适用
+  ✅ {{"content": "我喜欢毒舌但有干货的风格", "category": "preference"}}
   ❌ "重新写文章" → 当前操作指令，不是长期特征
 </example>
 
 <example>
 对话: "帮我把这个 CSV 转成 Excel，加个柱状图"
 long_term_memories: [] → 纯任务操作，无持久用户特征
+</example>
+
+<example>
+对话: [user] "你可以叫我小明" [assistant] "好的小明！叫我小搭子就行"
+long_term_memories:
+  ✅ {{"content": "称呼: 小明", "category": "identity"}} → 用户的称呼
+  ❌ {{"content": "昵称: 小搭子", "category": "identity"}} → 这是 AI 助手的名字，不是用户的
 </example>
 
 category 可选值：identity（身份）、preference（偏好）、style（风格）、fact（关于用户的事实）、tool（常用工具）
