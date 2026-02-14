@@ -6,7 +6,7 @@ Triggered: after every chat response (fire-and-forget, never blocks user)
 Strategy: session-level batch extraction
 - Per-message: zero cost, no LLM calls
 - Per-session: one LLM call extracts all 10-dimension hints from full conversation
-- Quick pre-filter: skip trivial conversations (< 50 chars or single short turn)
+- Quick pre-filter: skip trivial conversations (< 30 total chars)
 
 Concurrency: global lock ensures only ONE flush runs at a time.
 If a previous flush is still running, the new one is skipped entirely.
@@ -36,8 +36,7 @@ _flush_lock = asyncio.Lock()
 
 # Quick pre-filter thresholds (format validation, not semantic judgment)
 # Chinese is ~3x denser than English: 30 Chinese chars ≈ 90 English words
-_MIN_TOTAL_CHARS = 30  # Skip conversations with < 30 chars total
-_MIN_SINGLE_TURN_CHARS = 15  # Skip single-turn with user msg < 15 chars
+_MIN_TOTAL_CHARS = 30  # Skip conversations with < 30 chars total (user + assistant)
 
 
 def _should_skip(messages: List[Dict]) -> str:
@@ -45,8 +44,12 @@ def _should_skip(messages: List[Dict]) -> str:
     Quick pre-filter: skip trivial conversations that won't yield
     useful memory fragments. Returns skip reason or empty string.
 
-    These are format/length checks (allowed by LLM-First rules),
-    not semantic judgment.
+    Only checks TOTAL conversation length (user + assistant combined).
+    Does NOT filter by user message length alone — short user messages
+    (e.g., setting a nickname or asking about identity) can carry
+    high-value info that must be persisted to MEMORY.md.
+    The LLM extractor handles "nothing useful" cases by returning
+    empty long_term_memories.
     """
     if not messages:
         return "no messages"
@@ -58,9 +61,6 @@ def _should_skip(messages: List[Dict]) -> str:
     total_chars = sum(len(m.get("content", "")) for m in messages)
     if total_chars < _MIN_TOTAL_CHARS:
         return f"too short ({total_chars} chars < {_MIN_TOTAL_CHARS})"
-
-    if len(user_msgs) == 1 and len(user_msgs[0].get("content", "")) < _MIN_SINGLE_TURN_CHARS:
-        return f"single short turn ({len(user_msgs[0].get('content', ''))} chars)"
 
     return ""
 

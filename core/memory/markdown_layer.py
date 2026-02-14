@@ -70,6 +70,14 @@ class MemoryEntry:
     source: str = "MEMORY.md"  # 来源文件
 
 
+@dataclass
+class SectionWriteResult:
+    """Result of append_to_section, enabling callers to do CRUD on indexes."""
+
+    action: str  # "appended" | "replaced" | "skipped"
+    old_content: str = ""  # replaced: the old entry content (for index delete)
+
+
 class MarkdownMemoryLayer:
     """
     Layer 1: Markdown 文件层
@@ -127,21 +135,25 @@ class MarkdownMemoryLayer:
         logger.debug("MEMORY.md 已更新")
 
     async def append_to_section(
-        self, section: str, content: str
-    ) -> bool:
+        self, section: str, content: str, replace_by_key: bool = False
+    ) -> SectionWriteResult:
         """
-        向 MEMORY.md 的指定段落追加内容（写入时精确去重）
+        向 MEMORY.md 的指定段落追加或替换内容。
 
         通过解析 Markdown 标题定位插入位置。
         如果段落不存在，在文件末尾新建段落。
         如果完全相同的内容已存在于该段落中，跳过写入。
 
         Args:
-            section: 段落标题（如 "偏好"、"偏好/写作风格"、"历史经验/成功案例"）
-            content: 要追加的内容（如 "- 喜欢简洁风格"）
+            section: 段落标题（如 "偏好"、"偏好/写作风格"）
+            content: 要追加的内容
+            replace_by_key: If True, "KEY: VALUE" entries replace existing
+                entries with the same KEY prefix (last-write-wins).
+                Format-level dedup rule: LLM decides what to write,
+                storage layer ensures no duplicate keys within a section.
 
         Returns:
-            True if written, False if skipped (duplicate)
+            SectionWriteResult with action and old_content (for CRUD on indexes).
         """
         full_text = await self.read_global_memory()
         lines = full_text.split("\n")
@@ -166,7 +178,43 @@ class MarkdownMemoryLayer:
                         logger.debug(
                             f"去重跳过 [{section}]: {content[:50]}..."
                         )
-                        return False
+                        return SectionWriteResult(action="skipped")
+
+            # Replace-by-key: for "KEY: VALUE" entries, replace existing
+            # entries with the same key prefix (last-write-wins).
+            if replace_by_key and section_start is not None:
+                entry_text = entry_stripped.lstrip("- ").strip()
+                if ":" in entry_text or "：" in entry_text:
+                    sep = ":" if ":" in entry_text else "："
+                    new_key = entry_text.split(sep)[0].strip()
+                    for i in range(insert_idx - 1, section_start - 1, -1):
+                        existing = lines[i].strip().lstrip("- ").strip()
+                        if ":" in existing or "：" in existing:
+                            esep = ":" if ":" in existing else "："
+                            existing_key = existing.split(esep)[0].strip()
+                            if existing_key == new_key:
+                                old_content = existing
+                                lines[i] = entry
+                                logger.info(
+                                    f"Identity 覆盖 [{section}]: "
+                                    f"'{old_content}' → "
+                                    f"'{entry_stripped.lstrip('- ').strip()}'"
+                                )
+                                new_text = "\n".join(lines)
+                                await self.write_global_memory(new_text)
+                                return SectionWriteResult(
+                                    action="replaced",
+                                    old_content=old_content,
+                                )
+
+            # Remove template placeholders in this section before inserting
+            if section_start is not None:
+                for i in range(insert_idx - 1, section_start - 1, -1):
+                    stripped = lines[i].strip().lstrip("- ").strip()
+                    if stripped.startswith("（") and stripped.endswith("）"):
+                        lines.pop(i)
+                        if insert_idx > i:
+                            insert_idx -= 1
 
             lines.insert(insert_idx, entry)
         else:
@@ -180,7 +228,7 @@ class MarkdownMemoryLayer:
         new_text = "\n".join(lines)
         await self.write_global_memory(new_text)
         logger.debug(f"已追加到段落 [{section}]: {content[:50]}...")
-        return True
+        return SectionWriteResult(action="appended")
 
     # ==================== 每日日志 ====================
 
