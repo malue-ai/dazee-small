@@ -479,12 +479,14 @@
                 </p>
                 <p class="text-xs text-muted-foreground/50 mt-1">ZIP 文件，必须包含 SKILL.md</p>
               </div>
+              <!-- 不可用 display:none，macOS WebKit 会阻止 .click() -->
               <input
                 ref="fileInput"
                 type="file"
                 accept=".zip"
                 @change="handleFileSelect"
-                class="hidden"
+                class="absolute w-px h-px opacity-0 overflow-hidden pointer-events-none"
+                style="left: -9999px;"
               >
             </div>
           </div>

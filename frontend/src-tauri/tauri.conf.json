@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "xiaodazi",
-  "version": "0.1.0",
-  "identifier": "com.xiaodazi.app",
+  "version": "0.7.5",
+  "identifier": "com.zenflux.agent",
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",

@@ -48,7 +48,7 @@
                 :value="option" 
                 v-model="selectedValue"
                 name="hitl-option"
-                class="mr-4 accent-amber-500 w-5 h-5"
+                class="mr-4 accent-primary w-5 h-5"
               />
               <span class="text-base font-medium text-foreground flex items-center gap-2">
                 <template v-if="option === 'confirm'">
@@ -74,7 +74,7 @@
                 type="checkbox" 
                 :value="option" 
                 v-model="selectedValues"
-                class="mr-4 accent-amber-500 w-5 h-5 rounded"
+                class="mr-4 accent-primary w-5 h-5 rounded"
               />
               <span class="text-base font-medium text-foreground">{{ option }}</span>
             </label>
@@ -117,7 +117,7 @@
                     :value="option" 
                     v-model="formData[question.id]"
                     :name="`form-${question.id}`"
-                    class="mr-3 accent-amber-500"
+                    class="mr-3 accent-primary"
                   />
                   <span class="text-sm text-foreground">{{ option }}</span>
                 </label>
@@ -135,7 +135,7 @@
                     type="checkbox" 
                     :value="option" 
                     v-model="formData[question.id]"
-                    class="mr-3 accent-amber-500 rounded"
+                    class="mr-3 accent-primary rounded"
                   />
                   <span class="text-sm text-foreground">{{ option }}</span>
                 </label>
