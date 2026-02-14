@@ -113,14 +113,15 @@
         </div>
       </div>
 
-      <!-- 隐藏的文件上传 input -->
+      <!-- 隐藏的文件上传 input（不可用 display:none，macOS WebKit 会阻止 .click()） -->
       <input
         type="file"
         ref="fileInputRef"
         @change="handleFileSelect"
         multiple
         accept="image/*,.pdf,.txt,.md,.csv,.json"
-        style="display: none"
+        class="absolute w-px h-px opacity-0 overflow-hidden pointer-events-none"
+        style="left: -9999px;"
       />
     </div>
 
@@ -230,12 +231,13 @@
                 <Trash2 class="w-4 h-4" />
               </button>
             </div>
-            <!-- 隐藏的文件选择器 -->
+            <!-- 隐藏的文件选择器（不可用 display:none，macOS WebKit 会阻止 .click()） -->
             <input 
               ref="iconInputRef"
               type="file"
               accept="image/*"
-              class="hidden"
+              class="absolute w-px h-px opacity-0 overflow-hidden pointer-events-none"
+              style="left: -9999px;"
               @change="handleIconUpload"
             />
           </div>
