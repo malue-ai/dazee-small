@@ -1,22 +1,132 @@
+<p align="center">
+  <img src="docs/assets/logo.png" width="80" alt="xiaodazi logo" />
+</p>
+
+<h1 align="center">xiaodazi</h1>
+
+<p align="center">
+  <strong>Open-source AI agent that lives on your desktop.</strong><br/>
+  Local-first storage · 200+ plug-and-play skills · 7+ LLM providers · macOS & Windows
+</p>
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
+  <a href="https://github.com/malue-ai/dazee-small/stargazers"><img src="https://img.shields.io/github/stars/malue-ai/dazee-small?style=social" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
+  <a href="README_zh.md">中文</a> | English
+</p>
+
+<p align="center">
+  <img src="docs/assets/quick-start.jpg" width="720" alt="Get started in 3 steps" />
+</p>
 
 ---
 
-xiaodazi ("little buddy") is an open-source AI agent that **lives on your desktop**. It runs as a native Tauri application, keeps all data on your machine, and can operate your computer directly — managing files, automating apps, generating documents, and remembering your preferences across sessions.
+## What is xiaodazi?
 
-<!-- TODO: Add a 30-second demo GIF here showing intent understanding + skill loading + plan progress -->
-<!-- <p align="center"><img src="docs/assets/demo.gif" width="720" alt="demo" /></p> -->
+xiaodazi ("little buddy") is an open-source AI agent that **runs as a native desktop app** (Tauri). It keeps all data on your machine, operates your computer directly — managing files, automating apps, generating documents — and remembers your preferences across sessions.
 
-## Why xiaodazi?
+### Demo
 
-Most AI assistants are cloud-hosted chat interfaces. xiaodazi is different:
+<video src="docs/assets/demo.mp4" width="720" controls>
+  Your browser does not support the video tag. <a href="docs/assets/demo.mp4">Download the demo video</a>.
+</video>
+
+### Why xiaodazi?
+
+<p align="center">
+  <img src="docs/assets/core-advantages.jpg" width="720" alt="5 core advantages" />
+</p>
 
 | | Cloud AI Assistants | xiaodazi |
 |---|---|---|
 | **Data** | Stored on provider's servers | 100% local (SQLite, plain files) |
 | **Memory** | Forgets between sessions | Remembers preferences via editable `MEMORY.md` + semantic search |
-| **Skills** | Fixed capabilities | 150+ plug-and-play skills, add new ones by writing Markdown |
+| **Skills** | Fixed capabilities | 200+ plug-and-play skills, add new ones by writing Markdown |
 | **Models** | Locked to one provider | Switch between Claude, GPT, Qwen, DeepSeek, Gemini, GLM, or Ollama |
 | **Errors** | Fails silently or retries | Classifies errors, backtracks from bad approaches, degrades gracefully |
+
+---
+
+## Quick Start
+
+### Option A: One-click install (end users)
+
+**Windows** — Download the installer from [Releases](https://github.com/malue-ai/dazee-small/releases), double-click to run.
+
+**macOS** — Open Terminal and run:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/malue-ai/dazee-small/main/scripts/auto_build_app.sh)
+```
+
+Then configure an API key in the Settings page (DeepSeek or Gemini free tier recommended for beginners).
+
+### Option B: From source (developers)
+
+```bash
+git clone https://github.com/malue-ai/dazee-small.git
+cd dazee-small
+
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Create `config.yaml` in the project root (or use the Settings page after starting):
+
+```yaml
+api_keys:
+  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here   # Recommended
+  # OPENAI_API_KEY: sk-xxx
+  # DASHSCOPE_API_KEY: sk-xxx                      # Qwen
+  # GOOGLE_API_KEY: xxx                            # Gemini (free: 1500 req/day)
+```
+
+Start the backend:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Start the frontend:
+
+```bash
+cd frontend
+npm install && npm run dev
+# Open http://localhost:5174
+```
+
+<details>
+<summary><strong>Desktop app (Tauri) — requires Rust toolchain</strong></summary>
+
+```bash
+# Install Rust: https://rustup.rs/
+cd frontend
+npm run tauri:dev     # Development
+npm run tauri:build   # Production build
+```
+
+</details>
+
+<details>
+<summary><strong>Fully offline with Ollama</strong></summary>
+
+Install [Ollama](https://ollama.ai), then set in `config.yaml`:
+
+```yaml
+llm:
+  COT_AGENT_MODEL: ollama/llama3.1
+```
+
+No API key needed. All inference runs locally.
+
+</details>
+
+---
 
 ## Key Design Decisions
 
@@ -26,14 +136,11 @@ All semantic tasks — intent classification, skill selection, complexity infere
 
 **Why it matters:** When a user says *"Don't make a PPT, just give me the key points"*, a keyword system matches "PPT" and loads the wrong tools. xiaodazi's LLM-driven intent analysis correctly loads zero PPT skills.
 
-### Skills as Markdown — 150+ and growing
+### Skills as Markdown — 200+ and growing
 
-Each skill is a directory with a `SKILL.md` file. No Python code required for most skills — the LLM reads the instructions and uses built-in tools to execute them. Skills are classified on two axes:
+Each skill is a directory with a `SKILL.md` file. No Python code required for most skills — the LLM reads the instructions and uses built-in tools to execute them.
 
-- **OS compatibility**: common / macOS / Windows / Linux
-- **Dependency level**: builtin (zero-config) / lightweight (pip) / external (CLI) / cloud_api (API key)
-
-Despite 150+ skills, **zero are loaded by default**. Each request activates only the skill groups matching the user's intent (typically 0–15 out of 150+). A simple "hi" costs 0 skill tokens; a complex research task costs ~1,200.
+Despite 200+ skills, **zero are loaded by default**. Each request activates only the skill groups matching the user's intent (typically 0–15 out of 200+). A simple "hi" costs 0 skill tokens; a complex research task costs ~1,200.
 
 ### Local-First — Your data stays on your machine
 
@@ -45,7 +152,9 @@ Despite 150+ skills, **zero are loaded by default**. Each request activates only
 | User memory | `MEMORY.md` | Plain text, user-editable |
 | File attachments | Local filesystem | Instance-isolated |
 
-No cloud database, no external vector store, no third-party analytics. LLM inference uses cloud APIs by default (Claude, OpenAI, etc.), with full local model support via Ollama or LM Studio for completely offline operation.
+No cloud database, no external vector store, no third-party analytics. LLM inference uses cloud APIs by default, with full local model support via Ollama for completely offline operation.
+
+---
 
 ## Architecture Overview
 
@@ -62,99 +171,34 @@ No cloud database, no external vector store, no third-party analytics. LLM infer
 │    RVR-B Executor (React → Validate → Reflect → Backtrack)                   │
 │    Context Engineering (3-phase inject, KV-Cache 90%+ hit, scratchpad)       │
 │    Plan Manager (DAG tasks, real-time progress UI)                           │
-├──────────────────────────────────┬──────────────────────────────────────────┤
-│  Layer 4 — Capability            │  Layer 5 — Infrastructure                │
-│    150+ Skills (20 groups)       │    6 LLM Providers + Ollama               │
-│    Tool System (intent-pruned)   │    SQLite + FTS5 + sqlite-vec             │
-│    3-Layer Memory                │    Instance Isolation                     │
-│    Playbook Learning             │    3-Layer Evaluation                     │
-└──────────────────────────────────┴──────────────────────────────────────────┘
+├──────────────────────────────┬──────────────────────────────────────────────┤
+│  Layer 4 — Capability        │  Layer 5 — Infrastructure                    │
+│    200+ Skills (20 groups)   │    7 LLM Providers + Ollama                   │
+│    Tool System (intent-      │    SQLite + FTS5 + sqlite-vec                 │
+│      pruned)                 │    Instance Isolation                         │
+│    3-Layer Memory            │    3-Layer Evaluation                         │
+│    Playbook Learning         │                                               │
+└──────────────────────────────┴──────────────────────────────────────────────┘
 ```
 
 **Lifecycle of a request:** User message → Intent analysis (<200ms, cached) → Skill & tool selection → RVR-B execution loop (stream tokens, call tools, validate, backtrack if needed) → Memory extraction → Response complete.
 
-For a full walkthrough, see [Architecture Documentation](docs/architecture/README.md) (12 deep-dive modules).
-
-## Quick Start
-
-### 1. Clone and install
-
-```bash
-git clone https://github.com/aspect-build/xiaodazi.git   # Replace with actual repo URL
-cd xiaodazi
-
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Configure an LLM provider
-
-Create `config.yaml` in the project root (or use the Settings page after starting the frontend):
-
-```yaml
-api_keys:
-  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here   # Recommended
-  # OPENAI_API_KEY: sk-xxx                         # Or OpenAI
-  # DASHSCOPE_API_KEY: sk-xxx                      # Or Qwen
-  # GOOGLE_API_KEY: xxx                            # Or Gemini (free tier: 1500 req/day)
-```
-
-For fully offline use, install [Ollama](https://ollama.ai) and set:
-
-```yaml
-llm:
-  COT_AGENT_MODEL: ollama/llama3.1
-```
-
-### 3. Start
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Verify: `curl http://localhost:8000/health`
-
-### Frontend (optional)
-
-```bash
-cd frontend
-npm install && npm run dev
-# Open http://localhost:5174
-```
-
-### Desktop App (optional)
-
-Requires [Rust toolchain](https://rustup.rs/).
-
-```bash
-cd frontend
-npm run tauri:dev     # Development
-npm run tauri:build   # Production build
-```
-
-## What Makes xiaodazi Different
-
-### vs. Typical Agent Frameworks
+<details>
+<summary><strong>What makes xiaodazi different from typical agent frameworks?</strong></summary>
 
 | Capability | xiaodazi | Typical frameworks |
 |---|---|---|
 | **Intent analysis** | LLM semantic analysis per request (4-layer cache, <200ms). Adjusts skill loading, planning depth, and token budget per request. | Route by session or fixed config. Same resource allocation for every request. |
 | **Error recovery** | RVR-B loop: classify error → backtrack from wrong approaches → clean context pollution → degrade gracefully with partial results. | Retry + model failover. Solves infra failures, not strategy failures. |
-| **Context management** | Proactive: 3-phase injection, progressive history decay, scratchpad file exchange (100x compression), KV-Cache optimization (90%+ hit). | Reactive: truncate or summarize when context overflows. Quality drops in a sudden step. |
+| **Context management** | Proactive: 3-phase injection, progressive history decay, scratchpad file exchange (100x compression), KV-Cache optimization (90%+ hit). | Reactive: truncate or summarize when context overflows. |
 | **Skill loading** | 0 skills loaded by default. Intent-driven lazy allocation. Token cost scales with task complexity, not library size. | Load all capabilities upfront, or manual tool selection. |
 | **Planning** | Explicit DAG plan with UI progress widget and re-planning on failure. | Implicit chain-of-thought. No visibility, no recovery. |
 | **Evaluation** | 3-layer grading (code + LLM-as-Judge + human), 12-type failure classification, auto-regression. | External eval tools or manual testing. |
-| **Learning** | Playbook system: extract strategy → user confirms → apply to future tasks. Efficiency improves over time. | No built-in learning loop. |
-| **Configuration** | Write a `prompt.md` → framework auto-generates agent config + graded system prompts. | YAML/JSON config files, manual coordination. |
+| **Learning** | Playbook system: extract strategy → user confirms → apply to future tasks. | No built-in learning loop. |
 
-### vs. Cloud AI Assistants (ChatGPT, Claude.ai, etc.)
+</details>
 
-- **Privacy**: All data local. No conversations leave your machine (except LLM API calls, which you can eliminate with Ollama).
-- **Persistence**: Memory survives across sessions. The agent learns your preferences.
-- **Extensibility**: Add skills by writing Markdown. Add tools by implementing a Python class.
-- **Model freedom**: Not locked to one provider. Switch with one config change.
-- **Desktop integration**: Can manage files, automate apps, take screenshots — not just chat.
+---
 
 ## Tech Stack
 
@@ -171,6 +215,9 @@ npm run tauri:build   # Production build
 
 ## Project Structure
 
+<details>
+<summary><strong>Click to expand</strong></summary>
+
 ```
 xiaodazi/
 ├── frontend/            # Vue 3 + Tauri desktop app
@@ -182,7 +229,7 @@ xiaodazi/
 │   ├── skill/           # Skill loader, group registry
 │   ├── memory/          # 3-layer memory (Markdown + FTS5 + Mem0)
 │   ├── playbook/        # Online learning (strategy extraction)
-│   ├── llm/             # 6 LLM providers + format adapters
+│   ├── llm/             # 7 LLM providers + format adapters
 │   ├── planning/        # DAG task planning + progress tracking
 │   ├── termination/     # Adaptive termination strategies
 │   ├── state/           # Snapshot / rollback
@@ -196,6 +243,10 @@ xiaodazi/
 ├── models/              # Pydantic data models
 └── infra/               # Storage infrastructure (SQLite, cache)
 ```
+
+</details>
+
+---
 
 ## Extending xiaodazi
 
@@ -219,73 +270,81 @@ os_compatibility: common
 dependency_level: builtin
 ```
 
-The skill is automatically discovered, classified, and available on next request. See [Skill Ecosystem docs](docs/architecture/07-skill-ecosystem.md) for the full specification.
+The skill is automatically discovered, classified, and available on next request.
 
 ### Add an LLM Provider
 
-Implement a provider class in `core/llm/` following the existing adapters (Claude, OpenAI, Qwen, etc.). Register it in the `LLMRegistry`. See [LLM Multi-Model docs](docs/architecture/09-llm-multi-model.md).
+Implement a provider class in `core/llm/` following the existing adapters (Claude, OpenAI, Qwen, etc.). Register it in the `LLMRegistry`.
 
 ### Add a Messaging Channel
 
-Implement a gateway adapter in `core/gateway/`. The `ChatService` is protocol-agnostic — your adapter only handles message format conversion. Currently supported: Web, Telegram, Feishu.
+Implement a gateway adapter in `core/gateway/`. The `ChatService` is protocol-agnostic — your adapter only handles message format conversion.
+
+---
 
 ## Known Issues
 
-We are honest about what doesn't work well yet. These are real problems, not edge cases.
+We are honest about what doesn't work well yet.
 
-### Stability
+<details>
+<summary><strong>Stability</strong></summary>
 
-- **Long session memory pressure** — In 80+ turn conversations with heavy tool usage, context compression occasionally discards information the agent needs later. We are tuning decay thresholds.
-- **Process crashes** — The Python backend can exit unexpectedly under concurrent file writes during snapshot or edge cases in SSE streaming. The Tauri shell does not yet auto-restart the sidecar. If the UI stops responding, restart the app.
-- **SQLite write contention** — When memory extraction, conversation save, and playbook extraction fire simultaneously, WAL mode handles most cases, but `database is locked` errors occur occasionally on slower disks.
+- **Long session memory pressure** — In 80+ turn conversations with heavy tool usage, context compression occasionally discards information the agent needs later.
+- **Process crashes** — The Python backend can exit unexpectedly under concurrent file writes. The Tauri shell does not yet auto-restart the sidecar.
+- **SQLite write contention** — When memory extraction, conversation save, and playbook extraction fire simultaneously, `database is locked` errors occur occasionally on slower disks.
 
-### Agent Quality
+</details>
 
-- **Backtracking timing** — The RVR-B loop sometimes backtracks too late (context already polluted) or too eagerly (abandoning an approach that would have succeeded). Error classification thresholds are still being calibrated.
-- **Planning granularity** — Plans are sometimes too coarse (one giant step) or too fine (20 micro-steps for a simple task). The complexity-to-depth mapping needs more real-world data.
+<details>
+<summary><strong>Agent Quality</strong></summary>
 
-### Platform
+- **Backtracking timing** — The RVR-B loop sometimes backtracks too late or too eagerly. Error classification thresholds are still being calibrated.
+- **Planning granularity** — Plans are sometimes too coarse or too fine. The complexity-to-depth mapping needs more real-world data.
 
-- **macOS is the primary test platform.** Windows support exists but has received less testing — expect path issues, permission edge cases, and platform-specific skill failures. We welcome Windows bug reports.
+</details>
+
+<details>
+<summary><strong>Platform</strong></summary>
+
+- **macOS is the primary test platform.** Windows support exists but has received less testing.
 - **Single-machine only.** No remote access, no mobile app, no multi-device sync.
 - **Text only.** No voice input/output yet.
-- **3 channels** (Web, Telegram, Feishu). Discord, Slack, WhatsApp are planned.
 
-### Ecosystem
+</details>
 
-- **Most skills are declarative.** Of 150+ skills, only ~17 have executable scripts. The rest are prompt-only — their effectiveness depends on the underlying LLM's capability.
-- **No skill versioning or marketplace.** Skills are local files. Community sharing requires manual copying.
-- **External dependency fragility.** Skills depending on CLI tools (ffmpeg, pandoc) can break when those tools update. Runtime checking detects "not installed" but not "installed but incompatible."
+---
 
 ## Roadmap
 
 - [ ] Windows platform hardening
 - [ ] Sidecar auto-restart and health monitoring
 - [ ] Importance-aware context compression
-- [ ] Skill dependency version checking
 - [ ] Skill marketplace / community registry
 - [ ] Parallel tool execution
 - [ ] Voice input/output
 - [ ] Additional messaging channels (Discord, Slack, WhatsApp)
-- [ ] CI/CD pipeline
+
+---
 
 ## Documentation
 
 | Document | Description |
 |---|---|
 | **[Architecture Overview](docs/architecture/README.md)** | Full 5-layer architecture with 12 deep-dive modules |
-| [Frontend & Desktop](docs/architecture/01-frontend-and-desktop.md) | Tauri + Vue 3, Apple Liquid design, HITL interactions |
+| [Frontend & Desktop](docs/architecture/01-frontend-and-desktop.md) | Tauri + Vue 3, Apple Liquid design |
 | [API & Services](docs/architecture/02-api-and-services.md) | Three-layer architecture, preprocessing pipeline |
 | [Intent Analysis](docs/architecture/03-intent-and-routing.md) | LLM-First semantic analysis, 4-layer caching |
 | [Agent Execution](docs/architecture/04-agent-execution.md) | RVR-B loop, backtracking, adaptive termination |
 | [Context Engineering](docs/architecture/05-context-engineering.md) | 3-phase injection, compression, KV-Cache |
 | [Tool System](docs/architecture/06-tool-system.md) | 2-layer registry, intent-driven pruning |
-| [Skill Ecosystem](docs/architecture/07-skill-ecosystem.md) | 150+ skills, 2D classification, lazy allocation |
+| [Skill Ecosystem](docs/architecture/07-skill-ecosystem.md) | 200+ skills, 2D classification, lazy allocation |
 | [Memory System](docs/architecture/08-memory-system.md) | 3-layer memory, dual-write, fusion search |
-| [LLM Multi-Model](docs/architecture/09-llm-multi-model.md) | 6 providers, format adapters, failover |
+| [LLM Multi-Model](docs/architecture/09-llm-multi-model.md) | 7 providers, format adapters, failover |
 | [Instance & Config](docs/architecture/10-instance-and-config.md) | Prompt-driven schema, instance isolation |
 | [Evaluation](docs/architecture/11-evaluation.md) | 3-layer grading, E2E pipeline, failure detection |
 | [Playbook Learning](docs/architecture/12-playbook-learning.md) | Closed-loop strategy learning |
+
+---
 
 ## Contributing
 
@@ -297,7 +356,21 @@ We welcome contributions of all kinds:
 - **Documentation** — Tutorials, examples, translations.
 - **Code** — See the [Architecture docs](docs/architecture/README.md) to understand the codebase before diving in.
 
-<!-- TODO: Add CONTRIBUTING.md with detailed PR workflow, code style, and branch naming conventions -->
+## Star History
+
+<a href="https://star-history.com/#malue-ai/dazee-small&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=malue-ai/dazee-small&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=malue-ai/dazee-small&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=malue-ai/dazee-small&type=Date" />
+ </picture>
+</a>
+
+## Contributors
+
+<a href="https://github.com/malue-ai/dazee-small/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=malue-ai/dazee-small" />
+</a>
 
 ## Authors
 
@@ -309,10 +382,3 @@ We welcome contributions of all kinds:
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2025-2026 ZenFlux
-
-## Authors
-
-- **Yi Liu**  — liuyi@zenflux.cn
-- **Kangcheng Wang** — wangkangcheng@zenflux.cn
-- **Mengqi Zeng** — zengmengqi@zenflux.cn
-- **Haipeng Xie** — xiehaipeng@zenflux.cn
