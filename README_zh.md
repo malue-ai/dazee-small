@@ -1,509 +1,359 @@
-# ZenFlux Agent — 小搭子桌面端实例
+<p align="center">
+  <img src="docs/assets/logo.png" width="80" alt="小搭子 logo" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+<h1 align="center">小搭子</h1>
 
-[English](README.md) | 中文
+<p align="center">
+  <strong>养在电脑里的开源 AI 搭子。</strong><br/>
+  100% 本地存储 · 200+ 即插即用技能 · 7+ 大模型 · macOS & Windows
+</p>
 
-> "养在电脑里的小搭子"设计的桌面端 AI 智能体。
-> 100% 本地存储、Skills-First 能力体系、跨平台（macOS / Windows / Linux）。
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
+  <a href="https://github.com/malue-ai/dazee-small/stargazers"><img src="https://img.shields.io/github/stars/malue-ai/dazee-small?style=social" alt="GitHub Stars" /></a>
+</p>
 
-## 技术架构
+<p align="center">
+  中文 | <a href="README.md">English</a>
+</p>
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        小搭子桌面应用（Tauri + Vue）                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                           UI 层                                        │  │
-│  │  ┌─────────┐ ┌─────────┐ ┌┌─────────────────┐                          │  │
-│  │  │ 对话界面 │ │ 项目管理 │  │ Skills 市场      │                           │  │
-│  │  └─────────┘ └─────────┘  └─────────────────┘                           │  │
-│  │                              ↕ postMessage                              │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐  │  │
-│  │  │            MCP Apps Client（Vue Component）                      │  │  │
-│  │  │  • iframe 生命周期管理  • JSON-RPC 桥接  • UI 资源缓存           │  │  │
-│  │  └─────────────────────────────────────────────────────────────────┘  │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐  │  │
-│  │  │         ProgressRenderer（进度展示组件）                          │  │  │
-│  │  │  • 友好进度消息展示  • 进度条渲染  • 隐藏技术细节                   │  │  │
-│  │  └─────────────────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                   ↕ IPC
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      小搭子 Agent 实例（Python/Rust）                        │
-│                                                                               │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │              意图与规划层（简化版 IntentAnalyzer + ProgressTransformer）  │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │      状态一致性层 + 终止策略层（StateConsistencyManager + Terminator）   │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │          Agent 引擎层（RVRBAgent + BacktrackManager + PlanTodoTool）    │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │     Skills-First 能力层（SkillRegistry + 二维分类 OS × 依赖复杂度）      │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │       OS 兼容层（MacOSLocalNode / WindowsLocalNode / LinuxLocalNode）   │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │  本地知识检索（LocalKnowledgeManager: FTS5 全文搜索 + sqlite-vec 语义）  │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │              MCP Apps 服务层（UI 资源注册 / ui:// 协议 / CSP 安全）      │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                    存储层（100% 本地）                                  │  │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐      │  │
-│  │  │ SQLite      │ │ SQLite FTS5 │ │ sqlite-vec  │ │ Skills 缓存 │      │  │
-│  │  │ (消息/会话) │ │ (全文索引)   │ │ (可选向量)  │ │ (延迟加载)  │      │  │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘      │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/assets/quick-start.jpg" width="720" alt="三步开始使用" />
+</p>
 
-## 项目结构
+---
 
-```
-zenflux_agent/
-├── main.py                      # FastAPI 入口
-├── core/                        # 核心组件
-│   ├── agent/                   # Agent 编排（RVRBAgent / BacktrackManager）
-│   ├── llm/                     # LLM 适配（Claude / OpenAI / Gemini / Qwen）
-│   ├── memory/                  # 记忆管理（Mem0 / 系统记忆 / 工作记忆）
-│   ├── planning/                # 规划系统（PlanTodoTool / ProgressTransformer）
-│   ├── routing/                 # 意图分析与路由
-│   ├── skill/                   # Skill 加载器（动态 / 延迟）
-│   ├── tool/                    # 工具选择与执行
-│   ├── events/                  # 事件管理
-│   └── context/                 # 运行上下文
-├── infra/                       # 基础设施
-│   ├── database/                # PostgreSQL（云端版）
-│   ├── local_store/             # SQLite 本地存储（桌面版）   ← 新增
-│   │   ├── engine.py            #   异步引擎（aiosqlite + WAL）
-│   │   ├── models.py            #   ORM 模型（会话 / 消息 / Skills 缓存）
-│   │   ├── fts.py               #   FTS5 全文索引
-│   │   ├── vector.py            #   sqlite-vec 可选向量搜索
-│   │   ├── skills_cache.py      #   Skills 延迟加载缓存
-│   │   ├── workspace.py         #   Workspace 管理器（统一入口）
-│   │   └── crud/                #   CRUD 操作层
-│   ├── cache/                   # 缓存
-│   ├── storage/                 # 文件存储（本地 / S3）
-│   └── cache/                   # 缓存层
-├── instances/                   # 实例配置（详见 instances/README.md）
-│   ├── _template/               # 实例模板（创建新实例的起点）
-│   └── xiaodazi/                # 小搭子（桌面版主力实例）
-│       ├── config.yaml          #   实例配置
-│       ├── prompt.md            #   人格提示词
-│       ├── config/              #   LLM 路由、Skills、记忆配置
-│       ├── skills/              #   70+ 预置 Skills
-│       └── prompt_results/      #   自动生成的场景化提示词
-├── routers/                     # API 路由
-├── services/                    # 业务服务
-├── tools/                       # 工具实现
-├── skills/                      # 全局 Skills 库
-├── config/                      # 配置文件
-├── models/                      # Pydantic 数据模型
-├── frontend/                    # Vue 前端
-└── docs/                        # 文档
-    └── architecture/
-        └── xiaodazi-desktop.md  # 桌面版详细架构设计
-```
+## 小搭子是什么？
 
-## 快速开始（开发者指南）
+小搭子是一个开源 AI 智能体，**以原生桌面应用（Tauri）运行在你的电脑上**。所有数据留在本地，能直接操作你的电脑——管理文件、自动化应用、生成文档，并且跨会话记住你的偏好。
 
-### 前置要求
+### 演示视频
 
-| 工具 | 最低版本 | 推荐版本 | 说明 |
-|---|---|---|---|
-| Python | 3.10+ | 3.12 | 后端服务 |
-| Node.js | 18+ | 20 LTS | 前端构建 |
-| Rust | 1.70+ | latest stable | Tauri 桌面壳（可选） |
-| pnpm / npm | - | pnpm | 前端包管理 |
+<video src="docs/assets/demo.mp4" width="720" controls>
+  你的浏览器不支持视频播放。<a href="docs/assets/demo.mp4">下载演示视频</a>。
+</video>
 
-### 第一步：安装 Python 环境
+### 五大核心优势
+
+<p align="center">
+  <img src="docs/assets/core-advantages.jpg" width="720" alt="五大核心优势" />
+</p>
+
+| | 云端 AI 助手 | 小搭子 |
+|---|---|---|
+| **数据** | 存储在服务商的服务器 | 100% 本地（SQLite + 纯文件） |
+| **记忆** | 跨会话遗忘 | 通过可编辑的 `MEMORY.md` + 语义搜索记住偏好 |
+| **技能** | 固定能力 | 200+ 即插即用技能，写 Markdown 就能添加 |
+| **模型** | 锁定单一供应商 | 自由切换 Claude、GPT、千问、DeepSeek、Gemini、GLM 或 Ollama |
+| **容错** | 静默失败或重试 | 错误分类 → 回溯错误路径 → 优雅降级 |
+
+---
+
+## 快速开始
+
+### 方式一：一键安装（普通用户）
+
+**Windows** — 从 [Releases](https://github.com/malue-ai/dazee-small/releases) 下载安装包，双击运行。
+
+**macOS** — 打开终端，输入：
 
 ```bash
-# macOS（Homebrew）
-brew install python@3.12
-
-# Ubuntu / Debian
-sudo apt update && sudo apt install python3.12 python3.12-venv python3-pip
-
-# Windows（winget）
-winget install Python.Python.3.12
-
-# 验证
-python3 --version  # Python 3.12.x
+bash <(curl -fsSL https://raw.githubusercontent.com/malue-ai/dazee-small/main/scripts/auto_build_app.sh)
 ```
 
-### 第二步：创建 Python 虚拟环境并安装依赖
+安装完成后，在设置页面填入 AI 模型的 API Key（新手推荐从 DeepSeek 或 Gemini 免费额度开始）。
+
+### 方式二：从源码安装（开发者）
 
 ```bash
-# 进入项目根目录
-cd zenflux_agent
+git clone https://github.com/malue-ai/dazee-small.git
+cd dazee-small
 
-# 创建虚拟环境
 python3 -m venv .venv
-
-# 激活虚拟环境
-# macOS / Linux:
-source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
-
-# 安装依赖
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 第三步：配置环境变量
-
-配置文件位于用户数据目录的 `config.yaml`，首次启动时会自动创建。
-
-```bash
-# macOS: ~/Library/Application Support/com.zenflux.agent/config.yaml
-# Linux: ~/.local/share/zenflux-agent/config.yaml
-# Windows: %APPDATA%\zenflux-agent\config.yaml
-```
-
-**方式一：通过前端设置页面配置（推荐）**
-
-启动应用后，访问设置页面填写 API Key。
-
-**方式二：手动编辑 config.yaml**
+创建 `config.yaml`（或启动后通过设置页面配置）：
 
 ```yaml
 api_keys:
-  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here  # 至少配置一个大模型（推荐 Claude）
-  # OPENAI_API_KEY: sk-xxx  # 可选
-  # DASHSCOPE_API_KEY: sk-xxx  # 可选（千问）
-
-llm:
-  COT_AGENT_MODEL: claude-sonnet-4-5-20250514  # 默认模型
-  QOS_LEVEL: PRO  # 服务等级
-
-app:
-  LOG_LEVEL: INFO  # 日志级别
+  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here   # 推荐
+  # OPENAI_API_KEY: sk-xxx
+  # DASHSCOPE_API_KEY: sk-xxx                      # 千问
+  # GOOGLE_API_KEY: xxx                            # Gemini（免费：1500 次/天）
 ```
 
-### 第四步：启动后端服务
+启动后端：
 
 ```bash
-# 确保虚拟环境已激活
-source .venv/bin/activate
-
-# 启动开发服务器（默认 http://localhost:8000）
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-验证服务：
-
-```bash
-curl http://localhost:8000/health
-```
-
-### 第五步：安装 Node.js 和前端依赖
-
-```bash
-# macOS（Homebrew）
-brew install node
-
-# Ubuntu / Debian（通过 NodeSource）
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Windows（winget）
-winget install OpenJS.NodeJS.LTS
-
-# 验证
-node --version   # v20.x.x
-npm --version    # 10.x.x
-```
-
-安装前端依赖：
+启动前端：
 
 ```bash
 cd frontend
-npm install
+npm install && npm run dev
+# 打开 http://localhost:5174
 ```
 
-### 第六步：启动前端开发服务器
+<details>
+<summary><strong>桌面应用（Tauri）— 需要 Rust 工具链</strong></summary>
 
 ```bash
-# 在 frontend/ 目录下
-npm run dev
-
-# 前端开发服务器默认运行在 http://localhost:5174
-```
-
-### 第七步（可选）：Tauri 桌面应用开发
-
-如需开发 Tauri 桌面应用，还需安装 Rust 工具链：
-
-```bash
-# 安装 Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# macOS 额外依赖
-xcode-select --install
-
-# Ubuntu / Debian 额外依赖
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-
-# 验证
-rustc --version  # rustc 1.70+
-```
-
-启动 Tauri 开发模式（同时启动前端 + 后端 + 桌面壳）：
-
-```bash
+# 安装 Rust: https://rustup.rs/
 cd frontend
-npm run tauri:dev
+npm run tauri:dev     # 开发模式
+npm run tauri:build   # 生产构建
 ```
 
-构建桌面应用：
+</details>
 
-```bash
-cd frontend
-npm run tauri:build
+<details>
+<summary><strong>完全离线运行（Ollama）</strong></summary>
+
+安装 [Ollama](https://ollama.ai)，然后在 `config.yaml` 中设置：
+
+```yaml
+llm:
+  COT_AGENT_MODEL: ollama/llama3.1
 ```
 
-### 常用开发命令速查
+无需 API Key，所有推理在本地运行。
 
-```bash
-# ---- 后端 ----
-source .venv/bin/activate            # 激活虚拟环境
-uvicorn main:app --reload            # 启动后端（开发模式）
-pytest tests/unit/ -v                # 运行单元测试
-pytest tests/integration/ -v         # 运行集成测试
+</details>
 
-# ---- 前端 ----
-cd frontend
-npm run dev                          # 启动前端开发服务器
-npm run build                        # 构建前端生产包
-npm run type-check                   # TypeScript 类型检查
-npm run lint                         # ESLint 代码检查
+---
 
-# ---- 桌面应用 ----
-cd frontend
-npm run tauri:dev                    # Tauri 开发模式
-npm run tauri:build                  # Tauri 生产构建
-```
+## 核心设计理念
 
-### 常见问题
+### LLM-First — 永远不做关键词匹配
 
-**Q: `pip install` 报错找不到某些系统依赖？**
+所有语义任务——意图分类、技能选择、复杂度推断、回溯决策——全部由大模型完成。硬编码规则仅用于格式验证、数值计算和安全边界。
 
-部分 Python 包（如 `Pillow`、`sqlite-vec`）需要系统级依赖：
+**为什么重要：** 当用户说 *"不要做 PPT，直接给我要点"*，关键词系统匹配到"PPT"会加载错误的工具。小搭子的 LLM 驱动意图分析能正确理解否定语义，加载零个 PPT 技能。
 
-```bash
-# macOS
-brew install libjpeg libpng
+### Skills as Markdown — 200+ 且持续增长
 
-# Ubuntu / Debian
-sudo apt install libjpeg-dev libpng-dev
-```
+每个技能是一个包含 `SKILL.md` 的目录。大多数技能不需要 Python 代码——LLM 读取指令并使用内置工具执行。
 
-**Q: 前端启动后页面空白？**
+尽管有 200+ 技能，**默认加载零个**。每次请求只激活匹配用户意图的技能组（通常 200+ 中的 0–15 个）。一句"你好"消耗 0 技能 token；一个复杂研究任务消耗约 1,200。
 
-确认后端服务已启动并运行在 `http://localhost:8000`。前端需要后端 API 才能正常工作。
+### 本地优先 — 你的数据留在你的电脑
 
-**Q: Tauri 构建失败？**
-
-确保 Rust 工具链是最新的：
-
-```bash
-rustup update
-```
-
-**Q: 启动时提示「Claude API Key 为空」？**
-
-配置优先从项目根或用户数据目录的 `config.yaml` 读取；若该文件不存在或未配置 `api_keys`，会自动回退加载项目根目录的 `.env`。请确保：
-
-- 在项目根目录存在 `.env`，且其中配置了 `ANTHROPIC_API_KEY=sk-ant-...`；或
-- 在「设置」页面或 `config.yaml` 的 `api_keys` 段中填写 API Key。
-
-**Q: 启动时大量「Skill 目录不存在」/ 工具加载失败 / PyPDF2、APScheduler 未安装？**
-
-- **Skill 目录不存在**：若实例使用 Skills-First 配置（`config.yaml` 里 `skills` 含 `common`/`darwin` 等），不会再去校验 `skill_registry.yaml`，这类告警应已消失；若仍出现，请确认已拉取最新代码并重启。
-- **加载工具 XXX 失败: No module named 'tools.xxx'**：部分能力在 `config/capabilities.yaml` 中声明但未实现对应 `tools/` 模块，可忽略或后续按需实现；不影响已实现的工具和 Skills。
-- **PyPDF2 / APScheduler 未安装**：为可选依赖，仅影响 PDF 解析或定时任务；需要时执行 `pip install PyPDF2 apscheduler`。
-
-**Q: 端口冲突？**
-
-后端默认使用 `8000` 端口，前端默认使用 `5174` 端口。如需修改：
-
-```bash
-# 后端换端口
-uvicorn main:app --port 9000 --reload
-
-# 前端换端口（修改 vite.config.ts 或使用 --port 参数）
-npm run dev -- --port 3000
-```
-
-## 核心机制
-
-### 1. 存储层（100% 本地）
-
-| 组件 | 技术 | 说明 |
+| 存储 | 技术 | 用途 |
 |---|---|---|
-| 消息/会话 | SQLite + aiosqlite | WAL 模式，异步读写 |
-| 全文索引 | SQLite FTS5 | BM25 排序，unicode61 分词，零配置 |
-| 向量搜索 | sqlite-vec | 可选扩展，不可用时优雅降级 |
-| Skills 缓存 | SQLite 表 | 延迟加载 + file_mtime 变更检测 |
+| 消息与会话 | SQLite（WAL 模式） | 异步读写，并发访问 |
+| 全文搜索 | SQLite FTS5 | BM25 排序，零配置 |
+| 语义向量 | sqlite-vec（可选） | 向量相似度，单文件 |
+| 用户记忆 | `MEMORY.md` | 纯文本，用户可编辑 |
+| 文件附件 | 本地文件系统 | 实例隔离 |
 
-代码入口：`infra/local_store/workspace.py` → `LocalWorkspace`
+无云数据库、无外部向量库、无第三方分析。大模型推理默认使用云 API，通过 Ollama 可实现完全离线运行。
 
-### 2. Skills-First 能力体系
+---
 
-二维分类（OS × 依赖复杂度）：
-
-```
-                    依赖复杂度 →
-           ┌──────────┬─────────────┬──────────┬───────────┐
-           │ builtin  │ lightweight │ external │ cloud_api │
-    OS ↓   │ (内置)    │ (轻量)      │ (外部)    │ (云服务)   │
-┌──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ common   │summarize │excel-       │obsidian  │notion     │
-│ (跨平台)  │canvas    │analyzer     │          │gemini-img │
-├──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ darwin   │screenshot│apple-notes  │peekaboo  │           │
-├──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ win32    │screenshot│outlook-cli  │powershell│           │
-├──────────┼──────────┼─────────────┼──────────┼───────────┤
-│ linux    │screenshot│notify-send  │xdotool   │           │
-└──────────┴──────────┴─────────────┴──────────┴───────────┘
-
-状态管理: ready → need_auth → need_setup → unavailable
-```
-
-### 3. 零配置/低配置设计
-
-**大模型配置**（开源项目，不提供免费额度）：
-
-| 优先级 | 方案 | 门槛 | 适用场景 |
-|---|---|---|---|
-| 1 | Gemini（Google 免费额度 1500 req/day） | 3 分钟配置 | 大多数用户 |
-| 2 | 本地模型（Ollama / LM Studio） | 10 分钟安装 | 隐私敏感 / 离线 |
-| 3 | OpenAI / Claude 等 | 自备 API Key | 进阶用户 |
-
-**本地知识检索**（渐进式解锁）：
-
-| 层级 | 方案 | 配置门槛 | 依赖 |
-|---|---|---|---|
-| Level 1（默认） | SQLite FTS5 全文搜索 | 零（选择文件夹即可） | 内置 |
-| Level 2（可选） | sqlite-vec 语义搜索 | 一键启用 | 复用已配 LLM API |
-| Level 3（进阶） | 外部向量库 | 用户自行配置 | Chroma / Qdrant |
-
-### 4. 状态一致性管理
+## 架构概览
 
 ```
-任务开始 → 创建快照（文件备份 + 环境状态）
-    ↓
-执行操作 → 记录操作日志（含逆操作定义）
-    ↓
-  ┌─ 正常完成 → 提交（清理快照）
-  └─ 异常/中断 → HITL 询问用户 → 回滚 / 保持 / 继续
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Layer 1 — 用户界面                                                         │
+│    Tauri 2.10 (Rust) · Vue 3.4 + TypeScript · Apple Liquid 设计              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Layer 2 — API 与服务                                                       │
+│    FastAPI (REST + SSE + WebSocket) · 多通道网关                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Layer 3 — Agent 引擎                                                       │
+│    意图分析器（LLM，4 层缓存，<200ms）                                         │
+│    RVR-B 执行器（React → Validate → Reflect → Backtrack）                     │
+│    上下文工程（3 阶段注入，KV-Cache 90%+ 命中，scratchpad）                     │
+│    计划管理器（DAG 任务，实时进度 UI）                                          │
+├──────────────────────────────┬──────────────────────────────────────────────┤
+│  Layer 4 — 能力层            │  Layer 5 — 基础设施                            │
+│    200+ Skills（20 组）      │    7 大模型供应商 + Ollama                      │
+│    工具系统（意图裁剪）       │    SQLite + FTS5 + sqlite-vec                  │
+│    3 层记忆                  │    实例隔离                                     │
+│    Playbook 学习             │    3 层评估                                     │
+└──────────────────────────────┴──────────────────────────────────────────────┘
 ```
 
-### 5. 多维度终止策略
+**请求生命周期：** 用户消息 → 意图分析（<200ms，缓存） → 技能与工具选择 → RVR-B 执行循环（流式输出、调用工具、验证、必要时回溯） → 记忆提取 → 响应完成。
 
-```
-LLM 自主终止（任务完成自评）
-    + HITL 人工干预（危险操作确认）
-    + 用户主动停止（"算了" / "取消"）
-    + 安全兜底（max_turns=100 / 30min 超时）
-    + 长任务确认（>20 轮时询问）
-```
+<details>
+<summary><strong>小搭子 vs 典型 Agent 框架</strong></summary>
 
-### 6. OS 兼容层
-
-| 平台 | 节点 | 核心能力 |
+| 能力 | 小搭子 | 典型框架 |
 |---|---|---|
-| macOS | `MacOSLocalNode` | AppleScript / screencapture / pbcopy |
-| Windows | `WindowsLocalNode` | PowerShell / WinAPI / clip |
-| Linux | `LinuxLocalNode` | X11 & Wayland / xdotool / xclip |
+| **意图分析** | 每次请求 LLM 语义分析（4 层缓存，<200ms），按请求调整技能加载、规划深度和 token 预算 | 按会话或固定配置路由，每次请求分配相同资源 |
+| **错误恢复** | RVR-B 循环：分类错误 → 回溯错误路径 → 清理上下文污染 → 部分结果优雅降级 | 重试 + 模型故障转移，解决基础设施故障而非策略失败 |
+| **上下文管理** | 主动式：3 阶段注入、渐进式历史衰减、scratchpad 文件交换（100x 压缩）、KV-Cache 优化（90%+ 命中） | 被动式：上下文溢出时截断或摘要 |
+| **技能加载** | 默认加载 0 个技能，意图驱动的延迟分配，token 成本随任务复杂度而非库大小缩放 | 预加载所有能力，或手动选择工具 |
+| **规划** | 显式 DAG 计划，带 UI 进度组件，失败时重新规划 | 隐式思维链，无可见性，无恢复 |
+| **评估** | 3 层评分（代码 + LLM-as-Judge + 人工），12 类失败分类，自动回归 | 外部评估工具或手动测试 |
+| **学习** | Playbook 系统：提取策略 → 用户确认 → 应用到未来任务 | 无内置学习循环 |
 
-### 7. MCP Apps UI 集成
+</details>
 
-> "别的智能体返回文本，小搭子返回界面"
+---
 
-工具执行完成 → 返回带 `_meta.ui` 的结果 → 前端渲染到 iframe → 用户在 UI 中交互
+## 技术栈
 
-## 实施路线图
+| 层级 | 技术 |
+|---|---|
+| 桌面壳 | Tauri 2.10 (Rust) |
+| 前端 | Vue 3.4 + TypeScript + Tailwind CSS 4.1 + Pinia |
+| 后端 | Python 3.12 + FastAPI + asyncio |
+| 通信 | SSE + WebSocket + REST |
+| 存储 | SQLite (WAL) + FTS5 + sqlite-vec |
+| 大模型 | Claude、OpenAI、千问、DeepSeek、Gemini、GLM、Ollama |
+| 记忆 | MEMORY.md + FTS5 + Mem0 |
+| 评估 | 代码评分器 + LLM-as-Judge + 人工审核 |
 
-| 阶段 | 内容 | 周期 |
-|---|---|---|
-| Phase 1 | 基础实例（目录结构 / 人格提示词 / Skills 加载） | 2 周 |
-| Phase 2 | 自适应终止（AdaptiveTerminator / HITL 集成） | 1 周 |
-| Phase 3 | OS 兼容性（三平台 LocalNode / Skill 适配） | 2 周 |
-| Phase 4 | MCP Apps 集成（MCPAppViewer / UI 模板库） | 2 周 |
-| Phase 5 | Tauri 桌面壳（IPC 通信 / 三平台打包） | 2 周 |
+## 项目结构
 
-## 实例配置
+<details>
+<summary><strong>点击展开</strong></summary>
 
-ZenFlux Agent 通过**实例（Instance）** 隔离不同智能体的配置和数据。每个实例包含独立的人格提示词、Skills、LLM 路由和运行时数据。
-
-**详细配置指南**：[instances/README.md](instances/README.md)
-
-快速了解：
-
-| 配置文件 | 用途 | 是否必须 |
-|---|---|---|
-| `config.yaml` | 实例基础信息、大模型配置、存储与功能开关 | 必须 |
-| `prompt.md` | 人格提示词（定义 Agent 的角色和行为） | 必须 |
-| `config/skills.yaml` | Skills 清单与意图分组 | 推荐 |
-| `config/llm_profiles.yaml` | 框架 LLM 路由（各模块模型分配） | 可选（有默认值） |
-| `config/memory.yaml` | 记忆与语义搜索配置 | 可选（有默认值） |
-
-创建新实例：
-
-```bash
-cp -r instances/_template instances/my-agent
-# 编辑 config.yaml 和 prompt.md
-AGENT_INSTANCE=my-agent uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+xiaodazi/
+├── frontend/            # Vue 3 + Tauri 桌面应用
+├── core/
+│   ├── agent/           # RVR-B 执行、回溯
+│   ├── routing/         # LLM-First 意图分析
+│   ├── context/         # 上下文工程（注入、压缩、缓存）
+│   ├── tool/            # 工具注册、选择、执行
+│   ├── skill/           # 技能加载器、分组注册
+│   ├── memory/          # 3 层记忆（Markdown + FTS5 + Mem0）
+│   ├── playbook/        # 在线学习（策略提取）
+│   ├── llm/             # 7 大模型供应商 + 格式适配器
+│   ├── planning/        # DAG 任务规划 + 进度追踪
+│   ├── termination/     # 自适应终止策略
+│   ├── state/           # 快照 / 回滚
+│   └── monitoring/      # 故障检测、token 审计
+├── routers/             # FastAPI HTTP/WS 端点
+├── services/            # 业务逻辑（协议无关）
+├── tools/               # 内置工具实现
+├── skills/              # 共享技能库
+├── instances/           # Agent 实例配置
+├── evaluation/          # E2E 测试套件 + 评分器
+├── models/              # Pydantic 数据模型
+└── infra/               # 存储基础设施（SQLite、缓存）
+```
+
+</details>
+
+---
+
+## 扩展小搭子
+
+### 添加技能（无需代码）
+
+在 `skills/` 或 `instances/xiaodazi/skills/` 下创建目录，包含一个 `SKILL.md`：
+
+```markdown
+# 我的自定义技能
+
+## When to Use
+当用户要求 [描述触发场景]。
+
+## Instructions
+1. 首先，[步骤一]
+2. 然后，[步骤二]
+3. 最后，[步骤三]
+
+## metadata
+os_compatibility: common
+dependency_level: builtin
+```
+
+技能会被自动发现、分类，下次请求即可使用。
+
+### 添加大模型供应商
+
+在 `core/llm/` 中参照现有适配器（Claude、OpenAI、千问等）实现 provider 类，注册到 `LLMRegistry`。
+
+### 添加消息通道
+
+在 `core/gateway/` 中实现网关适配器。`ChatService` 是协议无关的——你的适配器只需处理消息格式转换。
+
+---
+
+## 已知问题
+
+我们坦诚面对目前做得不够好的地方。
+
+<details>
+<summary><strong>稳定性</strong></summary>
+
+- **长会话记忆压力** — 在 80+ 轮对话中，上下文压缩偶尔会丢弃 Agent 后续需要的信息。
+- **进程崩溃** — Python 后端在并发文件写入时可能意外退出。Tauri 壳尚未实现自动重启 sidecar。
+- **SQLite 写入竞争** — 当记忆提取、会话保存和 Playbook 提取同时触发时，较慢的磁盘上偶尔出现 `database is locked` 错误。
+
+</details>
+
+<details>
+<summary><strong>Agent 质量</strong></summary>
+
+- **回溯时机** — RVR-B 循环有时回溯太晚（上下文已被污染）或太急（放弃了本可成功的方法）。
+- **规划粒度** — 计划有时太粗（一个巨大步骤）或太细（简单任务 20 个微步骤）。
+
+</details>
+
+<details>
+<summary><strong>平台</strong></summary>
+
+- **macOS 是主要测试平台。** Windows 支持已有但测试较少。
+- **仅限单机。** 无远程访问、无移动端、无多设备同步。
+- **仅文本。** 暂无语音输入/输出。
+
+</details>
+
+---
+
+## 路线图
+
+- [ ] Windows 平台加固
+- [ ] Sidecar 自动重启与健康监控
+- [ ] 重要性感知的上下文压缩
+- [ ] 技能市场 / 社区注册表
+- [ ] 并行工具执行
+- [ ] 语音输入/输出
+- [ ] 更多消息通道（Discord、Slack、WhatsApp）
+
+---
 
 ## 文档
 
 | 文档 | 说明 |
 |---|---|
-| [实例配置指南](instances/README.md) | 实例目录结构、配置文件详解、创建新实例 |
-| [桌面版详细架构](docs/architecture/xiaodazi-desktop.md) | 完整设计：Skills 分类、配置向导、状态管理、知识检索 |
-| [V4 架构总览](docs/architecture/00-ARCHITECTURE-V4.md) | ZenFlux Agent 核心架构 |
-| [Memory Protocol](docs/architecture/01-MEMORY-PROTOCOL.md) | 跨会话记忆管理 |
-| [事件协议](docs/architecture/03-EVENT-PROTOCOL.md) | 统一事件系统 |
+| **[架构总览](docs/architecture/README.md)** | 完整 5 层架构，12 个深度模块 |
+| [前端与桌面](docs/architecture/01-frontend-and-desktop.md) | Tauri + Vue 3，Apple Liquid 设计 |
+| [API 与服务](docs/architecture/02-api-and-services.md) | 三层架构，预处理管线 |
+| [意图分析](docs/architecture/03-intent-and-routing.md) | LLM-First 语义分析，4 层缓存 |
+| [Agent 执行](docs/architecture/04-agent-execution.md) | RVR-B 循环，回溯，自适应终止 |
+| [上下文工程](docs/architecture/05-context-engineering.md) | 3 阶段注入，压缩，KV-Cache |
+| [工具系统](docs/architecture/06-tool-system.md) | 2 层注册，意图驱动裁剪 |
+| [技能生态](docs/architecture/07-skill-ecosystem.md) | 200+ 技能，2D 分类，延迟分配 |
+| [记忆系统](docs/architecture/08-memory-system.md) | 3 层记忆，双写，融合搜索 |
+| [LLM 多模型](docs/architecture/09-llm-multi-model.md) | 7 供应商，格式适配，故障转移 |
+| [实例与配置](docs/architecture/10-instance-and-config.md) | 提示词驱动的 schema，实例隔离 |
+| [评估](docs/architecture/11-evaluation.md) | 3 层评分，E2E 管线，故障检测 |
+| [Playbook 学习](docs/architecture/12-playbook-learning.md) | 闭环策略学习 |
 
-## 开发
+---
 
-### 添加新 Skill
+## 贡献
 
-1. 在 `instances/xiaodazi/skills/` 创建目录
-2. 创建 `SKILL.md`（标准 Skill 描述格式）
-3. 配置 `metadata.xiaodazi.dependency_level`（builtin / lightweight / external / cloud_api）
-4. SkillRegistry 自动发现并按 OS + 依赖复杂度分类
+欢迎各种形式的贡献：
 
-### 运行测试
-
-```bash
-# 确保虚拟环境已激活
-source .venv/bin/activate
-
-# 单元测试
-pytest tests/unit/ -v
-
-# 集成测试
-pytest tests/integration/ -v
-
-# 端到端测试
-pytest tests/e2e/ -v
-
-# 运行全部测试
-pytest -v
-```
+- **编写技能** — 最低门槛的贡献方式。写一个 `SKILL.md`，提交 PR。
+- **Bug 报告** — 尤其是 Windows 平台。每个崩溃报告都在改进项目。
+- **提示词调优** — 帮助提升意图分析准确率或 Agent 响应质量。
+- **文档** — 教程、示例、翻译。
+- **代码** — 先阅读[架构文档](docs/architecture/README.md)了解代码库。
 
 ## Star History
 

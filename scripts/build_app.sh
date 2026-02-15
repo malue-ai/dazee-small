@@ -265,8 +265,13 @@ if [ "$(uname)" = "Darwin" ]; then
   rm -f "$TMP_DMG" "$DMG_PATH"
   [ -d "$TMP_MOUNT" ] && hdiutil detach "$TMP_MOUNT" 2>/dev/null || true
 
+  # 动态计算 DMG 大小（.app 实际大小 + 50MB 余量）
+  APP_SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
+  DMG_SIZE_MB=$(( APP_SIZE_MB + 50 ))
+  info ".app 大小: ${APP_SIZE_MB}MB, DMG 预留: ${DMG_SIZE_MB}MB"
+
   # 创建临时可写 DMG → 挂载 → 复制 .app + /Applications 快捷方式 → 卸载
-  hdiutil create -size 300m -fs HFS+ -volname "$VOL_NAME" "$TMP_DMG" -quiet
+  hdiutil create -size "${DMG_SIZE_MB}m" -fs HFS+ -volname "$VOL_NAME" "$TMP_DMG" -quiet
   mkdir -p "$TMP_MOUNT"
   hdiutil attach "$TMP_DMG" -mountpoint "$TMP_MOUNT" -quiet
   cp -R "$APP_PATH" "$TMP_MOUNT/"
