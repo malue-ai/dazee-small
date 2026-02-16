@@ -63,12 +63,12 @@ class MemoryRecallTool(BaseTool):
     async def _get_memory_manager(self, context: ToolContext):
         """Lazy-init InstanceMemoryManager with proper instance isolation."""
         if self._memory_manager is None:
-            from core.memory.instance_memory import InstanceMemoryManager
+            from core.memory.instance_memory import get_instance_memory_manager
 
             from utils.memory_config import load_memory_config
             mem_cfg = await load_memory_config()
 
-            self._memory_manager = InstanceMemoryManager(
+            self._memory_manager = get_instance_memory_manager(
                 user_id=context.user_id,
                 instance_name=context.instance_id or None,
                 mem0_enabled=mem_cfg.mem0_enabled,

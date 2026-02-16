@@ -212,12 +212,12 @@ class UserMemoryInjector(BaseInjector):
         This is the Source of Truth — user editable memory file.
         """
         try:
-            from core.memory.instance_memory import InstanceMemoryManager
+            from core.memory.instance_memory import get_instance_memory_manager
 
             from utils.memory_config import load_memory_config
             mem_cfg = await load_memory_config()
 
-            mgr = InstanceMemoryManager(
+            mgr = get_instance_memory_manager(
                 user_id=context.user_id or "default",
                 mem0_enabled=False,  # Only need file layer for injection
                 enabled=mem_cfg.enabled,
@@ -322,9 +322,9 @@ class UserMemoryInjector(BaseInjector):
             return []
 
         try:
-            from core.memory.instance_memory import InstanceMemoryManager
+            from core.memory.instance_memory import get_instance_memory_manager
 
-            mgr = InstanceMemoryManager(
+            mgr = get_instance_memory_manager(
                 user_id=user_id, mem0_enabled=False, enabled=True
             )
             results = []
