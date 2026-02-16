@@ -1295,6 +1295,8 @@ class ChatService:
             background_tasks.append("memory_flush")
         if "playbook_extraction" not in background_tasks:
             background_tasks.append("playbook_extraction")
+        if "persona_build" not in background_tasks:
+            background_tasks.append("persona_build")
 
         # 跟踪执行状态，用于 finally 块的资源清理
         execution_status = "completed"

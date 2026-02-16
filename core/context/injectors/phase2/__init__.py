@@ -15,11 +15,13 @@ Phase 2 Injectors - User Context
 """
 
 from .knowledge_context import KnowledgeContextInjector
+from .persona import PersonaInjector
 from .playbook_hint import PlaybookHintInjector
 from .user_memory import UserMemoryInjector
 
 __all__ = [
     "KnowledgeContextInjector",
+    "PersonaInjector",
     "PlaybookHintInjector",
     "UserMemoryInjector",
 ]
@@ -34,6 +36,7 @@ def get_phase2_injectors():
     """
     return [
         UserMemoryInjector(),
+        PersonaInjector(),
         PlaybookHintInjector(),
         KnowledgeContextInjector(),
     ]
