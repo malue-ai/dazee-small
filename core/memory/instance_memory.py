@@ -360,12 +360,23 @@ class InstanceMemoryManager:
             return
 
         # Extract memory fragments (uses LLM, independent of Mem0)
-        # mem0_enabled only controls whether Mem0 vector store is written to,
-        # extraction itself always runs (uses FragmentExtractor + LLM Profile)
-        extracted = await self._extract_from_conversation(
+        # Returns both the full FragmentMemory (10-dim) and long_term_memories list.
+        fragment, extracted = await self._extract_from_conversation(
             session_id, messages
         )
+
+        # Persist long_term_memories to MEMORY.md + FTS5
         await self.remember_batch(extracted)
+
+        # Persist full FragmentMemory (10 dimensions) to fragment_store
+        # for PersonaBuilder and BehaviorAnalyzer to query later.
+        if fragment:
+            try:
+                from core.memory.fragment_store import get_fragment_store
+                store = get_fragment_store()
+                await store.save(fragment)
+            except Exception as e:
+                logger.warning(f"Fragment 持久化失败（非致命）: {e}")
 
         # Layer 1: 写入每日日志
         user_msgs = [
@@ -768,16 +779,17 @@ class InstanceMemoryManager:
         self,
         session_id: str,
         messages: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple:
         """
         Session-level memory extraction: one LLM call for the full conversation.
 
         Concatenates all messages into a single conversation text, sends to
-        FragmentExtractor once, and converts 10-dimension hints into flat
-        (content, category) pairs for downstream remember() calls.
+        FragmentExtractor once. Returns both the full FragmentMemory (for
+        10-dimension persistence) and the flat long_term_memories list
+        (for MEMORY.md/FTS5 write).
 
         Returns:
-            [{"content": str, "category": str}, ...]
+            (fragment_or_none, [{"content": str, "category": str}, ...])
         """
         if not self._extractor:
             try:
@@ -787,7 +799,7 @@ class InstanceMemoryManager:
                 self._extractor = FragmentExtractor()
             except Exception as e:
                 logger.warning(f"FragmentExtractor 初始化失败: {e}")
-                return []
+                return None, []
 
         # Concatenate full conversation for single LLM call
         conversation_text = "\n".join(
@@ -797,7 +809,7 @@ class InstanceMemoryManager:
         )
 
         if not conversation_text or len(conversation_text) < 20:
-            return []
+            return None, []
 
         try:
             fragment = await self._extractor.extract(
@@ -806,17 +818,9 @@ class InstanceMemoryManager:
                 message=conversation_text,
             )
             if not fragment:
-                return []
+                return None, []
 
-            # ── LLM-driven memory persistence ──
-            # The LLM decides what's worth remembering long-term via the
-            # `long_term_memories` field. No hardcoded dimension filtering
-            # in code — the semantic judgment of "is this worth keeping
-            # across sessions?" is made by the LLM at extraction time.
-            #
-            # This avoids the noise problem where session-scoped data
-            # (task descriptions, goals, emotions) floods MEMORY.md.
-
+            # Extract long_term_memories for MEMORY.md/FTS5 write
             extracted: List[Dict[str, Any]] = []
             long_term = fragment.metadata.get("long_term_memories", [])
 
@@ -828,7 +832,6 @@ class InstanceMemoryManager:
                 category = mem.get("category", "general")
                 if not content:
                     continue
-                # Normalize unknown categories to "general"
                 if category not in valid_categories:
                     category = "general"
                 extracted.append({
@@ -840,7 +843,7 @@ class InstanceMemoryManager:
                 f"会话级记忆提取: {len(extracted)} 条碎片, "
                 f"1 次 LLM 调用, 对话长度={len(conversation_text)} 字符"
             )
-            return extracted
+            return fragment, extracted
 
         except Exception as e:
             logger.warning(f"记忆提取失败（非致命）: {e}")
