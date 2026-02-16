@@ -288,29 +288,37 @@ class InstanceMemoryManager:
         if not valid:
             return
 
-        # Phase 1: Write to MEMORY.md (source of truth) + FTS5 CRUD
-        # Identity entries use replace-by-key; FTS5 is updated based
-        # on the write result (appended → insert, replaced → delete old + insert new).
+        # Phase 1: Batch write to MEMORY.md (1 read + 1 write) + FTS5 CRUD
+        # Uses batch_append_to_section for single-cycle file I/O.
+        batch_entries = [
+            (
+                _SECTION_MAP.get(mem["category"], "历史经验"),
+                mem["content"],
+                mem["category"] == "identity",
+            )
+            for mem in valid
+        ]
+        try:
+            results = await self._file_layer.batch_append_to_section(
+                batch_entries
+            )
+        except Exception as e:
+            logger.warning(f"MEMORY.md 批量写入失败: {e}")
+            results = []
+
+        # FTS5 CRUD based on each entry's write result
         ok = 0
-        for mem in valid:
-            content = mem["content"]
-            category = mem["category"]
-            section = _SECTION_MAP.get(category, "历史经验")
-            replace = category == "identity"
+        for mem, result in zip(valid, results):
             try:
-                result = await self._file_layer.append_to_section(
-                    section, content, replace_by_key=replace
-                )
-                # FTS5 CRUD based on MEMORY.md write result
                 if result.action == "replaced" and result.old_content:
                     await self._fts5_delete_by_content(result.old_content)
-                    await self._fts5_index_entry(content, category)
+                    await self._fts5_index_entry(mem["content"], mem["category"])
                 elif result.action == "appended":
-                    await self._fts5_index_entry(content, category)
+                    await self._fts5_index_entry(mem["content"], mem["category"])
                 # skipped: no FTS5 change
                 ok += 1
             except Exception as e:
-                logger.warning(f"L1/L2 写入失败（跳过）: {e}")
+                logger.warning(f"FTS5 写入失败（跳过）: {e}")
 
         # Phase 3: Mem0 batch write (optional, best-effort)
         mem0_ok = False
@@ -879,3 +887,45 @@ class InstanceMemoryManager:
                 deduped.append(r)
 
         return deduped
+
+
+# ==================== Factory with instance cache ====================
+
+_manager_cache: Dict[str, "InstanceMemoryManager"] = {}
+
+
+def get_instance_memory_manager(
+    user_id: str = "default",
+    instance_name: Optional[str] = None,
+    mem0_enabled: bool = True,
+    enabled: bool = True,
+) -> "InstanceMemoryManager":
+    """
+    Get or create a cached InstanceMemoryManager.
+
+    Caches by (instance_name, user_id) to avoid repeated FTS5
+    ensure_table and Mem0 init on every request.
+
+    Args:
+        user_id: User identifier for Mem0 isolation.
+        instance_name: Instance name for storage path isolation.
+        mem0_enabled: Whether to enable Mem0 vector layer.
+        enabled: Whether memory system is enabled.
+
+    Returns:
+        Cached or newly created InstanceMemoryManager.
+    """
+    import os
+    inst = instance_name or os.getenv("AGENT_INSTANCE", "default")
+    cache_key = f"{inst}:{user_id}"
+    cached = _manager_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    mgr = InstanceMemoryManager(
+        user_id=user_id,
+        instance_name=inst,
+        mem0_enabled=mem0_enabled,
+        enabled=enabled,
+    )
+    _manager_cache[cache_key] = mgr
+    return mgr

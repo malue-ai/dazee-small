@@ -230,6 +230,106 @@ class MarkdownMemoryLayer:
         logger.debug(f"已追加到段落 [{section}]: {content[:50]}...")
         return SectionWriteResult(action="appended")
 
+    async def batch_append_to_section(
+        self, entries: List[tuple]
+    ) -> List[SectionWriteResult]:
+        """
+        Batch write multiple entries to MEMORY.md with a single read/write cycle.
+
+        Each entry is (section, content, replace_by_key).
+        Returns a SectionWriteResult per entry for FTS5 CRUD.
+
+        Reduces N entries from 2N file I/O ops to exactly 2 (1 read + 1 write).
+        """
+        if not entries:
+            return []
+
+        full_text = await self.read_global_memory()
+        lines = full_text.split("\n")
+        results: List[SectionWriteResult] = []
+        modified = False
+
+        for section, content, replace_by_key in entries:
+            parts = section.split("/")
+            target_title = parts[-1].strip()
+            insert_idx = self._find_section_end(lines, target_title)
+            entry = content if content.startswith("-") else f"- {content}"
+            entry_stripped = entry.strip()
+
+            if insert_idx is not None:
+                section_start = self._find_section_start(lines, target_title)
+
+                # Exact dedup
+                is_dup = False
+                if section_start is not None:
+                    for i in range(section_start, insert_idx):
+                        if lines[i].strip() == entry_stripped:
+                            is_dup = True
+                            break
+                if is_dup:
+                    results.append(SectionWriteResult(action="skipped"))
+                    continue
+
+                # Replace-by-key
+                replaced = False
+                if replace_by_key and section_start is not None:
+                    entry_text = entry_stripped.lstrip("- ").strip()
+                    if ":" in entry_text or "：" in entry_text:
+                        sep = ":" if ":" in entry_text else "："
+                        new_key = entry_text.split(sep)[0].strip()
+                        for i in range(insert_idx - 1, section_start - 1, -1):
+                            existing = lines[i].strip().lstrip("- ").strip()
+                            if ":" in existing or "：" in existing:
+                                esep = ":" if ":" in existing else "："
+                                existing_key = existing.split(esep)[0].strip()
+                                if existing_key == new_key:
+                                    old_content = existing
+                                    lines[i] = entry
+                                    logger.info(
+                                        f"Identity 覆盖 [{section}]: "
+                                        f"'{old_content}' → "
+                                        f"'{entry_text}'"
+                                    )
+                                    results.append(SectionWriteResult(
+                                        action="replaced",
+                                        old_content=old_content,
+                                    ))
+                                    replaced = True
+                                    modified = True
+                                    break
+
+                if not replaced:
+                    # Remove template placeholders
+                    if section_start is not None:
+                        for i in range(insert_idx - 1, section_start - 1, -1):
+                            stripped = lines[i].strip().lstrip("- ").strip()
+                            if stripped.startswith("（") and stripped.endswith("）"):
+                                lines.pop(i)
+                                if insert_idx > i:
+                                    insert_idx -= 1
+                    lines.insert(insert_idx, entry)
+                    results.append(SectionWriteResult(action="appended"))
+                    modified = True
+            else:
+                # Section not found — create at end
+                level = "#" * (len(parts) + 1)
+                lines.append("")
+                lines.append(f"{level} {target_title}")
+                lines.append("")
+                lines.append(entry)
+                results.append(SectionWriteResult(action="appended"))
+                modified = True
+
+        # Single write for all entries
+        if modified:
+            await self.write_global_memory("\n".join(lines))
+            logger.debug(
+                f"Batch write: {len(entries)} entries, "
+                f"{sum(1 for r in results if r.action != 'skipped')} written"
+            )
+
+        return results
+
     # ==================== 每日日志 ====================
 
     async def read_daily_log(self, date: Optional[str] = None) -> str:  # UNUSED: daily logs are written but never read
