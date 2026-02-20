@@ -1,0 +1,84 @@
+# ============================================================
+# ZenFlux Agent - Docker Compose
+# ============================================================
+#
+# 阿里云计算巢部署配置（Docker Compose 模式）
+#
+# 启动:
+#   docker compose up -d
+#
+# 查看日志:
+#   docker compose logs -f
+#
+# 停止:
+#   docker compose down
+#
+# ============================================================
+
+services:
+  # ==================== Backend (FastAPI) ====================
+  zenflux-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zenflux-agent
+    volumes:
+      - zenflux-data:/app/data
+      - frontend-dist:/app/frontend/dist
+    environment:
+      # LLM API Keys (from .env file)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MOONSHOT_API_KEY=${MOONSHOT_API_KEY:-}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - ZHIPUAI_API_KEY=${ZHIPUAI_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - EXA_API_KEY=${EXA_API_KEY:-}
+      # App config
+      - AGENT_INSTANCE=xiaodazi
+      - ZENFLUX_DATA_DIR=/app/data
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - COT_AGENT_MODEL=${COT_AGENT_MODEL:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - zenflux-net
+
+  # ==================== Nginx (Reverse Proxy) ====================
+  nginx:
+    image: nginx:alpine
+    container_name: zenflux-nginx
+    ports:
+      - "${EXPOSE_PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - frontend-dist:/app/frontend/dist:ro
+    depends_on:
+      zenflux-agent:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - zenflux-net
+
+# ==================== Volumes ====================
+volumes:
+  zenflux-data:
+    driver: local
+  frontend-dist:
+    driver: local
+
+# ==================== Networks ====================
+networks:
+  zenflux-net:
+    driver: bridge
