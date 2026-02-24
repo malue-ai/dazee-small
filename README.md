@@ -10,13 +10,14 @@
 </p>
 
 <p align="center">
+  <a href="https://www.dazee.ai"><img src="https://img.shields.io/badge/Website-dazee.ai-F59E0B?style=flat&logo=safari&logoColor=white" alt="Official Website" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+" /></a>
   <a href="https://github.com/malue-ai/dazee-small/stargazers"><img src="https://img.shields.io/github/stars/malue-ai/dazee-small?style=social" alt="GitHub Stars" /></a>
 </p>
 
 <p align="center">
-  <a href="README_zh.md">中文</a> | English
+  <a href="https://www.dazee.ai">Official Website</a> | <a href="README_zh.md">中文</a> | English
 </p>
 
 <p align="center">

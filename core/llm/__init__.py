@@ -222,7 +222,7 @@ def create_llm_service(
         LLMProvider.QWEN: "qwen3-max",
         LLMProvider.DEEPSEEK: "deepseek-reasoner",
         LLMProvider.GLM: "glm-5",
-        LLMProvider.MINIMAX: "MiniMax-M2.1",
+        LLMProvider.MINIMAX: "MiniMax-M2.5",
     }
 
     if model is None:

@@ -67,8 +67,8 @@ skill_groups:
     description: "AI 图像生成（DALL·E、Gemini）"
     skills: [openai-image-gen, nano-banana-pro]
   media:
-    description: "语音转文字、文字转语音、音乐播放、视频帧/片段提取、React 编程式视频生成（Remotion）"
-    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, sag, spotify-player, video-frames, remotion]
+    description: "语音转文字、文字转语音、音频理解、音乐播放、视频帧/片段提取、React 编程式视频生成（Remotion）"
+    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, sag, spotify-player, video-frames, remotion, audio-processing]
   health:
     description: "营养分析、饮食建议、用药管理、健康追踪"
     skills: [nutrition-analyzer, medication-tracker]
@@ -113,6 +113,9 @@ skills:
       - { name: file-manager,        backend_type: local, skill_source: instance, system: true, description: "本地文件管理" }
       - { name: local-search,        backend_type: local, skill_source: instance, system: true, description: "本地文件搜索（Spotlight + FTS5）" }
       - { name: app-recommender,     backend_type: local, skill_source: instance, system: true, description: "根据任务推荐最合适的应用" }
+
+      # --- 音频处理 ---
+      - { name: audio-processing,    backend_type: tool, tool_name: audio_processing, description: "音频处理：TTS 语音合成、STT 语音识别、音频内容理解" }
 
       # --- 写作 ---
       - { name: writing-assistant,   backend_type: local, skill_source: instance, description: "写作辅助：润色、改写、扩写" }

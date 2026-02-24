@@ -1204,6 +1204,38 @@ def _register_preset_models() -> None:
         )
     )
 
+    # --- GPT Audio (Omni) ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-audio",
+            model_type=ModelType.AUDIO,
+            display_name="GPT Audio",
+            description="OpenAI 全模态音频模型，支持音频输入/输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=16384, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=2.5, output_per_million=10.0),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-4o-audio-preview",
+            model_type=ModelType.AUDIO,
+            display_name="GPT-4o Audio Preview",
+            description="GPT-4o 音频预览版，支持音频输入/输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=16384, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=2.5, output_per_million=10.0),
+            **_OPENAI_COMMON,
+        )
+    )
+
     # --- Legacy ---
 
     ModelRegistry.register(
@@ -1650,6 +1682,53 @@ def _register_preset_models() -> None:
         )
     )
 
+    # --- Qwen Omni（全模态音频）系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-omni-turbo",
+            model_type=ModelType.AUDIO,
+            display_name="Qwen-Omni-Turbo",
+            description="阿里云全模态模型，支持音频/视觉输入输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=33000, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.80, output_per_million=3.20),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-omni-flash",
+            model_type=ModelType.AUDIO,
+            display_name="Qwen3-Omni-Flash",
+            description="Qwen3 全模态快速模型，支持音频/视觉输入输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=33000, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.50),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-audio-turbo",
+            model_type=ModelType.AUDIO,
+            display_name="Qwen-Audio-Turbo",
+            description="阿里云音频理解模型",
+            capabilities=ModelCapabilities(
+                supports_tools=False, supports_vision=False, supports_audio=True,
+                max_tokens=8192, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.40, output_per_million=1.20),
+            **_QWEN_COMMON,
+        )
+    )
+
     # --- Qwen VL 经典 ---
 
     ModelRegistry.register(
@@ -1861,6 +1940,60 @@ def _register_preset_models() -> None:
         )
     )
 
+    # ==================== Gemini 系列 ====================
+
+    _GEMINI_COMMON = dict(
+        adapter=AdapterType.GEMINI,
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        api_key_env="GOOGLE_API_KEY",
+        provider="gemini",
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gemini-2.5-pro",
+            model_type=ModelType.VLM,
+            display_name="Gemini 2.5 Pro",
+            description="Google 旗舰推理模型，支持多模态",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=1048576,
+            ),
+            pricing=ModelPricing(input_per_million=1.25, output_per_million=10.0),
+            **_GEMINI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gemini-2.5-flash",
+            model_type=ModelType.VLM,
+            display_name="Gemini 2.5 Flash",
+            description="Google 高性价比快速模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=1048576,
+            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=0.60),
+            **_GEMINI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gemini-2.5-flash-native-audio",
+            model_type=ModelType.AUDIO,
+            display_name="Gemini 2.5 Flash Native Audio",
+            description="Google 全模态音频模型，支持音频/视频输入输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=65536, max_input_tokens=1048576,
+            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=0.60),
+            **_GEMINI_COMMON,
+        )
+    )
+
     # ==================== DeepSeek 系列 ====================
 
     _DEEPSEEK_COMMON = dict(
@@ -1982,6 +2115,40 @@ def _register_preset_models() -> None:
         base_url="https://api.minimaxi.com/anthropic",
         api_key_env="MINIMAX_API_KEY",
         provider="minimax",
+    )
+
+    # --- MiniMax M2.5 系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="MiniMax-M2.5",
+            model_type=ModelType.LLM,
+            display_name="MiniMax M2.5",
+            description="MiniMax 最新旗舰模型，编码与智能体任务 SOTA，~60 tps",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768, max_input_tokens=204800,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.10),
+            **_MINIMAX_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="MiniMax-M2.5-highspeed",
+            model_type=ModelType.LLM,
+            display_name="MiniMax M2.5 Highspeed",
+            description="MiniMax M2.5 极速版，性能不变，~100 tps",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768, max_input_tokens=204800,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.10),
+            **_MINIMAX_COMMON,
+        )
     )
 
     # --- MiniMax M2 系列 ---

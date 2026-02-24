@@ -478,11 +478,11 @@ SUPPORTED_PROVIDERS = {
     "minimax": {
         "display_name": "MiniMax",
         "icon": "🔶",
-        "base_url": "https://api.minimax.chat/v1",
+        "base_url": "https://api.minimaxi.com/anthropic",
         "api_key_env": "MINIMAX_API_KEY",
-        "description": "MiniMax 系列，支持超长上下文和语音",
-        "adapter": "openai",
-        "validate_method": "openai",
+        "description": "MiniMax M2.5/M2 系列，官方 Anthropic 兼容 / 第三方 OpenAI 兼容",
+        "adapter": "claude",
+        "validate_method": "auto",
     },
     "glm": {
         "display_name": "智谱 GLM (Zhipu AI)",
@@ -575,8 +575,10 @@ async def _validate_openai_compatible(base_url: str, api_key: str) -> tuple[bool
         return False, f"验证失败 (HTTP {resp.status_code})", []
 
 
-async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, list[str]]:
-    """Validate API key for Anthropic Claude."""
+async def _validate_anthropic(
+    base_url: str, api_key: str, provider: str = "claude",
+) -> tuple[bool, str, list[str]]:
+    """Validate API key for Anthropic-compatible providers (Claude, MiniMax, etc.)."""
     base = base_url.rstrip("/")
     headers = {
         "x-api-key": api_key,
@@ -584,14 +586,17 @@ async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, l
         "content-type": "application/json",
     }
 
+    # Pick a lightweight probe model based on provider
+    catalog_models = ModelRegistry.list_models(provider=provider)
+    probe_model = catalog_models[0].model_name if catalog_models else "claude-3-5-haiku-20241022"
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Step 1: validate key via messages endpoint (empty body → expect 400)
         url = f"{base}/v1/messages"
-        body = {"model": "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": []}
+        body = {"model": probe_model, "max_tokens": 1, "messages": []}
         resp = await client.post(url, headers=headers, json=body)
 
         if resp.status_code not in (200, 400):
-            # Log the raw Anthropic error for debugging
             try:
                 err_body = resp.json()
                 err_msg = err_body.get("error", {}).get("message", resp.text[:200])
@@ -618,13 +623,11 @@ async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, l
                 data = models_resp.json().get("data", [])
                 models = [m.get("id", "") for m in data if m.get("id")]
         except Exception:
-            # Models listing failed; fall back to catalog models for this provider
-            catalog = ModelRegistry.list_models(provider="claude")
+            catalog = ModelRegistry.list_models(provider=provider)
             models = [m.model_name for m in catalog]
 
-        # If models API returned nothing, still fall back to catalog
         if not models:
-            catalog = ModelRegistry.list_models(provider="claude")
+            catalog = ModelRegistry.list_models(provider=provider)
             models = [m.model_name for m in catalog]
 
         return True, "API Key 验证通过", models
@@ -708,9 +711,16 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
     base_url = request.base_url or meta["base_url"]
     validate_method = meta["validate_method"]
 
+    # "auto": official endpoint → anthropic, custom base_url → openai
+    if validate_method == "auto":
+        if request.base_url:
+            validate_method = "openai"
+        else:
+            validate_method = "anthropic"
+
     try:
         if validate_method == "anthropic":
-            valid, message, models = await _validate_anthropic(base_url, request.api_key)
+            valid, message, models = await _validate_anthropic(base_url, request.api_key, provider)
         else:
             valid, message, models = await _validate_openai_compatible(base_url, request.api_key)
 
