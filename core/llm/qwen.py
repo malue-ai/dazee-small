@@ -502,12 +502,13 @@ class QwenLLMService(BaseLLMService):
                 # 字符串格式
                 request_params["messages"].insert(0, {"role": "system", "content": str(system)})
 
-        # 千问特有参数（通过 extra_body 传递）
+        # 千问扩展参数（通过 extra_body 传递）
         extra_body = self._build_extra_body(override_thinking, kwargs)
         if extra_body:
-            # OpenAI SDK 的 extra_body 参数
-            for key, value in extra_body.items():
-                request_params[key] = value
+            request_params["extra_body"] = extra_body
+
+        # OpenAI 标准参数（直接设置）
+        self._apply_standard_params(request_params, kwargs)
 
         # Tools（Function Calling）
         all_tools = []
@@ -623,15 +624,13 @@ class QwenLLMService(BaseLLMService):
                 # 字符串格式
                 request_params["messages"].insert(0, {"role": "system", "content": str(system)})
 
-        # 千问特有参数（通过 extra_body 传递）
-        # ⚠️ 注意：以下参数为 Qwen 非标准参数，需要放在 extra_body 中：
-        # - enable_thinking: 思考模式
-        # - top_k: 采样参数
-        # - vl_high_resolution_images: 高分辨率图像处理
-        # - thinking_budget: 思考过程的最大 Token 数
+        # 千问扩展参数（通过 extra_body 传递）
         extra_body = self._build_extra_body(override_thinking, kwargs)
         if extra_body:
             request_params["extra_body"] = extra_body
+
+        # OpenAI 标准参数（直接设置）
+        self._apply_standard_params(request_params, kwargs)
 
         # Tools
         all_tools = []
@@ -1065,18 +1064,14 @@ class QwenLLMService(BaseLLMService):
         self, override_thinking: Optional[bool], kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        构建千问特有参数
+        构建千问非标准扩展参数（通过 extra_body 传递给 OpenAI SDK）。
 
-        Args:
-            override_thinking: 动态覆盖思考配置
-            kwargs: 其他参数
-
-        Returns:
-            extra_body 字典
+        只包含 OpenAI 标准 API 不支持的千问扩展字段。
+        标准字段（seed, presence_penalty, response_format）由
+        _apply_standard_params 直接设置到 request_params。
         """
         extra = {}
 
-        # 深度思考
         effective_thinking = (
             override_thinking
             if override_thinking is not None
@@ -1088,32 +1083,38 @@ class QwenLLMService(BaseLLMService):
             if thinking_budget:
                 extra["thinking_budget"] = thinking_budget
 
-        # 视觉模型参数
         if QwenModelCapability.supports_vision(self.config.model):
             if getattr(self.config, "vl_high_resolution_images", False):
                 extra["vl_high_resolution_images"] = True
-
-        # 其他参数
-        seed = getattr(self.config, "seed", None)
-        if seed is not None:
-            extra["seed"] = seed
 
         top_k = getattr(self.config, "top_k", None)
         if top_k is not None:
             extra["top_k"] = top_k
 
+        return extra
+
+    def _apply_standard_params(
+        self, request_params: Dict[str, Any], kwargs: Dict[str, Any]
+    ) -> None:
+        """
+        将 OpenAI 标准参数直接设置到 request_params。
+
+        seed / presence_penalty / response_format 是 OpenAI API 的标准字段，
+        SDK 会进行类型校验并正确序列化，无需绕道 extra_body。
+        """
+        seed = getattr(self.config, "seed", None)
+        if seed is not None:
+            request_params["seed"] = seed
+
         presence_penalty = getattr(self.config, "presence_penalty", 0.0)
         if presence_penalty != 0.0:
-            extra["presence_penalty"] = presence_penalty
+            request_params["presence_penalty"] = presence_penalty
 
-        # 结构化输出
         response_format = getattr(self.config, "response_format", None) or kwargs.get(
             "response_format"
         )
         if response_format:
-            extra["response_format"] = response_format
-
-        return extra
+            request_params["response_format"] = response_format
 
     def _normalize_tool_input(self, input_dict: Dict[str, Any]) -> Dict[str, Any]:
         """

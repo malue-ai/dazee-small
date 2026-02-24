@@ -541,8 +541,7 @@ class OpenAILLMService(BaseLLMService):
 
             logger.info(f"📥 OpenAI 响应: stop_reason={stop_reason or 'stop'}")
 
-            # 转换 stop_reason
-            if stop_reason == "tool_calls":
+            if stop_reason == "tool_calls" or (formatted_tool_calls and stop_reason == "stop"):
                 stop_reason = "tool_use"
 
             # 返回最终响应
@@ -619,9 +618,8 @@ class OpenAILLMService(BaseLLMService):
                 f"output={usage['output_tokens']:,}"
             )
 
-        # 转换 stop_reason
         stop_reason = choice.finish_reason
-        if stop_reason == "tool_calls":
+        if stop_reason == "tool_calls" or (tool_calls and stop_reason == "stop"):
             stop_reason = "tool_use"
 
         # 构建 raw_content
