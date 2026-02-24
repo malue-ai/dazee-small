@@ -60,12 +60,30 @@ export function getFileTypeLabel(mimeType: string | undefined, fileName?: string
     if (type.includes('typescript')) return 'TypeScript'
     if (type.includes('python')) return 'Python'
     
+    if (type.startsWith('audio/')) {
+      if (type.includes('wav')) return 'WAV'
+      if (type.includes('mpeg') || type.includes('mp3')) return 'MP3'
+      if (type.includes('ogg')) return 'OGG'
+      if (type.includes('flac')) return 'FLAC'
+      if (type.includes('m4a') || type.includes('mp4')) return 'M4A'
+      if (type.includes('aac')) return 'AAC'
+      if (type.includes('webm')) return 'WebM'
+      return 'Audio'
+    }
+
+    if (type.startsWith('video/')) {
+      if (type.includes('mp4')) return 'MP4'
+      if (type.includes('webm')) return 'WebM'
+      if (type.includes('quicktime') || type.includes('mov')) return 'MOV'
+      if (type.includes('avi')) return 'AVI'
+      return 'Video'
+    }
+
     if (type.includes('spreadsheet') || type.includes('excel')) return 'Excel'
     if (type.includes('presentation') || type.includes('powerpoint')) return 'PPT'
     if (type.includes('word') || type.includes('document')) return 'Word'
     if (type.includes('zip')) return 'ZIP'
 
-    // MIME 类型有效且非通用类型时直接返回
     if (type !== 'application/octet-stream') return 'File'
   }
 
@@ -81,7 +99,8 @@ export function getFileTypeLabel(mimeType: string | undefined, fileName?: string
       pdf: 'PDF', doc: 'Word', docx: 'Word', xls: 'Excel', xlsx: 'Excel',
       ppt: 'PPT', pptx: 'PPT', zip: 'ZIP', rar: 'RAR', tar: 'Archive', gz: 'Archive',
       png: 'PNG', jpg: 'JPEG', jpeg: 'JPEG', gif: 'GIF', webp: 'WebP', svg: 'SVG',
-      mp3: 'Audio', wav: 'Audio', mp4: 'Video', avi: 'Video', mov: 'Video',
+      mp3: 'MP3', wav: 'WAV', ogg: 'OGG', flac: 'FLAC', m4a: 'M4A', aac: 'AAC',
+      mp4: 'MP4', avi: 'AVI', mov: 'MOV', webm: 'WebM',
       vue: 'Vue', tsx: 'TSX', jsx: 'JSX', svelte: 'Svelte',
     }
     if (ext && extMap[ext]) return extMap[ext]
@@ -211,7 +230,10 @@ export function getMimeType(filename: string): string {
     'mp3': 'audio/mpeg',
     'wav': 'audio/wav',
     'ogg': 'audio/ogg',
-    'm4a': 'audio/mp4'
+    'm4a': 'audio/x-m4a',
+    'flac': 'audio/flac',
+    'aac': 'audio/aac',
+    'wma': 'audio/x-ms-wma'
   }
   
   return mimeMap[ext || ''] || 'application/octet-stream'

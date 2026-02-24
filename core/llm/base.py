@@ -98,9 +98,9 @@ def _extract_message_text(content: Any) -> str:
         elif block_type == "thinking":
             return content.get("thinking", "")
         elif block_type == "image":
-            # 图片 token 由 Claude 按像素计算（约 1600 tokens/张）
-            # 用固定占位文本代替 base64，避免 tiktoken 误算
             return "[image: ~1600 tokens]"
+        elif block_type == "input_audio":
+            return "[audio: ~500 tokens]"
         else:
             return str(content.get("text", "") or content.get("content", ""))
     return str(content)
@@ -358,6 +358,9 @@ class LLMResponse:
     # 🆕 流式工具调用
     tool_use_start: Optional[Dict[str, str]] = None  # {id, name}
     input_delta: Optional[str] = None  # JSON 片段
+
+    # 音频输出（全模态模型返回的音频数据）
+    audio_data: Optional[Dict[str, Any]] = None
 
     # Claude 特有
     cache_read_tokens: int = 0

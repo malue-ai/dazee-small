@@ -1,22 +1,24 @@
-name: GeneralAgent
-description: 通用智能助手（高质量默认配置）
+name: XiaoDazi
+description: 住在用户电脑里的 AI 搭子，亲切、主动、可靠，擅长本地桌面任务执行与个性化服务
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - low
+  - simple
   - medium
-  - high
+  - complex
   task_types:
-  - question_answering
-  - data_analysis
-  - content_generation
-  - code_execution
-  - web_search
   - file_operation
+  - data_analysis
+  - writing
+  - translation
+  - ui_automation
+  - preference_recall
+  - tool_installation_guidance
   output_formats:
   - text
-  - json
   - markdown
+  - structured_list
+  - file_reference
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,40 +27,43 @@ intent_analyzer:
 plan_manager:
   enabled: true
   trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 15
-  granularity: medium
+  max_steps: 20
+  granularity: fine
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 2
+  max_replan_attempts: 3
   replan_strategy: incremental
-  failure_threshold: 0.3
+  failure_threshold: 0.4
 tool_selector:
   enabled: true
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 3
+  max_parallel_tools: 1
   base_tools:
-  - plan_todo
+  - nodes
+  - knowledge_search
+  - open_system_preferences
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
-  retention_policy: session
-  episodic_memory: false
-  working_memory_limit: 20
+  retention_policy: user
+  episodic_memory: true
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: text
+  default_format: markdown
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: true
-  max_output_length: 50000
+  code_highlighting: false
+  max_output_length: 2000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
@@ -66,9 +71,12 @@ output_formatter:
   json_indent: 2
   include_metadata: false
 skills: []
-tools: []
-model: claude-sonnet-4-5-20250929
-max_turns: 15
+tools:
+- web_search
+- api_calling
+- multi-lang-ocr
+model: qwen3-max
+max_turns: null
 execution_strategy: rvr-b
 allow_parallel_tools: false
 context_limits:
@@ -81,4 +89,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。
+reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好。需细粒度规划、强记忆管理、工具动态选择，并支持 OCR
+  等技能。优先本地执行，敏感操作需 HITL 确认，出错时重试并提供替代方案。

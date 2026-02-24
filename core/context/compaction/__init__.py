@@ -375,8 +375,9 @@ def _compress_tool_result_content(content: Any) -> Any:
                     else:
                         compressed.append(block)
                 elif block_type == "image":
-                    # 图片应已被 _strip_old_images 处理，这里做兜底
                     compressed.append({"type": "text", "text": "[图片已省略]"})
+                elif block_type == "input_audio":
+                    compressed.append({"type": "text", "text": "[音频已省略]"})
                 else:
                     compressed.append(block)
             else:

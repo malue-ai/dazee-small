@@ -10,9 +10,9 @@
 #   ┌──────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────────────┐
 #   │ 角色     │ qwen             │ claude           │ deepseek         │ glm              │ minimax                  │
 #   ├──────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────────────┤
-#   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.1             │
-#   │ heavy    │ qwen3-max        │ claude-sonnet-4-5│ deepseek-reasoner│ glm-5            │ MiniMax-M2.1             │
-#   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.1-lightning   │
+#   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
+#   │ heavy    │ qwen3-max        │ claude-sonnet-4-5│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
+#   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.5-highspeed   │
 #   └──────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────────────┘
 #
 
@@ -92,7 +92,7 @@ provider_templates:
       api_key_env: "ZHIPUAI_API_KEY"
 
   minimax:
-    agent_model: "MiniMax-M2.1"                 # 主 Agent：MiniMax M2.1 旗舰（Anthropic API 兼容）
+    agent_model: "MiniMax-M2.5"                 # 主 Agent：MiniMax M2.5 旗舰（Anthropic API 兼容）
     agent_llm:
       max_tokens: 32768
       enable_thinking: true
@@ -100,11 +100,11 @@ provider_templates:
       enable_caching: false                     # MiniMax 不支持 prompt cache
     heavy:
       provider: "minimax"
-      model: "MiniMax-M2.1"
+      model: "MiniMax-M2.5"
       api_key_env: "MINIMAX_API_KEY"
     light:
       provider: "minimax"
-      model: "MiniMax-M2.1-lightning"
+      model: "MiniMax-M2.5-highspeed"
       api_key_env: "MINIMAX_API_KEY"
 
 # ==================== 各调用点配置 ====================
