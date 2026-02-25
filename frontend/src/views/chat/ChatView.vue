@@ -243,6 +243,7 @@
             @upload-click="handleUploadClick"
             @files-dropped="handleFilesDropped"
             @workspace-file-dropped="handleWorkspaceFileDropped"
+            @file-preview="handleFilePreview"
           />
         </div>
       </div>
