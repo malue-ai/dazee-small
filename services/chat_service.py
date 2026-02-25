@@ -129,6 +129,7 @@ class PreprocessingHandler:
         tracker: Optional["UsageTracker"],
         router: Optional["AgentRouter"],
         enable_intent: bool = True,
+        current_step_hint: Optional[str] = None,
     ) -> PreprocessingResult:
         """
         执行前置处理
@@ -143,6 +144,8 @@ class PreprocessingHandler:
             tracker: UsageTracker 实例
             router: AgentRouter 实例
             enable_intent: 是否启用意图识别
+            current_step_hint: Current plan step title for Step-Aware
+                skill group selection.
 
         Returns:
             PreprocessingResult 包含 intent
@@ -158,6 +161,7 @@ class PreprocessingHandler:
                 history_messages=history_for_intent,
                 router=router,
                 tracker=tracker,
+                current_step_hint=current_step_hint,
             )
         elif not enable_intent:
             # 意图识别已关闭，使用默认 IntentResult
@@ -174,19 +178,28 @@ class PreprocessingHandler:
         history_messages: List[Dict[str, Any]],
         router: "AgentRouter",
         tracker: Optional["UsageTracker"],
+        current_step_hint: Optional[str] = None,
     ) -> Optional["IntentResult"]:
         """
         执行意图识别
 
         Args:
             user_message: 用户消息（支持 str 或多模态 list）
+            history_messages: 历史消息列表
+            router: AgentRouter 实例
+            tracker: UsageTracker 实例
+            current_step_hint: Current plan step title for Step-Aware
+                skill group selection.
 
         Returns:
             routing_intent: 意图分析结果
         """
         with log_execution_time("路由决策", logger):
             routing_decision = await router.route(
-                user_query=user_message, conversation_history=history_messages, tracker=tracker
+                user_query=user_message,
+                conversation_history=history_messages,
+                tracker=tracker,
+                current_step_hint=current_step_hint,
             )
             routing_intent = routing_decision.intent
 
@@ -209,6 +222,30 @@ class PreprocessingHandler:
             )
 
         return routing_intent
+
+# ==================== 辅助函数 ====================
+
+
+def _extract_current_step_hint(plan: Optional[Dict]) -> Optional[str]:
+    """
+    Extract the title of the current active step from a plan.
+
+    Looks for the first in_progress step; falls back to the first
+    pending step if none are in_progress.
+
+    Returns:
+        Step title string, or None if no plan / no actionable steps.
+    """
+    if not plan or not isinstance(plan, dict):
+        return None
+    for todo in plan.get("todos", []):
+        if todo.get("status") == "in_progress":
+            return todo.get("title")
+    for todo in plan.get("todos", []):
+        if todo.get("status") == "pending":
+            return todo.get("title")
+    return None
+
 
 # ==================== 异常定义 ====================
 
@@ -1433,6 +1470,9 @@ class ChatService:
                 agent_prompt_cache = getattr(agent, "prompt_cache", None)
                 router = await self._get_router(prompt_cache=agent_prompt_cache)
 
+            # Step-Aware: extract current step title from plan
+            current_step_hint = _extract_current_step_hint(existing_plan)
+
             # 执行前置处理（传入完整消息，支持多模态）
             preprocessing_handler = await self.get_preprocessing_handler()
             preprocessing_result = await preprocessing_handler.process(
@@ -1445,6 +1485,7 @@ class ChatService:
                 tracker=shared_tracker,
                 router=router,
                 enable_intent=self.enable_routing and enable_intent,
+                current_step_hint=current_step_hint,
             )
 
             routing_intent = preprocessing_result.intent

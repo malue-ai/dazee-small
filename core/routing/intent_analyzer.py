@@ -110,7 +110,12 @@ class IntentAnalyzer:
         self.semantic_cache_threshold = semantic_cache_threshold
         self.simplified_output = simplified_output
 
-    async def analyze(self, messages: List[Dict[str, Any]], tracker=None) -> IntentResult:
+    async def analyze(
+        self,
+        messages: List[Dict[str, Any]],
+        tracker=None,
+        current_step_hint: Optional[str] = None,
+    ) -> IntentResult:
         """
         Three-tier intent analysis: L1 Hash → L2 Semantic → L3 LLM
 
@@ -121,12 +126,21 @@ class IntentAnalyzer:
         - L1 Hash 命中: < 0.1ms
         - L2 Semantic 命中: < 60ms (embed ~50ms + cosine ~5ms)
         - L3 LLM: 100-500ms (模型/网络依赖)
+
+        Args:
+            messages: Raw message list (may contain multimodal content).
+            tracker: UsageTracker (optional).
+            current_step_hint: Title of the current in_progress/next pending
+                plan step (Step-Aware intent analysis). When provided, the LLM
+                uses it to infer which skill groups the current step needs.
         """
         # 提取最后一条用户消息作为缓存 key
         query_text = self._extract_query_text(messages)
 
         # === L1 Hash + L2 Semantic: 缓存查询 ===
-        cache = self._get_cache()
+        # Skip cache when step hint is present (step context changes skill
+        # selection even for identical user messages like "继续").
+        cache = self._get_cache() if not current_step_hint else None
         if cache and query_text:
             cached_result, score = await cache.lookup(query_text)
             if cached_result:
@@ -141,7 +155,9 @@ class IntentAnalyzer:
 
         # === L3: LLM 意图分析（兜底，ground truth）===
         if self.enable_llm:
-            result = await self._analyze_with_llm(messages, tracker=tracker)
+            result = await self._analyze_with_llm(
+                messages, tracker=tracker, current_step_hint=current_step_hint
+            )
         else:
             result = self._get_conservative_default()
 
@@ -310,7 +326,12 @@ class IntentAnalyzer:
 
         return result if result else filtered[-1:]  # at least 1 message
 
-    async def _analyze_with_llm(self, messages: List[Dict[str, Any]], tracker=None) -> IntentResult:
+    async def _analyze_with_llm(
+        self,
+        messages: List[Dict[str, Any]],
+        tracker=None,
+        current_step_hint: Optional[str] = None,
+    ) -> IntentResult:
         """
         Use LLM for intent analysis with forced structured output.
 
@@ -321,6 +342,8 @@ class IntentAnalyzer:
         Args:
             messages: Raw message list (may contain multimodal content).
             tracker: UsageTracker (optional).
+            current_step_hint: Current plan step title for step-aware
+                skill group inference.
 
         Returns:
             IntentResult
@@ -328,6 +351,16 @@ class IntentAnalyzer:
         try:
             # Filter: extract text, drop tool blocks, limit message count
             filtered = self._filter_for_intent(messages)
+
+            # Step-Aware: append plan step context so the LLM can infer
+            # which skill groups the current step requires.
+            if current_step_hint:
+                step_ctx = f"[Plan context: current step = \"{current_step_hint}\"]"
+                if filtered and filtered[-1]["role"] == "user":
+                    filtered[-1]["content"] += f"\n{step_ctx}"
+                else:
+                    filtered.append({"role": "user", "content": step_ctx})
+                logger.info(f"Step-Aware 意图分析: step_hint=\"{current_step_hint}\"")
 
             if len(filtered) < len(messages):
                 logger.info(f"意图分析: 过滤消息 {len(messages)} → {len(filtered)} 条")
