@@ -189,6 +189,16 @@ export function resolveResourceUrl(url: string): string {
   if (url.startsWith('/')) {
     return `${_baseUrl}${url}`
   }
+
+  // 本地文件路径或 file:/// URL → 提取 instance + storage 相对路径，转为 API URL
+  // Tauri webview 禁止加载 file:/// 协议，需通过后端 /api/v1/files/@instance/ 接口代理
+  const normalized = url.replace(/^file:\/\/\//, '').replace(/\\/g, '/')
+  const instanceMatch = normalized.match(/\/instances\/([^/]+)\/storage\/(.+)$/)
+  if (instanceMatch) {
+    const [, instance, relativePath] = instanceMatch
+    return `${_baseUrl}/v1/files/@${instance}/${relativePath}`
+  }
+
   return url
 }
 
