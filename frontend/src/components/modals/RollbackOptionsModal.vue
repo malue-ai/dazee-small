@@ -25,7 +25,7 @@
         </div>
 
         <!-- Body -->
-        <div class="p-8 space-y-5 overflow-y-auto flex-1 scrollbar-thin">
+        <div class="p-8 space-y-5 overflow-y-auto flex-1 scrollbar-overlay">
           <!-- 回滚原因 -->
           <p v-if="reason" class="text-sm text-muted-foreground">
             {{ reason }}

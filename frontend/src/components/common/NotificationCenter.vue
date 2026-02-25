@@ -89,7 +89,7 @@
           >
             <div v-if="item.expanded && item.fullContent" class="overflow-hidden">
               <div class="mx-4 mb-3 border-t border-border" />
-              <div class="px-4 pb-4 max-h-64 overflow-y-auto scrollbar-thin">
+              <div class="px-4 pb-4 max-h-64 overflow-y-auto scrollbar-overlay">
                 <div class="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{{ item.fullContent }}</div>
               </div>
             </div>

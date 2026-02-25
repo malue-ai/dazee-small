@@ -105,6 +105,13 @@ npm install && npm run dev
 
 ```bash
 # 安装 Rust: https://rustup.rs/
+# 确保 Node.js >= 18（Vite 5 要求）
+
+# 1. 构建后端 sidecar 二进制（需要 PyInstaller）
+pip install pyinstaller
+python scripts/build_backend.py
+
+# 2. 启动 Tauri 开发/构建
 cd frontend
 npm run tauri:dev     # 开发模式
 npm run tauri:build   # 生产构建
