@@ -113,6 +113,17 @@
                       验证
                     </button>
                   </div>
+                  <p v-if="p.api_key_url" class="text-[11px] text-muted-foreground mt-1.5">
+                    前往
+                    <button
+                      @click="openExternalUrl(p.api_key_url)"
+                      class="inline-flex items-center gap-0.5 text-accent-foreground hover:text-accent-foreground/80 underline underline-offset-2 transition-colors cursor-pointer"
+                    >
+                      <span>{{ p.display_name }} API Keys</span>
+                      <ExternalLink class="w-2.5 h-2.5" />
+                    </button>
+                    获取你的 API Key
+                  </p>
                 </div>
 
                 <!-- Base URL（可选） -->
@@ -150,7 +161,7 @@
                     <div class="text-[10px] text-success/70 mb-1.5">
                       共 {{ validateResults[p.name].model_details.length }} 个可用模型
                     </div>
-                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-thin pr-1">
+                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-overlay pr-1">
                       <div
                         v-for="m in validateResults[p.name].model_details"
                         :key="m.model_name"

@@ -47,7 +47,7 @@
     </div>
 
     <!-- Main content -->
-    <div class="flex-1 overflow-y-auto scrollbar-thin p-6">
+    <div class="flex-1 overflow-y-auto scrollbar-overlay p-6">
 
       <!-- Loading -->
       <div v-if="taskStore.loading && taskStore.tasks.length === 0" class="flex items-center justify-center py-20">

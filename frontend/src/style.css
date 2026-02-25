@@ -147,27 +147,29 @@ body {
   background: rgba(0, 0, 0, 0.15);
 }
 
-/* 容器级：默认透明，hover 显示 */
-.scrollbar-thin::-webkit-scrollbar {
+/* 容器级自定义滚动条：hover 时显示
+   注意：类名避免使用 scrollbar-thin，因为 Tailwind v4 内置该工具类
+   会生成 scrollbar-width: thin 导致 Chromium 忽略 webkit 伪元素样式 */
+.scrollbar-overlay::-webkit-scrollbar {
   width: 5px;
   height: 5px;
 }
 
-.scrollbar-thin::-webkit-scrollbar-track {
+.scrollbar-overlay::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: transparent;
+.scrollbar-overlay::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.06);
   border-radius: 3px;
 }
 
-.scrollbar-thin:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.1);
+.scrollbar-overlay:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.12);
 }
 
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.18);
+.scrollbar-overlay::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.2);
 }
 
 /* ============================================================
