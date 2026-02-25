@@ -54,6 +54,31 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _extract_tool_hints(tool_results: List[Dict[str, Any]]) -> List[str]:
+    """Extract _hint values from tool results for mandatory injection into LLM context.
+
+    Checks both top-level and nested result._hint locations, since some tools
+    (e.g. nodes) promote _hint to the top level while others may nest it.
+    """
+    import json
+
+    hints: List[str] = []
+    for tr in tool_results:
+        content = tr.get("content", "")
+        if not isinstance(content, str) or "_hint" not in content:
+            continue
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        hint = data.get("_hint") or (
+            data.get("result", {}).get("_hint") if isinstance(data.get("result"), dict) else None
+        )
+        if hint:
+            hints.append(hint)
+    return hints
+
+
 @dataclass
 class RVRBState:
     """RVR-B 循环状态（V12: 移除冗余 max_turns，统一由 ExecutorConfig 管理）"""
@@ -1480,6 +1505,14 @@ class RVRBExecutor(RVRExecutor):
                 logger.info("HITL pending 检测：工具返回 pending_user_input，暂停执行等待用户响应")
                 break
 
+        # _hint 强制注入：工具结果中含 _hint 字段时，提升为独立系统消息，
+        # 确保 LLM 不会因 _hint 埋在嵌套 JSON 中而忽略它。
+        _injected_hints = _extract_tool_hints(tool_results)
+        if _injected_hints:
+            _hint_msg = "[系统提示] " + " ".join(_injected_hints)
+            append_user_message(llm_messages, _hint_msg)
+            logger.info(f"🔔 _hint 强制注入（stream）: {_hint_msg[:120]}...")
+
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):
             ctx.consecutive_failures += 1
@@ -1607,6 +1640,13 @@ class RVRBExecutor(RVRExecutor):
                 ctx.stop_reason = "hitl_pending"
                 logger.info("HITL pending 检测：工具返回 pending_user_input，暂停执行等待用户响应")
                 break
+
+        # _hint 强制注入（non-stream 版本，逻辑与 stream 版本一致）
+        _injected_hints = _extract_tool_hints(tool_results)
+        if _injected_hints:
+            _hint_msg = "[系统提示] " + " ".join(_injected_hints)
+            append_user_message(llm_messages, _hint_msg)
+            logger.info(f"🔔 _hint 强制注入（non-stream）: {_hint_msg[:120]}...")
 
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):
