@@ -106,6 +106,13 @@ npm install && npm run dev
 
 ```bash
 # Install Rust: https://rustup.rs/
+# Requires Node.js >= 18 (Vite 5 requirement)
+
+# 1. Build backend sidecar binary (requires PyInstaller)
+pip install pyinstaller
+python scripts/build_backend.py
+
+# 2. Start Tauri dev / build
 cd frontend
 npm run tauri:dev     # Development
 npm run tauri:build   # Production build
