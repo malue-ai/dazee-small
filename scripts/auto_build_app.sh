@@ -32,8 +32,14 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 
 # ==================== 配置 ====================
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# When run via process substitution (bash <(curl ...)), $0 becomes /dev/fd/N.
+# In that case, fall back to the current working directory as the project root.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo "")"
+if [[ -z "$SCRIPT_DIR" || "$SCRIPT_DIR" == /dev/fd* || "$SCRIPT_DIR" == /dev ]]; then
+  PROJECT_ROOT="$(pwd)"
+else
+  PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 VENV_DIR="$PROJECT_ROOT/.venv"
 VENV_X86_DIR="$PROJECT_ROOT/.venv-x86_64"

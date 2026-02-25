@@ -17,7 +17,7 @@ Plan 数据结构 v2：
     "todos": [
         {
             "id": "1",
-            "title": "步骤标题（注入 prompt 用）",
+            "title": "步骤标题（注入 prompt 用，也用于 Step-Aware 意图分析）",
             "content": "详细描述（存储用，不注入 prompt）",
             "status": "pending",
             "result": "完成结果"
@@ -28,6 +28,11 @@ Plan 数据结构 v2：
     "updated_at": "2026-01-28T11:00:00",
     "completed_at": "2026-01-28T12:00:00"
 }
+
+Skill 选择策略（双信号源重召回）：
+- 信号 1: Step-Aware 意图分析 — IntentAnalyzer 每轮感知当前步骤 title，LLM 推断 skill groups
+- 信号 2: Plan required_skills — 主模型创建 plan 时可选声明，跨轮持久
+- 两者 union 合并，漏选代价远大于多选代价
 
 操作：
 - create: 创建新计划
@@ -263,7 +268,8 @@ class PlanTool(BaseTool):
             todos: 步骤列表
             overview: 一句话目标摘要（可选）
             plan_doc: 详细计划文档（可选）
-            required_skills: 此计划所需的 Skills 名称列表（可选，驱动后续轮次 Skills 注入）
+            required_skills: Skills 名称列表（可选，与 Step-Aware 意图分析
+                union 合并，重召回安全网）
 
         Returns:
             plan 数据结构
