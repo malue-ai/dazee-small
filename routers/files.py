@@ -46,8 +46,6 @@ def _generate_storage_path(original_filename: str) -> str:
     Format: uploads/{date}/{uuid}_{filename}
     Uses os.path.join for cross-platform path separators.
     """
-    import os
-
     date_str = datetime.now().strftime("%Y%m%d")
     unique_id = uuid.uuid4().hex[:8]
     safe_name = original_filename.replace(" ", "_")
