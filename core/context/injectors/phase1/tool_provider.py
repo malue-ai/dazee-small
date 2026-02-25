@@ -183,18 +183,17 @@ class ToolSystemRoleProvider(BaseInjector):
 
     async def _get_skills_prompt(self, context: InjectionContext) -> str:
         """
-        动态生成 Skills 提示词（V12.1: 意图驱动 + Plan-Aware 按需注入）
+        动态生成 Skills 提示词（双信号源重召回注入）
+
+        信号源（union 合并，宁多勿漏）：
+        1. Step-Aware Intent: IntentAnalyzer 感知当前步骤语义，每轮推断
+        2. Plan required_skills: 主模型在创建 plan 时声明，跨轮持久
 
         优先级链：
         1. intent.relevant_skill_groups 有值 -> 按分组过滤注入
-        2. Plan.required_skills 存在 -> 反查分组，与 intent 合并（union）
+        2. Plan.required_skills 存在 -> 反查分组，与 intent union 合并
         3. intent.relevant_skill_groups 为 None -> Fallback 全量注入（保守）
         4. 无 intent -> 使用缓存的静态 skills_prompt
-
-        V12.1 Plan-Aware 补偿：
-        - Intent（Haiku）负责"当前轮需要什么"（每轮重新分析）
-        - Plan（主模型）负责"整体任务需要什么"（跨轮持久）
-        - 两者 union 合并，最大化召回率
         """
         # 尝试动态生成（需要 skills_loader 和 group_registry）
         if context.has_prompt_cache and context.prompt_cache.runtime_context:
@@ -209,12 +208,9 @@ class ToolSystemRoleProvider(BaseInjector):
                 if context.intent and hasattr(context.intent, "relevant_skill_groups"):
                     groups = context.intent.relevant_skill_groups
                     if isinstance(groups, list) and len(groups) > 0:
-                        # 有明确动作：使用 LLM 返回的 groups，并缓存
                         relevant_groups = groups
                         self._last_skill_groups = groups
                     elif isinstance(groups, list) and len(groups) == 0:
-                        # 空数组（追问"继续"/"好的"等无明确动作）
-                        # is_follow_up 时继承上一轮的 groups，避免技能丢失
                         is_follow_up = getattr(context.intent, "is_follow_up", False)
                         if is_follow_up and self._last_skill_groups:
                             relevant_groups = self._last_skill_groups
@@ -222,10 +218,10 @@ class ToolSystemRoleProvider(BaseInjector):
                                 f"Skills follow-up 继承: {self._last_skill_groups}"
                             )
                         else:
-                            relevant_groups = groups  # 保持空数组语义
+                            relevant_groups = groups
                     # groups is None → relevant_groups stays None → 全量 Fallback
 
-                # V12.1: Plan-Aware 补偿 — 合并 plan.required_skills
+                # Plan required_skills 补偿（union 合并，重召回安全网）
                 relevant_groups = self._merge_plan_skills(
                     relevant_groups, context, group_registry
                 )
@@ -256,30 +252,22 @@ class ToolSystemRoleProvider(BaseInjector):
         intent_groups, context: InjectionContext, group_registry
     ):
         """
-        Plan-Aware 补偿：将 plan.required_skills 反查为 group，与 intent 合并。
+        Plan required_skills union merge (recall safety net).
 
-        设计原则：
-        - intent_groups 为 None（全量 Fallback）时不合并（已经是最大集合）
-        - plan 不存在或无 required_skills 时原样返回
-        - 合并策略：union（宁多勿漏）
+        Supplements intent-driven groups with plan-level required_skills.
+        Both Step-Aware intent analysis and this mechanism operate
+        independently — their union maximizes recall.
 
-        Args:
-            intent_groups: intent 分析的 relevant_skill_groups（None 或 list）
-            context: InjectionContext（从 metadata 获取 plan）
-            group_registry: SkillGroupRegistry（反查 skill → group）
-
-        Returns:
-            合并后的 groups list，或 None（保持全量 Fallback）
+        Skip conditions:
+        - intent_groups is None (full fallback, already maximal)
+        - No plan or no required_skills in plan
         """
-        # None = 全量 Fallback，无需合并
         if intent_groups is None:
             return None
 
-        # 需要 group_registry 做反查
         if not group_registry or not hasattr(group_registry, "get_groups_for_skill"):
             return intent_groups
 
-        # 从 metadata 获取 plan
         plan = context.get("plan")
         if not plan or not isinstance(plan, dict):
             return intent_groups
@@ -288,7 +276,6 @@ class ToolSystemRoleProvider(BaseInjector):
         if not plan_skills or not isinstance(plan_skills, list):
             return intent_groups
 
-        # 反查：skill name → group names
         plan_groups = set()
         for skill_name in plan_skills:
             if not isinstance(skill_name, str):
@@ -296,22 +283,21 @@ class ToolSystemRoleProvider(BaseInjector):
             groups_for_skill = group_registry.get_groups_for_skill(skill_name)
             plan_groups.update(groups_for_skill)
 
-        # 过滤掉 _always（它始终注入，不需要显式选择）
         plan_groups.discard("_always")
 
         if not plan_groups:
             return intent_groups
 
-        # Union 合并
         intent_set = set(intent_groups)
         added = plan_groups - intent_set
         if added:
             merged = sorted(intent_set | plan_groups)
             logger.info(
-                f"Plan-Aware 补偿: intent={intent_groups}, "
-                f"plan_skills={plan_skills} → +groups={sorted(added)}, "
+                f"Plan required_skills 补偿: "
+                f"intent={intent_groups}, +groups={sorted(added)}, "
                 f"merged={merged}"
             )
             return merged
 
         return intent_groups
+
