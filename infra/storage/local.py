@@ -16,10 +16,11 @@ class LocalStorage(StorageBackend):
     def __init__(self, base_dir: str = "", instance_name: str = ""):
         if base_dir:
             self.base_dir = Path(base_dir)
+            self._instance_name = ""
         else:
             import os
-            _inst = instance_name or os.getenv("AGENT_INSTANCE", "default")
-            self.base_dir = get_instance_storage_dir(_inst)
+            self._instance_name = instance_name or os.getenv("AGENT_INSTANCE", "default")
+            self.base_dir = get_instance_storage_dir(self._instance_name)
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_full_path(self, path: str) -> Path:
@@ -70,6 +71,7 @@ class LocalStorage(StorageBackend):
         获取文件访问 URL
         
         本地存储返回文件路径，实际访问需要通过 API 路由
+        URL 包含 @instance 前缀，确保切换项目后仍能正确定位文件
         """
-        return f"/api/v1/files/{path}"
+        return f"/api/v1/files/@{self._instance_name}/{path}"
 

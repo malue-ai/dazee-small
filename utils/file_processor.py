@@ -22,7 +22,7 @@ import aiofiles
 import httpx
 
 from logger import get_logger
-from utils.app_paths import get_storage_dir
+from utils.app_paths import get_storage_dir, get_instance_storage_dir
 
 logger = get_logger("file_processor")
 
@@ -109,8 +109,17 @@ class FileProcessor:
 
         /api/v1/files/uploads/20260208/abc_test.txt
         -> {storage_dir}/uploads/20260208/abc_test.txt
+
+        /api/v1/files/@xiaodazi/uploads/20260208/abc_test.txt
+        -> {instances_data}/xiaodazi/storage/uploads/20260208/abc_test.txt
         """
         relative_path = url[len(self.LOCAL_FILE_PREFIX):]
+        # New format: @instance/... → resolve to that instance's storage
+        if relative_path.startswith("@"):
+            sep = relative_path.index("/") if "/" in relative_path else len(relative_path)
+            instance_name = relative_path[1:sep]
+            file_path = relative_path[sep + 1:] if sep < len(relative_path) else ""
+            return get_instance_storage_dir(instance_name) / file_path
         return get_storage_dir() / relative_path
 
     async def _read_local_file(self, local_path: Path) -> bytes:

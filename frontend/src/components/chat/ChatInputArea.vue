@@ -119,6 +119,7 @@ const emit = defineEmits<{
   (e: 'upload-click'): void
   (e: 'files-dropped', files: File[]): void
   (e: 'workspace-file-dropped', fileInfo: { path: string; name: string; size: number }): void
+  (e: 'file-preview', file: AttachedFile): void
 }>()
 
 // ==================== State ====================
@@ -304,6 +305,13 @@ function insertFile(file: AttachedFile) {
     onEditorInput()
   }
 
+  chip.onclick = (e) => {
+    if ((e.target as HTMLElement).classList.contains('file-chip-close')) return
+    e.preventDefault()
+    e.stopPropagation()
+    emit('file-preview', file)
+  }
+
   chip.appendChild(icon)
   chip.appendChild(nameEl)
   chip.appendChild(closeBtn)
@@ -392,6 +400,12 @@ defineExpose({
   line-height: 1.5;
   background-color: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.file-chip:hover {
+  background-color: hsl(var(--muted-foreground) / 0.12);
 }
 
 .file-chip-icon {

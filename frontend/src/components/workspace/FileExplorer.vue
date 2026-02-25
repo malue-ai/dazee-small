@@ -47,7 +47,7 @@
     </div>
     
     <!-- 文件树 -->
-    <div v-else class="flex-1 overflow-y-auto py-2 scrollbar-thin">
+    <div v-else class="flex-1 overflow-y-auto py-2 scrollbar-overlay">
       <FileTreeNode
         v-for="item in files"
         :key="item.path"

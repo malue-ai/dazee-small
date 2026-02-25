@@ -113,6 +113,17 @@
                       验证
                     </button>
                   </div>
+                  <p v-if="p.api_key_url" class="text-[11px] text-muted-foreground mt-1.5">
+                    前往
+                    <button
+                      @click="openExternalUrl(p.api_key_url)"
+                      class="inline-flex items-center gap-0.5 text-accent-foreground hover:text-accent-foreground/80 underline underline-offset-2 transition-colors cursor-pointer"
+                    >
+                      <span>{{ p.display_name }} API Keys</span>
+                      <ExternalLink class="w-2.5 h-2.5" />
+                    </button>
+                    获取你的 API Key
+                  </p>
                 </div>
 
                 <!-- Base URL（可选） -->
@@ -150,7 +161,7 @@
                     <div class="text-[10px] text-success/70 mb-1.5">
                       共 {{ validateResults[p.name].model_details.length }} 个可用模型
                     </div>
-                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-thin pr-1">
+                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-overlay pr-1">
                       <div
                         v-for="m in validateResults[p.name].model_details"
                         :key="m.model_name"
@@ -1191,6 +1202,9 @@ async function validateProviderKey(providerName: string) {
     const customBaseUrl = providerBaseUrls[providerName]?.trim() || undefined
     const result = await modelApi.validateKey(providerName, key, customBaseUrl)
     validateResults[providerName] = result
+    if (!result.valid) {
+      providerKeys[providerName] = ''
+    }
   } catch (e: any) {
     validateResults[providerName] = {
       valid: false,
@@ -1199,6 +1213,7 @@ async function validateProviderKey(providerName: string) {
       models: [],
       model_details: [],
     }
+    providerKeys[providerName] = ''
   } finally {
     validating[providerName] = false
   }
@@ -1303,6 +1318,7 @@ async function saveSettings() {
         validateResults[item.detail.name] = result
         if (!result.valid) {
           failedProviders.push(`${item.detail.display_name}: ${result.message || '验证失败'}`)
+          providerKeys[item.detail.name] = ''
         }
       } catch (e: any) {
         failedProviders.push(`${item.detail.display_name}: ${e?.response?.data?.detail?.message || e?.message || '验证失败'}`)
@@ -1313,6 +1329,7 @@ async function saveSettings() {
           models: [],
           model_details: [],
         }
+        providerKeys[item.detail.name] = ''
       } finally {
         validating[item.detail.name] = false
       }

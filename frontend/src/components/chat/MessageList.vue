@@ -1,6 +1,6 @@
 <template>
   <div 
-    class="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-6 md:p-8 scrollbar-thin" 
+    class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scroll-smooth p-6 md:p-8 scrollbar-overlay" 
     ref="containerRef"
     @scroll="handleScroll"
   >
