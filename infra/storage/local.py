@@ -70,6 +70,9 @@ class LocalStorage(StorageBackend):
         获取文件访问 URL
         
         本地存储返回文件路径，实际访问需要通过 API 路由
+        URL 包含 @instance 前缀，确保切换项目后仍能正确定位文件
         """
-        return f"/api/v1/files/{path}"
+        import os
+        instance_name = os.getenv("AGENT_INSTANCE", "default")
+        return f"/api/v1/files/@{instance_name}/{path}"
 
