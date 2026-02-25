@@ -1202,6 +1202,9 @@ async function validateProviderKey(providerName: string) {
     const customBaseUrl = providerBaseUrls[providerName]?.trim() || undefined
     const result = await modelApi.validateKey(providerName, key, customBaseUrl)
     validateResults[providerName] = result
+    if (!result.valid) {
+      providerKeys[providerName] = ''
+    }
   } catch (e: any) {
     validateResults[providerName] = {
       valid: false,
@@ -1210,6 +1213,7 @@ async function validateProviderKey(providerName: string) {
       models: [],
       model_details: [],
     }
+    providerKeys[providerName] = ''
   } finally {
     validating[providerName] = false
   }
@@ -1314,6 +1318,7 @@ async function saveSettings() {
         validateResults[item.detail.name] = result
         if (!result.valid) {
           failedProviders.push(`${item.detail.display_name}: ${result.message || '验证失败'}`)
+          providerKeys[item.detail.name] = ''
         }
       } catch (e: any) {
         failedProviders.push(`${item.detail.display_name}: ${e?.response?.data?.detail?.message || e?.message || '验证失败'}`)
@@ -1324,6 +1329,7 @@ async function saveSettings() {
           models: [],
           model_details: [],
         }
+        providerKeys[item.detail.name] = ''
       } finally {
         validating[item.detail.name] = false
       }
