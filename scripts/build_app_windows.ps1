@@ -578,6 +578,10 @@ if ($exeFile) {
     Copy-Item $exeFile.FullName $OutputDir -Force
     Info "NSIS installer: $($exeFile.Name) -- ${mb} MB"
     Info "Copied to: $OutputDir\$($exeFile.Name)"
+    # 固定文件名副本，供官网永久下载链接使用
+    $stableName = "xiaodazi-windows-x64-setup.exe"
+    Copy-Item $exeFile.FullName (Join-Path $OutputDir $stableName) -Force
+    Info "Stable-name copy: $stableName"
 } else {
     Warn "NSIS installer not found"
 }

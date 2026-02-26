@@ -1,0 +1,44 @@
+name: Add Stable Download Links to Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  add-stable-names:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets and re-upload with stable names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          REPO="${{ github.repository }}"
+          echo "Processing release: $TAG"
+
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+
+          gh release download "$TAG" -R "$REPO" --pattern "*.dmg" --pattern "*.exe" || true
+
+          for f in *_*_aarch64.dmg; do
+            [ -f "$f" ] || continue
+            STABLE="xiaodazi-macos-aarch64.dmg"
+            cp "$f" "$STABLE"
+            gh release upload "$TAG" "$STABLE" -R "$REPO" --clobber
+            echo "Uploaded: $STABLE"
+          done
+
+          for f in *_*_x64-setup.exe; do
+            [ -f "$f" ] || continue
+            STABLE="xiaodazi-windows-x64-setup.exe"
+            cp "$f" "$STABLE"
+            gh release upload "$TAG" "$STABLE" -R "$REPO" --clobber
+            echo "Uploaded: $STABLE"
+          done
+
+          rm -rf "$TMPDIR"
+          echo "Done! Stable download links are now available."

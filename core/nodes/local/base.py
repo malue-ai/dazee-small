@@ -170,20 +170,22 @@ class LocalNodeBase(ABC):
             # Allowlist rejection — guide Agent to use whitelist_add
             if self._ALLOWLIST_PATTERN in combined:
                 payload["_hint"] = (
-                    "⚠️ 命令被白名单拦截！"
-                    "请先使用 hitl 工具询问用户是否同意将该命令加入白名单，"
+                    "⚠️ 命令被白名单拦截！你必须立即调用 hitl 工具，"
+                    "询问用户是否同意将该命令加入白名单。"
                     "用户同意后调用 nodes（action=whitelist_add, "
-                    "executables=[\"命令名\"]）将其加入白名单，然后重试原命令。"
+                    "executables=[\"命令名\"]）加入白名单，然后重试原命令。"
+                    "禁止跳过 hitl 直接尝试其他方案。"
                 )
             else:
                 # Dependency missing — guide Agent to use hitl + install
                 for pattern in self._DEPENDENCY_ERROR_PATTERNS:
                     if pattern in combined:
                         payload["_hint"] = (
-                            "⚠️ 依赖缺失！请使用 hitl 工具告知用户缺少什么依赖，"
-                            "询问用户是否同意安装。用户同意后用 nodes 执行安装命令"
-                            "（如 pip install xxx），安装完成后重试。"
-                            "用户拒绝后再寻找替代方案。"
+                            "⚠️ 依赖缺失！你必须立即调用 hitl 工具，"
+                            "告知用户缺少哪个依赖，并询问是否同意安装。"
+                            "用户同意后用 nodes 执行安装命令（如 pip install xxx），"
+                            "安装完成后重试。用户拒绝后再寻找替代方案。"
+                            "禁止跳过 hitl 直接尝试其他方案。"
                         )
                         break
 
