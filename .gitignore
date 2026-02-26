@@ -103,6 +103,9 @@ evaluation/reports/*.json
 evaluation/reports/*.md
 eval_report.json
 
+# Reference repos (embedded git repos)
+reference/
+
 # Node.js
 node_modules/
 
