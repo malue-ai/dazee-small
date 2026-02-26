@@ -835,16 +835,21 @@ class ChatService:
                     elif hasattr(f, "model_dump"):
                         files_data.append(f.model_dump())  # type: ignore[union-attr]
                 if files_data:
-                    # 先做按模型的图片限制校验，避免请求发送到模型侧才报错
-                    try:
-                        await validate_image_files_for_model(
-                            files=files_data,
-                            model_name=effective_model_name,
-                        )
-                    except ValueError as e:
-                        raise AttachmentValidationError(str(e)) from e
+                    # 先做按模型的图片限制校验（仅在 PIL 不可用、无法自动压缩时才严格拦截）
+                    # 若 PIL 可用，process_files 会自动压缩超出限制的图片
+                    from utils.image_constraints import PIL_AVAILABLE as _pil_ok
+                    if not _pil_ok:
+                        try:
+                            await validate_image_files_for_model(
+                                files=files_data,
+                                model_name=effective_model_name,
+                            )
+                        except ValueError as e:
+                            raise AttachmentValidationError(str(e)) from e
 
-                    processed_files = await self.file_processor.process_files(files_data)
+                    processed_files = await self.file_processor.process_files(
+                        files_data, model_name=effective_model_name
+                    )
                     if processed_files:
                         files_metadata = [
                             {
