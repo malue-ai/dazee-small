@@ -33,9 +33,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/YOUR_ORG/xiaodazi/releases/latest/download/latest.json"
+        "https://github.com/malue-ai/dazee-small/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "REPLACE_WITH_YOUR_PUBLIC_KEY"
     }
   },
   "bundle": {

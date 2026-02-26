@@ -62,6 +62,9 @@ coverage.xml
 config.yaml
 .env
 
+# 计算巢部署配置（含敏感参数）
+.computenest/
+
 # 实例敏感信息（API Keys）
 instances/*/.env
 instances/*_backup/.env
@@ -111,3 +114,10 @@ node_modules/
 
 # Vite cache
 frontend/.vite/
+
+# 打包产物（安装包 / 安装程序）
+*.exe
+*.dmg
+*.msi
+*.AppImage
+*.deb
