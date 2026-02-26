@@ -1199,7 +1199,7 @@ async function validateProviderKey(providerName: string) {
   delete validateResults[providerName]
 
   try {
-    const customBaseUrl = providerBaseUrls[providerName]?.trim() || undefined
+    const customBaseUrl = providerBaseUrls[providerName]?.trim()
     const result = await modelApi.validateKey(providerName, key, customBaseUrl)
     validateResults[providerName] = result
     if (!result.valid) {
@@ -1297,7 +1297,7 @@ async function saveSettings() {
     toSave.push({
       detail: p,
       key,
-      baseUrl: providerBaseUrls[p.name]?.trim() || undefined,
+      baseUrl: providerBaseUrls[p.name]?.trim() ?? '',
       masked: p.api_key_configured && isMaskedKey(key),
     })
   }
@@ -1359,11 +1359,9 @@ async function saveSettings() {
         updates['api_keys'][item.detail.api_key_env] = item.key
       }
 
-      // 保存自定义 Base URL（如有）
-      if (item.baseUrl) {
-        const baseUrlEnv = item.detail.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
-        updates['api_keys'][baseUrlEnv] = item.baseUrl
-      }
+      // 保存自定义 Base URL（空字符串 = 清除旧值）
+      const baseUrlEnv = item.detail.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+      updates['api_keys'][baseUrlEnv] = item.baseUrl || ''
 
       // 记录第一个有验证结果的模型列表（用于默认模型）
       if (!firstValidModels.length) {
