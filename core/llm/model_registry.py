@@ -2056,15 +2056,18 @@ def _register_preset_models() -> None:
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="kimi-k2-0711",
-            model_type=ModelType.LLM,
-            display_name="Kimi K2",
-            description="Moonshot AI 最新旗舰模型",
+            model_name="kimi-k2.5",
+            model_type=ModelType.VLM,
+            display_name="Kimi K2.5",
+            description="Kimi 迄今最全能模型，原生多模态，支持视觉与文本、思考与非思考，256K 上下文",
             capabilities=ModelCapabilities(
-                supports_tools=True, supports_vision=False, supports_thinking=True,
-                max_tokens=16384, max_input_tokens=131072,
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=33000, max_input_tokens=262144,
             ),
-            pricing=ModelPricing(input_per_million=0.84, output_per_million=0.84),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.92,
+                cache_read_per_million=0.10,
+            ),
             **_KIMI_COMMON,
         )
     )
@@ -2074,12 +2077,33 @@ def _register_preset_models() -> None:
             model_name="kimi-k2-0905-preview",
             model_type=ModelType.LLM,
             display_name="Kimi K2 0905",
-            description="Kimi K2 2025-09 升级版，指令跟随与代码能力增强，256K 上下文",
+            description="Kimi K2 升级版，更强 Agentic Coding 与上下文理解，256K 上下文",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=True,
                 max_tokens=16384, max_input_tokens=262144,
             ),
-            pricing=ModelPricing(input_per_million=0.60, output_per_million=2.50),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.22,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-0711-preview",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2 0711",
+            description="Kimi K2 基础模型，MoE 1T 参数，128K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.22,
+                cache_read_per_million=0.14,
+            ),
             **_KIMI_COMMON,
         )
     )
@@ -2089,12 +2113,33 @@ def _register_preset_models() -> None:
             model_name="kimi-k2-turbo-preview",
             model_type=ModelType.LLM,
             display_name="Kimi K2 Turbo",
-            description="Kimi K2 高速版，4 倍输出速度，适合 Agent 与对话场景",
+            description="Kimi K2 高速版，输出最高 100 tok/s，对标最新 K2，256K 上下文",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=True,
                 max_tokens=16384, max_input_tokens=262144,
             ),
-            pricing=ModelPricing(input_per_million=1.15, output_per_million=8.00),
+            pricing=ModelPricing(
+                input_per_million=1.11, output_per_million=8.06,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-thinking",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2 Thinking",
+            description="Kimi K2 深度推理模型，通用 Agentic + 推理能力，256K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.22,
+                cache_read_per_million=0.14,
+            ),
             **_KIMI_COMMON,
         )
     )
@@ -2104,27 +2149,15 @@ def _register_preset_models() -> None:
             model_name="kimi-k2-thinking-turbo",
             model_type=ModelType.LLM,
             display_name="Kimi K2 Thinking Turbo",
-            description="Kimi K2 深度思考高速版，适合复杂推理任务",
+            description="Kimi K2 深度推理高速版，适合需要深度推理且追求高速的场景，256K 上下文",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=True,
                 max_tokens=16384, max_input_tokens=262144,
             ),
-            pricing=ModelPricing(input_per_million=1.15, output_per_million=8.00),
-            **_KIMI_COMMON,
-        )
-    )
-
-    ModelRegistry.register(
-        ModelConfig(
-            model_name="kimi-k2.5",
-            model_type=ModelType.VLM,
-            display_name="Kimi K2.5",
-            description="Kimi K2.5 原生多模态模型，支持图片/视频理解、视觉编码，256K 上下文",
-            capabilities=ModelCapabilities(
-                supports_tools=True, supports_vision=True, supports_thinking=True,
-                max_tokens=33000, max_input_tokens=262144,
+            pricing=ModelPricing(
+                input_per_million=1.11, output_per_million=8.06,
+                cache_read_per_million=0.14,
             ),
-            pricing=ModelPricing(input_per_million=0.60, output_per_million=3.00),
             **_KIMI_COMMON,
         )
     )
@@ -2139,7 +2172,7 @@ def _register_preset_models() -> None:
                 supports_tools=True, supports_vision=True, supports_thinking=False,
                 max_tokens=8192, max_input_tokens=131072,
             ),
-            pricing=ModelPricing(input_per_million=2.00, output_per_million=5.00),
+            pricing=ModelPricing(input_per_million=1.39, output_per_million=4.17),
             **_KIMI_COMMON,
         )
     )
@@ -2152,9 +2185,9 @@ def _register_preset_models() -> None:
             description="Moonshot AI 长上下文模型（128K）",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=8192, max_input_tokens=128000,
+                max_tokens=8192, max_input_tokens=131072,
             ),
-            pricing=ModelPricing(input_per_million=0.84, output_per_million=0.84),
+            pricing=ModelPricing(input_per_million=1.39, output_per_million=4.17),
             **_KIMI_COMMON,
         )
     )
@@ -2167,9 +2200,9 @@ def _register_preset_models() -> None:
             description="Moonshot AI 标准模型（32K）",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=8192, max_input_tokens=32000,
+                max_tokens=8192, max_input_tokens=32768,
             ),
-            pricing=ModelPricing(input_per_million=0.34, output_per_million=0.34),
+            pricing=ModelPricing(input_per_million=0.69, output_per_million=2.78),
             **_KIMI_COMMON,
         )
     )
@@ -2182,9 +2215,9 @@ def _register_preset_models() -> None:
             description="Moonshot AI 轻量模型（8K）",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=4096, max_input_tokens=8000,
+                max_tokens=4096, max_input_tokens=8192,
             ),
-            pricing=ModelPricing(input_per_million=0.17, output_per_million=0.17),
+            pricing=ModelPricing(input_per_million=0.28, output_per_million=1.39),
             **_KIMI_COMMON,
         )
     )
