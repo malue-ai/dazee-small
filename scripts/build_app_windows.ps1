@@ -541,6 +541,23 @@ Push-Location $FrontendDir
 if (-not (Test-Path "node_modules")) { & npm install }
 $env:CI = ""
 
+# 设置 Tauri updater 签名密钥（如果存在）
+$signKeyFile = Join-Path $ProjectRoot "keys\xiaodazi.key"
+$signKeyPwdFile = Join-Path $ProjectRoot "keys\xiaodazi.key.password"
+if (Test-Path $signKeyFile) {
+    $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $signKeyFile -Raw
+    if (Test-Path $signKeyPwdFile) {
+        $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = (Get-Content $signKeyPwdFile -Raw).Trim()
+    } elseif (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+        $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+    }
+    Info "  Loaded updater signing key"
+} elseif ($env:TAURI_SIGNING_PRIVATE_KEY) {
+    Info "  Using updater signing key from env"
+} else {
+    Warn "  No updater signing key found, skipping update bundle signing"
+}
+
 Info "  Running: npm run tauri:build"
 & npm run tauri:build
 if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "Tauri build failed" }
@@ -593,6 +610,47 @@ if ($msiFile) {
     $mb = [math]::Round($msiFile.Length / 1MB, 1)
     Copy-Item $msiFile.FullName $OutputDir -Force
     Info "MSI installer: $($msiFile.Name) -- ${mb} MB"
+}
+
+# ==================== Generate latest.json (Tauri updater) ====================
+if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+    Info "Generating latest.json for Tauri updater..."
+
+    $nsisZipDir = Join-Path $FrontendDir "src-tauri\target\release\bundle\nsis"
+    $sigFile = Get-ChildItem $nsisZipDir -Filter "*.nsis.zip.sig" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $updateFile = Get-ChildItem $nsisZipDir -Filter "*.nsis.zip" -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -notlike "*.sig" } | Select-Object -First 1
+
+    if ($sigFile -and $updateFile) {
+        $signature = Get-Content $sigFile.FullName -Raw
+        $version = Get-Content (Join-Path $ProjectRoot "VERSION") -ErrorAction SilentlyContinue
+        if (-not $version) { $version = "0.0.0" }
+        $version = $version.Trim()
+        $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $repoUrl = "https://github.com/malue-ai/dazee-small"
+
+        $latestJson = @{
+            version = $version
+            notes = "v$version release"
+            pub_date = $pubDate
+            platforms = @{
+                "windows-x86_64" = @{
+                    signature = $signature.Trim()
+                    url = "$repoUrl/releases/download/v$version/$($updateFile.Name)"
+                }
+            }
+        } | ConvertTo-Json -Depth 4
+
+        $latestJsonPath = Join-Path $OutputDir "latest.json"
+        $latestJson | Set-Content -Path $latestJsonPath -Encoding UTF8
+        Info "latest.json generated: $latestJsonPath"
+
+        Copy-Item $updateFile.FullName $OutputDir -Force
+        Copy-Item $sigFile.FullName $OutputDir -Force
+        Info "Update bundle copied: $($updateFile.Name)"
+    } else {
+        Warn "Signed update bundle not found, skipping latest.json"
+    }
 }
 
 Write-Host ""

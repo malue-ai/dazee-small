@@ -125,7 +125,27 @@ fi
 # 本地构建时统一取消 CI 标志。
 unset CI
 
+# 设置 Tauri updater 签名密钥（如果存在）
+# 设置后 Tauri 构建会自动生成 .tar.gz + .sig 更新包
+SIGN_KEY_FILE="$PROJECT_ROOT/keys/xiaodazi.key"
+SIGN_KEY_PWD_FILE="$PROJECT_ROOT/keys/xiaodazi.key.password"
+if [ -f "$SIGN_KEY_FILE" ]; then
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
+  if [ -f "$SIGN_KEY_PWD_FILE" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$SIGN_KEY_PWD_FILE")"
+  elif [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+  fi
+  info "已加载 updater 签名密钥"
+elif [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+  info "使用环境变量中的 updater 签名密钥"
+else
+  warn "未找到 updater 签名密钥，跳过更新包签名"
+  warn "如需签名，请运行: npx @tauri-apps/cli signer generate -p '<password>' -w keys/xiaodazi.key"
+fi
+
 # 构建 Tauri（只打包 .app，跳过 Tauri 自带的 DMG 打包，Step 3 会自己生成完整 DMG）
+# createUpdaterArtifacts=true + 签名密钥 → 自动生成 .app.tar.gz 和 .app.tar.gz.sig
 if [ "$(uname)" = "Darwin" ]; then
   npm run tauri:build -- --bundles app
 else
@@ -293,6 +313,54 @@ if [ "$(uname)" = "Darwin" ]; then
   DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
   info "DMG 生成完成: $DMG_FILENAME_VERSIONED ($DMG_SIZE)"
   info "固定文件名副本: $DMG_FILENAME_STABLE"
+
+  # 3h. 生成 latest.json（Tauri updater 端点需要）
+  if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+    info "生成 latest.json..."
+
+    UPDATE_BUNDLE_DIR="$FRONTEND_DIR/src-tauri/target/release/bundle/macos"
+    SIG_FILE=$(find "$UPDATE_BUNDLE_DIR" -name "*.app.tar.gz.sig" 2>/dev/null | head -1)
+    UPDATE_FILE=$(find "$UPDATE_BUNDLE_DIR" -name "*.app.tar.gz" ! -name "*.sig" 2>/dev/null | head -1)
+
+    if [ -n "$SIG_FILE" ] && [ -n "$UPDATE_FILE" ]; then
+      PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      REPO_URL="https://github.com/malue-ai/dazee-small"
+      UPDATE_FILENAME=$(basename "$UPDATE_FILE")
+      LATEST_JSON="$DMG_DIR/latest.json"
+
+      $PYTHON_CMD - "$VERSION" "$PUB_DATE" "$SIG_FILE" "$REPO_URL/releases/download/v$VERSION/$UPDATE_FILENAME" "$LATEST_JSON" << 'PYEOF'
+import json, sys
+
+version, pub_date, sig_path, url, out_path = sys.argv[1:6]
+signature = open(sig_path).read().strip()
+
+data = {
+    "version": version,
+    "notes": f"v{version} release",
+    "pub_date": pub_date,
+    "platforms": {
+        "darwin-aarch64": {
+            "signature": signature,
+            "url": url,
+        }
+    },
+}
+
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+PYEOF
+
+      info "latest.json 已生成: $LATEST_JSON"
+
+      # 复制更新包到 DMG 输出目录
+      cp "$UPDATE_FILE" "$DMG_DIR/"
+      cp "$SIG_FILE" "$DMG_DIR/"
+      info "更新包已复制: $(basename "$UPDATE_FILE")"
+    else
+      warn "未找到签名更新包，跳过 latest.json 生成"
+    fi
+  fi
 
   info "macOS 后处理完成"
 fi

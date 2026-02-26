@@ -12,6 +12,7 @@
 - 复杂文件 (PDF 等) → 提供路径/URL → 拼进消息，让 Agent 决定
 """
 
+import asyncio
 import base64
 from dataclasses import dataclass
 from enum import Enum
@@ -23,6 +24,15 @@ import httpx
 
 from logger import get_logger
 from utils.app_paths import get_storage_dir, get_instance_storage_dir
+
+try:
+    from utils.image_constraints import compress_image_to_constraint, resolve_image_constraint, PIL_AVAILABLE as _PIL_AVAILABLE
+
+    _IMAGE_COMPRESS_AVAILABLE = _PIL_AVAILABLE
+except Exception:
+    _IMAGE_COMPRESS_AVAILABLE = False
+    compress_image_to_constraint = None  # type: ignore[assignment]
+    resolve_image_constraint = None  # type: ignore[assignment]
 
 logger = get_logger("file_processor")
 
@@ -129,12 +139,17 @@ class FileProcessor:
         async with aiofiles.open(local_path, "rb") as f:
             return await f.read()
 
-    async def process_files(self, files: List[Dict[str, Any]]) -> List[ProcessedFile]:
+    async def process_files(
+        self,
+        files: List[Dict[str, Any]],
+        model_name: Optional[str] = None,
+    ) -> List[ProcessedFile]:
         """
         处理文件列表
 
         Args:
             files: 文件引用列表，每个元素包含 file_url + 元数据
+            model_name: 模型名称，用于图片压缩约束（可选）
 
         Returns:
             处理后的文件列表
@@ -162,6 +177,7 @@ class FileProcessor:
                     filename=file_name,
                     mime_type=file_type,
                     file_size=file_size,
+                    model_name=model_name,
                 )
 
                 if result:
@@ -181,6 +197,7 @@ class FileProcessor:
         filename: Optional[str] = None,
         mime_type: Optional[str] = None,
         file_size: Optional[int] = None,
+        model_name: Optional[str] = None,
     ) -> Optional[ProcessedFile]:
         """
         Process a file. Prefers local_path (direct filesystem read),
@@ -234,12 +251,37 @@ class FileProcessor:
                 # Local image: use base64 encoding for LLM
                 try:
                     content = await self._read_local_file(resolved_path)
-                    b64_data = base64.standard_b64encode(content).decode("utf-8")
+
+                    # 如果图片超出模型安全限制（考虑 base64 膨胀），尝试自动压缩
+                    effective_mime = mime_type
+                    if _IMAGE_COMPRESS_AVAILABLE and compress_image_to_constraint is not None and resolve_image_constraint is not None:
+                        try:
+                            _, constraint = resolve_image_constraint(model_name)
+                            safe_limit = constraint.safe_file_size_bytes
+                            if len(content) >= safe_limit:
+                                logger.info(
+                                    f"🔧 图片过大 ({len(content) / 1024 / 1024:.2f}MB >= "
+                                    f"安全限制 {safe_limit / 1024 / 1024:.1f}MB)，"
+                                    f"自动压缩: {filename}"
+                                )
+                                content, effective_mime = await compress_image_to_constraint(
+                                    content, model_name
+                                )
+                                file_size = len(content)
+                                logger.info(
+                                    f"✅ 图片压缩完成: {file_size / 1024 / 1024:.2f}MB → {filename}"
+                                )
+                        except Exception as compress_err:
+                            logger.warning(f"图片压缩失败，使用原始数据: {compress_err}")
+
+                    b64_data = await asyncio.to_thread(
+                        lambda: base64.standard_b64encode(content).decode("utf-8")
+                    )
                     content_block = {
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": mime_type,
+                            "media_type": effective_mime,
                             "data": b64_data,
                         },
                     }
