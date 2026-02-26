@@ -20,18 +20,43 @@ class NodeCommand(Enum):
     - system.run: 执行 shell 命令
     - system.which: 检查可执行文件是否存在
     - system.notify: 发送系统通知
-    - camera.snap: 摄像头截图
-    - screen.record: 屏幕录制
-    - location.get: 获取位置信息
+    - system.execApprovals.get: 获取当前执行审批策略
+    - system.execApprovals.set: 更新执行审批策略
+    - camera.snap: 摄像头拍照
+    - camera.list: 枚举可用摄像头
+    - camera.clip: 摄像头录制短视频
+    - screen.capture: 屏幕截图（支持多显示器、格式、质量）
+    - screen.list: 枚举所有显示器信息
+    - screen.record: 屏幕录制视频
+    - location.get: 获取设备位置信息
+    - canvas.present: 展示 WebView 窗口
+    - canvas.hide: 隐藏 WebView 窗口
+    - canvas.navigate: WebView 导航到 URL
+    - canvas.eval: 在 WebView 中执行 JavaScript
+    - canvas.snapshot: 获取 WebView 窗口快照（base64 图像）
+    - canvas.a2ui.push: 向 Canvas 推送 A2UI JSONL 内容
+    - canvas.a2ui.reset: 重置 Canvas A2UI 内容
     """
 
     SYSTEM_RUN = "system.run"
     SYSTEM_WHICH = "system.which"
     SYSTEM_NOTIFY = "system.notify"
+    SYSTEM_EXEC_APPROVALS_GET = "system.execApprovals.get"
+    SYSTEM_EXEC_APPROVALS_SET = "system.execApprovals.set"
     CAMERA_SNAP = "camera.snap"
+    CAMERA_LIST = "camera.list"
+    CAMERA_CLIP = "camera.clip"
+    SCREEN_CAPTURE = "screen.capture"
+    SCREEN_LIST = "screen.list"
     SCREEN_RECORD = "screen.record"
     LOCATION_GET = "location.get"
     CANVAS_PRESENT = "canvas.present"
+    CANVAS_HIDE = "canvas.hide"
+    CANVAS_NAVIGATE = "canvas.navigate"
+    CANVAS_EVAL = "canvas.eval"
+    CANVAS_SNAPSHOT = "canvas.snapshot"
+    CANVAS_A2UI_PUSH = "canvas.a2ui.push"
+    CANVAS_A2UI_RESET = "canvas.a2ui.reset"
     BROWSER_PROXY = "browser.proxy"
 
 
@@ -181,6 +206,7 @@ class NotifyParams:
     message: str
     subtitle: Optional[str] = None
     sound: bool = True
+    category: Optional[str] = None  # urgent/reminder/info/error/build 等，用于通知分类过滤
 
 
 @dataclass
