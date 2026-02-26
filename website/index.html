@@ -666,11 +666,17 @@
         简易安装后，小搭子就直接住在你的电脑里。它能看到你的屏幕、帮你管文件、产内容、做分析、设提醒。只需用自然语言告诉它想做什么，它就能动手帮你搞定！越用越懂你！
       </p>
       <div class="hero-downloads animate d3">
-        <a href="https://github.com/malue-ai/dazee-small/releases/latest/download/xiaodazi-macos-aarch64.dmg" class="hero-download-btn" target="_blank" rel="noopener">
+        <!-- macOS 下载按钮（暂时改为跳转到 Step1，后续可恢复直接下载）
+        <a href="https://github.com/malue-ai/dazee-small/releases/latest/download/xiaodazi_0.1.0_aarch64.dmg" class="hero-download-btn" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
           macOS
         </a>
-        <a href="https://github.com/malue-ai/dazee-small/releases/latest/download/xiaodazi-windows-x64-setup.exe" class="hero-download-btn" target="_blank" rel="noopener">
+        -->
+        <a href="#step1" class="hero-download-btn">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          macOS
+        </a>
+        <a href="https://github.com/malue-ai/dazee-small/releases/latest/download/xiaodazi_0.1.0_x64-setup.exe" class="hero-download-btn" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75l6-1.32v6.48L3 12zm17-9v8.75l-10 .15V5.21L20 3zM3 13l6 .09v6.81l-6-1.15V13zm17 .25V22l-10-1.91V13.1l10 .15z"/></svg>
           Windows
         </a>
@@ -783,7 +789,7 @@
       </div>
       <div class="steps-grid">
         <!-- Step 1 -->
-        <div class="step-card reveal">
+        <div class="step-card reveal" id="step1">
           <div class="step-number">STEP 1</div>
           <h3 data-i18n="s1_title">下载安装</h3>
           <div class="step-install-info">
@@ -814,7 +820,10 @@
               </g>
             </svg>
             <div class="platform-icons">
-              <a class="platform-item" href="https://github.com/malue-ai/dazee-small/releases/latest/download/xiaodazi-macos-aarch64.dmg" target="_blank" rel="noopener">
+              <!-- macOS 下载图标（暂时改为跳转到 Step1，后续可恢复直接下载）
+              <a class="platform-item" href="https://github.com/malue-ai/dazee-small/releases/latest/download/xiaodazi_0.1.0_aarch64.dmg" target="_blank" rel="noopener">
+              -->
+              <a class="platform-item" href="#step1">
                 <div class="platform-icon">
                   <svg viewBox="0 0 24 25" fill="currentColor"><path d="M19.792 18.7033C19.429 19.5418 18.9994 20.3136 18.5016 21.0232C17.8231 21.9906 17.2676 22.6602 16.8395 23.0321C16.1758 23.6424 15.4647 23.955 14.7032 23.9728C14.1566 23.9728 13.4973 23.8172 12.73 23.5017C11.9601 23.1876 11.2525 23.0321 10.6056 23.0321C9.92709 23.0321 9.19941 23.1876 8.42106 23.5017C7.64153 23.8172 7.01355 23.9817 6.53342 23.9979C5.80322 24.0291 5.07539 23.7076 4.3489 23.0321C3.88521 22.6276 3.30523 21.9343 2.61043 20.9521C1.86498 19.9033 1.25211 18.687 0.771975 17.3004C0.25777 15.8026 0 14.3523 0 12.9482C0 11.3398 0.347544 9.95259 1.04367 8.79011C1.59076 7.85636 2.31859 7.11979 3.22953 6.57906C4.14046 6.03834 5.12473 5.76279 6.18469 5.74516C6.76467 5.74516 7.52524 5.92457 8.4704 6.27715C9.41288 6.63091 10.0181 6.81032 10.2834 6.81032C10.4817 6.81032 11.154 6.60054 12.2937 6.18234C13.3714 5.7945 14.281 5.63391 15.0262 5.69717C17.0454 5.86012 18.5624 6.6561 19.5712 8.09013C17.7654 9.18432 16.8721 10.7169 16.8898 12.6829C16.9061 14.2142 17.4617 15.4886 18.5535 16.5004C19.0483 16.97 19.6009 17.333 20.2156 17.5907C20.0823 17.9774 19.9416 18.3477 19.792 18.7033ZM15.161 0.480137C15.161 1.68041 14.7225 2.8011 13.8484 3.83841C12.7937 5.07155 11.5179 5.78413 10.1343 5.67168C10.1167 5.52769 10.1065 5.37614 10.1065 5.21688C10.1065 4.06462 10.6081 2.83147 11.4989 1.82321C11.9436 1.3127 12.5092 0.888228 13.1951 0.549615C13.8796 0.216055 14.5269 0.031589 15.1358 0C15.1536 0.160458 15.161 0.320926 15.161 0.480137Z"/></svg>
                 </div>
