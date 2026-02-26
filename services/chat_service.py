@@ -66,6 +66,7 @@ from services.session_service import (
 )
 from utils.background_tasks import TaskContext, get_background_task_service
 from utils.file_processor import get_file_processor
+from utils.image_constraints import validate_image_files_for_model
 from utils.message_utils import (
     append_to_last_user_message,
     dict_list_to_messages,
@@ -129,6 +130,7 @@ class PreprocessingHandler:
         tracker: Optional["UsageTracker"],
         router: Optional["AgentRouter"],
         enable_intent: bool = True,
+        current_step_hint: Optional[str] = None,
     ) -> PreprocessingResult:
         """
         执行前置处理
@@ -143,6 +145,8 @@ class PreprocessingHandler:
             tracker: UsageTracker 实例
             router: AgentRouter 实例
             enable_intent: 是否启用意图识别
+            current_step_hint: Current plan step title for Step-Aware
+                skill group selection.
 
         Returns:
             PreprocessingResult 包含 intent
@@ -158,6 +162,7 @@ class PreprocessingHandler:
                 history_messages=history_for_intent,
                 router=router,
                 tracker=tracker,
+                current_step_hint=current_step_hint,
             )
         elif not enable_intent:
             # 意图识别已关闭，使用默认 IntentResult
@@ -174,19 +179,28 @@ class PreprocessingHandler:
         history_messages: List[Dict[str, Any]],
         router: "AgentRouter",
         tracker: Optional["UsageTracker"],
+        current_step_hint: Optional[str] = None,
     ) -> Optional["IntentResult"]:
         """
         执行意图识别
 
         Args:
             user_message: 用户消息（支持 str 或多模态 list）
+            history_messages: 历史消息列表
+            router: AgentRouter 实例
+            tracker: UsageTracker 实例
+            current_step_hint: Current plan step title for Step-Aware
+                skill group selection.
 
         Returns:
             routing_intent: 意图分析结果
         """
         with log_execution_time("路由决策", logger):
             routing_decision = await router.route(
-                user_query=user_message, conversation_history=history_messages, tracker=tracker
+                user_query=user_message,
+                conversation_history=history_messages,
+                tracker=tracker,
+                current_step_hint=current_step_hint,
             )
             routing_intent = routing_decision.intent
 
@@ -210,6 +224,30 @@ class PreprocessingHandler:
 
         return routing_intent
 
+# ==================== 辅助函数 ====================
+
+
+def _extract_current_step_hint(plan: Optional[Dict]) -> Optional[str]:
+    """
+    Extract the title of the current active step from a plan.
+
+    Looks for the first in_progress step; falls back to the first
+    pending step if none are in_progress.
+
+    Returns:
+        Step title string, or None if no plan / no actionable steps.
+    """
+    if not plan or not isinstance(plan, dict):
+        return None
+    for todo in plan.get("todos", []):
+        if todo.get("status") == "in_progress":
+            return todo.get("title")
+    for todo in plan.get("todos", []):
+        if todo.get("status") == "pending":
+            return todo.get("title")
+    return None
+
+
 # ==================== 异常定义 ====================
 
 
@@ -221,6 +259,12 @@ class ChatServiceError(Exception):
 
 class AgentExecutionError(ChatServiceError):
     """Agent 执行失败异常"""
+
+    pass
+
+
+class AttachmentValidationError(ChatServiceError):
+    """附件校验失败异常（如图片超过模型限制）"""
 
     pass
 
@@ -723,6 +767,10 @@ class ChatService:
                     raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
 
         effective_agent_id = agent_id or self.default_agent_key
+        effective_model_name = None
+        agent_config = self.agent_registry.get_agent_config(effective_agent_id)
+        if agent_config and getattr(agent_config, "instance_config", None):
+            effective_model_name = getattr(agent_config.instance_config, "model", None)
 
         # 2. 创建/校验 Conversation
         try:
@@ -787,6 +835,15 @@ class ChatService:
                     elif hasattr(f, "model_dump"):
                         files_data.append(f.model_dump())  # type: ignore[union-attr]
                 if files_data:
+                    # 先做按模型的图片限制校验，避免请求发送到模型侧才报错
+                    try:
+                        await validate_image_files_for_model(
+                            files=files_data,
+                            model_name=effective_model_name,
+                        )
+                    except ValueError as e:
+                        raise AttachmentValidationError(str(e)) from e
+
                     processed_files = await self.file_processor.process_files(files_data)
                     if processed_files:
                         files_metadata = [
@@ -1433,6 +1490,9 @@ class ChatService:
                 agent_prompt_cache = getattr(agent, "prompt_cache", None)
                 router = await self._get_router(prompt_cache=agent_prompt_cache)
 
+            # Step-Aware: extract current step title from plan
+            current_step_hint = _extract_current_step_hint(existing_plan)
+
             # 执行前置处理（传入完整消息，支持多模态）
             preprocessing_handler = await self.get_preprocessing_handler()
             preprocessing_result = await preprocessing_handler.process(
@@ -1445,6 +1505,7 @@ class ChatService:
                 tracker=shared_tracker,
                 router=router,
                 enable_intent=self.enable_routing and enable_intent,
+                current_step_hint=current_step_hint,
             )
 
             routing_intent = preprocessing_result.intent

@@ -12,6 +12,7 @@ from .agent_registry import (
 )
 from .chat_service import (
     AgentExecutionError,
+    AttachmentValidationError,
     ChatService,
     ChatServiceError,
     get_chat_service,
@@ -54,6 +55,7 @@ __all__ = [
     "get_chat_service",
     "ChatServiceError",
     "AgentExecutionError",
+    "AttachmentValidationError",
     # Conversation Service
     "ConversationService",
     "get_conversation_service",

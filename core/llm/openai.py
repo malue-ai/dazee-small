@@ -95,8 +95,8 @@ class OpenAILLMService(BaseLLMService):
                 "OpenAI API Key 未设置。请设置 OPENAI_API_KEY 环境变量或传入 api_key 参数"
             )
 
-        # API 端点
-        base_url = self.config.base_url or "https://api.openai.com/v1"
+        # API 端点（优先级：config.base_url > OPENAI_BASE_URL 环境变量 > 官方默认）
+        base_url = self.config.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 
         # 初始化 OpenAI 客户端
         timeout = getattr(self.config, "timeout", 120.0)
