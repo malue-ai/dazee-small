@@ -243,8 +243,8 @@ class QwenLLMService(BaseLLMService):
         masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
         logger.info(f"🔑 Qwen API Key: {masked_key} (长度: {len(api_key)})")
 
-        # 获取 API 端点（优先使用 base_url，否则根据 region 选择）
-        base_url = getattr(self.config, "base_url", None)
+        # 获取 API 端点（优先级：config.base_url > DASHSCOPE_BASE_URL 环境变量 > region 选择）
+        base_url = getattr(self.config, "base_url", None) or os.getenv("DASHSCOPE_BASE_URL")
         if base_url:
             logger.info(f"🌐 千问端点（自定义）: {base_url}")
         else:

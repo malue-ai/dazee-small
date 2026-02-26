@@ -1237,6 +1237,13 @@ async function loadAll() {
     for (const p of providerData) {
       const existingKey = settingsData?.['api_keys']?.[p.api_key_env] || ''
       providerKeys[p.name] = existingKey
+
+      // 回显已保存的自定义 Base URL
+      const baseUrlEnv = p.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+      const existingBaseUrl = settingsData?.['api_keys']?.[baseUrlEnv] || ''
+      if (existingBaseUrl) {
+        providerBaseUrls[p.name] = existingBaseUrl
+      }
     }
 
     // 引导系统：如果有已配置的 Key，允许跳过

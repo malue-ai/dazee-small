@@ -38,6 +38,7 @@ from models.chat import (
 )
 from services import (
     AgentExecutionError,
+    AttachmentValidationError,
     SessionNotFoundError,
     get_chat_service,
     get_conversation_service,
@@ -443,6 +444,12 @@ async def chat(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=create_error_response(ErrorCode.AGENT_ERROR, "对话处理失败，请稍后重试"),
+        )
+    except AttachmentValidationError as e:
+        logger.warning(f"⚠️ 附件校验失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=create_error_response(ErrorCode.VALIDATION_ERROR, str(e)),
         )
     except ConnectionError as e:
         logger.error(f"❌ 连接错误: {str(e)}", exc_info=True)
