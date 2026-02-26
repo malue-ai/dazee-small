@@ -1,6 +1,6 @@
 [package]
 name = "xiaodazi"
-version = "0.1.0"
+version = "0.1.1"
 description = "xiaodazi - AI-powered local execution client"
 authors = ["xiaodazi Team"]
 edition = "2021"
@@ -23,6 +23,7 @@ chrono = "0.4"
 hostname = "0.4"
 ureq = "2"
 base64 = "0.22"
+url = "2"
 
 [features]
 default = ["custom-protocol"]
