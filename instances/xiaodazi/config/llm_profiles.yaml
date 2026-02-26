@@ -10,9 +10,9 @@
 #   ┌──────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────────────┐
 #   │ 角色     │ qwen             │ claude           │ deepseek         │ glm              │ minimax                  │
 #   ├──────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────────────┤
-#   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
-#   │ heavy    │ qwen3-max        │ claude-sonnet-4-5│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
-#   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.5-highspeed   │
+#   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │ kimi-k2.5                │
+#   │ heavy    │ qwen3-max        │ claude-sonnet-4-5│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │ kimi-k2.5                │
+#   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.5-highspeed   │ kimi-k2-turbo-preview    │
 #   └──────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────────────┘
 #
 
@@ -108,6 +108,22 @@ provider_templates:
       provider: "minimax"
       model: "MiniMax-M2.5-highspeed"
       api_key_env: "MINIMAX_API_KEY"
+
+  kimi:
+    agent_model: "kimi-k2.5"                    # 主 Agent：Kimi K2.5 多模态旗舰（256K 上下文，视觉+思考）
+    agent_llm:
+      max_tokens: 33000
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: false
+    heavy:
+      provider: "kimi"
+      model: "kimi-k2.5"
+      api_key_env: "MOONSHOT_API_KEY"
+    light:
+      provider: "kimi"
+      model: "kimi-k2-turbo-preview"
+      api_key_env: "MOONSHOT_API_KEY"
 
 # ==================== 各调用点配置 ====================
 #

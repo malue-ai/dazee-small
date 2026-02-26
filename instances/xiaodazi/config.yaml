@@ -11,3 +11,6 @@ instance:
   name: 小搭子
   description: 住在你电脑里的 AI 搭子，亲切靠谱，帮你搞定桌面上的大小事
   version: 1.0.0
+agent:
+  provider: kimi
+  model: kimi-k2.5

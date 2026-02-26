@@ -201,6 +201,7 @@ class LLMProvider(Enum):
     DEEPSEEK = "deepseek"  # DeepSeek（深度求索）
     GLM = "glm"  # GLM（智谱AI）
     MINIMAX = "minimax"  # MiniMax（Anthropic API 兼容）
+    KIMI = "kimi"  # Kimi（Moonshot AI，OpenAI 兼容）
 
 
 class ToolType(Enum):
