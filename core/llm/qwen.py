@@ -218,6 +218,7 @@ class QwenLLMService(BaseLLMService):
                 provider=config.provider,
                 model=config.model,
                 api_key=config.api_key,
+                base_url=config.base_url,
                 max_tokens=config.max_tokens,
                 temperature=config.temperature,
                 enable_thinking=config.enable_thinking,

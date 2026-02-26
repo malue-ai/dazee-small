@@ -719,9 +719,11 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
     base_url = request.base_url or meta["base_url"]
     validate_method = meta["validate_method"]
 
-    # "auto": official endpoint → anthropic, custom base_url → openai
+    # "auto": 用户改了 base_url → openai 验证，否则 → anthropic 验证
     if validate_method == "auto":
-        if request.base_url:
+        default_url = meta["base_url"].rstrip("/")
+        custom_url = (request.base_url or "").rstrip("/")
+        if custom_url and custom_url != default_url:
             validate_method = "openai"
         else:
             validate_method = "anthropic"
