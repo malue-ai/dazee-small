@@ -1,23 +1,22 @@
-name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，能执行本地桌面任务并记住用户偏好
+name: GeneralAgent
+description: 通用智能助手（高质量默认配置）
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - simple
+  - low
   - medium
-  - complex
+  - high
   task_types:
-  - file_management
+  - question_answering
   - data_analysis
-  - writing
-  - translation
-  - desktop_automation
-  - preference_recall
-  - report_generation
+  - content_generation
+  - code_execution
+  - web_search
+  - file_operation
   output_formats:
   - text
+  - json
   - markdown
-  - file
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -26,42 +25,40 @@ intent_analyzer:
 plan_manager:
   enabled: true
   trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 20
-  granularity: fine
+  max_steps: 15
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 3
+  max_replan_attempts: 2
   replan_strategy: incremental
-  failure_threshold: 0.4
+  failure_threshold: 0.3
 tool_selector:
   enabled: true
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 1
+  max_parallel_tools: 3
   base_tools:
-  - nodes
-  - knowledge_search
-  - open_system_preferences
+  - plan_todo
   tool_timeout: 300
 memory_manager:
   enabled: true
-  retention_policy: user
-  episodic_memory: true
-  working_memory_limit: 50
+  retention_policy: session
+  episodic_memory: false
+  working_memory_limit: 20
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: markdown
+  default_format: text
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: false
-  max_output_length: 2000
+  code_highlighting: true
+  max_output_length: 50000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
@@ -69,15 +66,9 @@ output_formatter:
   json_indent: 2
   include_metadata: false
 skills: []
-tools:
-- web_search
-- api_calling
-- nodes
-- knowledge_search
-- open_system_preferences
-- hitl
-model: qwen3-max
-max_turns: null
+tools: []
+model: kimi-k2.5
+max_turns: 15
 execution_strategy: rvr-b
 allow_parallel_tools: false
 context_limits:
@@ -90,4 +81,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂桌面任务（如文件整理、UI操作、多步骤规划），强调主动性、本地执行和记忆能力。需启用细粒度规划、用户级记忆、HITL确认机制，并支持环境感知与安全回滚。虽未明确列出具体Skills，但核心能力依赖工具链（如nodes操作文件、open_system_preferences处理权限），且需通过intent_analyzer判断任务复杂度以决定是否规划。
+reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。
