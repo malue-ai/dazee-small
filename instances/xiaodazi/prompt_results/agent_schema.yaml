@@ -1,5 +1,5 @@
 name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，亲切、主动、可靠，擅长本地桌面任务执行与个性化服务
+description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，能执行本地桌面任务并记住用户偏好
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,18 +7,17 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_operation
+  - file_management
   - data_analysis
   - writing
   - translation
-  - ui_automation
+  - desktop_automation
   - preference_recall
-  - tool_installation_guidance
+  - report_generation
   output_formats:
   - text
   - markdown
-  - structured_list
-  - file_reference
+  - file
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -45,7 +44,6 @@ tool_selector:
   - nodes
   - knowledge_search
   - open_system_preferences
-  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -74,7 +72,10 @@ skills: []
 tools:
 - web_search
 - api_calling
-- multi-lang-ocr
+- nodes
+- knowledge_search
+- open_system_preferences
+- hitl
 model: qwen3-max
 max_turns: null
 execution_strategy: rvr-b
@@ -89,5 +90,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好。需细粒度规划、强记忆管理、工具动态选择，并支持 OCR
-  等技能。优先本地执行，敏感操作需 HITL 确认，出错时重试并提供替代方案。
+reasoning: 小搭子需处理复杂桌面任务（如文件整理、UI操作、多步骤规划），强调主动性、本地执行和记忆能力。需启用细粒度规划、用户级记忆、HITL确认机制，并支持环境感知与安全回滚。虽未明确列出具体Skills，但核心能力依赖工具链（如nodes操作文件、open_system_preferences处理权限），且需通过intent_analyzer判断任务复杂度以决定是否规划。
