@@ -22,6 +22,7 @@ chrono = "0.4"
 hostname = "0.4"
 ureq = "2"
 base64 = "0.22"
+url = "2"
 
 [features]
 default = ["custom-protocol"]
