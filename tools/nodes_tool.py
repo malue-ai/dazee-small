@@ -193,15 +193,28 @@ Actions:
             node_id=node_id,
         )
 
+        inner_payload = response.payload if response.ok else None
         result: Dict[str, Any] = {
             "success": response.ok,
             "action": "run",
             "node": node_id,
             "command": command,
-            "result": response.payload if response.ok else None,
+            "result": inner_payload,
             "error": response.error if not response.ok else None,
             "elapsed_ms": response.elapsed_ms,
         }
+
+        # Promote _hint from nested payload to top level so the LLM sees it
+        # without having to parse deeply nested JSON.
+        # Also mark success=False when the inner command failed (exit_code != 0),
+        # so the LLM does not misread the outer success=True as "command succeeded".
+        if inner_payload:
+            inner_hint = inner_payload.get("_hint")
+            if inner_hint:
+                result["_hint"] = inner_hint
+            inner_exit_code = inner_payload.get("exit_code")
+            if inner_exit_code is not None and inner_exit_code != 0:
+                result["success"] = False
 
         # Structured error classification for failed commands
         if not response.ok and response.error:

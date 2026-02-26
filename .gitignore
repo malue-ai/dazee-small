@@ -60,6 +60,7 @@ coverage.xml
 
 # 配置文件（包含 API Key 等敏感信息）
 config.yaml
+.env
 
 # 实例敏感信息（API Keys）
 instances/*/.env
@@ -69,7 +70,7 @@ instances/*_backup/.env
 frontend/src-tauri/gen/
 
 frontend/src-tauri/binaries/_internal/
-frontend/src-tauri/binaries/zenflux-backend-*
+frontend/src-tauri/binaries/xiaodazi-backend-*
 
 # Project specific
 workspace_*/

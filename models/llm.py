@@ -189,6 +189,7 @@ class ProviderDetailResponse(BaseModel):
     icon: str = Field("🤖", description="图标（emoji 或 URL）")
     base_url: str = Field(..., description="默认 API Base URL")
     api_key_env: str = Field(..., description="API Key 环境变量名")
+    api_key_url: Optional[str] = Field(None, description="获取 API Key 的平台链接")
     api_key_configured: bool = Field(False, description="API Key 是否已配置")
     default_model: str = Field(..., description="默认模型")
     description: Optional[str] = Field(None, description="Provider 描述")

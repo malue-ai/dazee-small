@@ -1,5 +1,5 @@
 name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，擅长本地桌面任务执行与个性化服务
+description: 住在用户电脑里的 AI 搭子，亲切、主动、可靠，擅长本地桌面任务执行与个性化服务
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,13 +7,13 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_management
-  - writing
+  - file_operation
   - data_analysis
+  - writing
   - translation
   - ui_automation
-  - memory_recall
-  - preference_adaptation
+  - preference_recall
+  - tool_installation_guidance
   output_formats:
   - text
   - markdown
@@ -43,8 +43,9 @@ tool_selector:
   max_parallel_tools: 1
   base_tools:
   - nodes
-  - hitl
+  - knowledge_search
   - open_system_preferences
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -72,10 +73,8 @@ output_formatter:
 skills: []
 tools:
 - web_search
-- knowledge_search
-- nodes
-- hitl
-- open_system_preferences
+- api_calling
+- multi-lang-ocr
 model: qwen3-max
 max_turns: null
 execution_strategy: rvr-b
@@ -90,4 +89,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好性。必须启用细粒度规划（plan_manager）以支持多步骤桌面操作；内存管理需长期保留用户偏好；工具选择聚焦本地能力（nodes为核心），敏感操作通过HITL确认；输出需通俗结构化，避免技术术语。虽然Skills未明确列出，但系统描述中隐含对多种技能的依赖（如OCR、PDF生成等），实际运行时由框架动态注入可用Skills，故Schema中skills留空以保持灵活性。
+reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好。需细粒度规划、强记忆管理、工具动态选择，并支持 OCR
+  等技能。优先本地执行，敏感操作需 HITL 确认，出错时重试并提供替代方案。

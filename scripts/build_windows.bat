@@ -1,9 +1,9 @@
 @echo off
-title ZenFlux Agent - Windows Build
+title xiaodazi - Windows Build
 
 echo.
 echo ============================================================
-echo   ZenFlux Agent - Windows One-Click Build
+echo   xiaodazi - Windows One-Click Build
 echo ============================================================
 echo.
 echo   This script will:
@@ -17,7 +17,7 @@ echo.
 echo ============================================================
 echo.
 
-powershell -ExecutionPolicy Bypass -File "%~dp0scripts\build_app_windows.ps1"
+powershell -ExecutionPolicy Bypass -File "%~dp0build_app_windows.ps1"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

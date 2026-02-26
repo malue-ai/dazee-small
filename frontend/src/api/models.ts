@@ -42,6 +42,7 @@ export interface ProviderDetail {
   icon: string
   base_url: string
   api_key_env: string
+  api_key_url?: string
   api_key_configured: boolean
   default_model: string
   description?: string

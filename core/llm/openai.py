@@ -36,6 +36,18 @@ logger = get_logger("llm.openai")
 # 详细日志开关
 LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", "yes")
 
+# 支持音频输入/输出的模型
+OPENAI_AUDIO_MODELS = {
+    "gpt-audio",
+    "gpt-4o-audio-preview",
+    "gpt-4o-audio-preview-2024-12-17",
+}
+
+
+def _is_audio_model(model: str) -> bool:
+    """Check if the model supports audio input/output."""
+    return any(m in model for m in OPENAI_AUDIO_MODELS)
+
 
 # ============================================================
 # OpenAI LLM 服务
@@ -253,22 +265,27 @@ class OpenAILLMService(BaseLLMService):
             "stream": False,
         }
 
+        # 音频模型参数
+        if _is_audio_model(self.config.model):
+            request_params["modalities"] = ["text", "audio"]
+            request_params["audio"] = {
+                "voice": kwargs.get("audio_voice", "alloy"),
+                "format": kwargs.get("audio_format", "wav"),
+            }
+
         # System prompt
         if system:
             if isinstance(system, list):
-                # 列表格式，提取文本
                 system_text = "\n".join(
                     block.get("text", "") for block in system if block.get("type") == "text"
                 )
                 request_params["messages"].insert(0, {"role": "system", "content": system_text})
             elif isinstance(system, dict):
-                # dict 格式，提取 text
                 system_text = (
                     system.get("text", "") if system.get("type") == "text" else str(system)
                 )
                 request_params["messages"].insert(0, {"role": "system", "content": system_text})
             else:
-                # 字符串格式
                 request_params["messages"].insert(0, {"role": "system", "content": str(system)})
 
         # Tools
@@ -294,7 +311,6 @@ class OpenAILLMService(BaseLLMService):
                 kwargs.get("tool_choice", "auto")
             )
 
-        # 调试日志
         logger.debug(f"📤 OpenAI 请求: model={self.config.model}, messages={len(openai_messages)}")
 
         if LLM_DEBUG_VERBOSE:
@@ -312,7 +328,7 @@ class OpenAILLMService(BaseLLMService):
                 logger.error(f"OpenAI API 调用失败: {e}")
             raise
 
-        # 转换响应
+        # 转换响应（含音频输出处理）
         return self._parse_response(response)
 
     async def create_message_stream(
@@ -354,6 +370,14 @@ class OpenAILLMService(BaseLLMService):
             "stream_options": {"include_usage": True},
         }
 
+        # 音频模型参数
+        if _is_audio_model(self.config.model):
+            request_params["modalities"] = ["text", "audio"]
+            request_params["audio"] = {
+                "voice": kwargs.get("audio_voice", "alloy"),
+                "format": kwargs.get("audio_format", "wav"),
+            }
+
         # System prompt
         if system:
             if isinstance(system, list):
@@ -362,7 +386,6 @@ class OpenAILLMService(BaseLLMService):
                 )
                 request_params["messages"].insert(0, {"role": "system", "content": system_text})
             elif isinstance(system, dict):
-                # dict 格式，提取 text
                 system_text = (
                     system.get("text", "") if system.get("type") == "text" else str(system)
                 )
@@ -401,6 +424,7 @@ class OpenAILLMService(BaseLLMService):
         # 累积变量
         accumulated_content = ""
         accumulated_thinking = ""
+        accumulated_audio_data = ""
         tool_calls = []
         stop_reason = None
         usage = {}
@@ -451,6 +475,21 @@ class OpenAILLMService(BaseLLMService):
                     yield LLMResponse(
                         content=delta.content, model=self.config.model, is_stream=True
                     )
+
+                # 处理音频输出（OpenAI 音频模型通过 delta.audio 返回流式音频）
+                if hasattr(delta, "audio") and delta.audio:
+                    audio_chunk = getattr(delta.audio, "data", None)
+                    if audio_chunk:
+                        accumulated_audio_data += audio_chunk
+
+                    audio_transcript = getattr(delta.audio, "transcript", None)
+                    if audio_transcript:
+                        accumulated_content += audio_transcript
+                        if on_content:
+                            on_content(audio_transcript)
+                        yield LLMResponse(
+                            content=audio_transcript, model=self.config.model, is_stream=True
+                        )
 
                 # 处理工具调用
                 if delta.tool_calls:
@@ -541,9 +580,20 @@ class OpenAILLMService(BaseLLMService):
 
             logger.info(f"📥 OpenAI 响应: stop_reason={stop_reason or 'stop'}")
 
-            # 转换 stop_reason
-            if stop_reason == "tool_calls":
+            if stop_reason == "tool_calls" or (formatted_tool_calls and stop_reason == "stop"):
                 stop_reason = "tool_use"
+
+            # 构建音频输出数据
+            audio_data = None
+            if accumulated_audio_data:
+                audio_data = {
+                    "data": accumulated_audio_data,
+                    "transcript": accumulated_content,
+                    "format": "wav",
+                }
+                logger.info(
+                    f"🎵 OpenAI 音频输出: data_len={len(accumulated_audio_data)}"
+                )
 
             # 返回最终响应
             yield LLMResponse(
@@ -554,6 +604,7 @@ class OpenAILLMService(BaseLLMService):
                 usage=usage if usage else None,
                 model=self.config.model,
                 raw_content=raw_content,
+                audio_data=audio_data,
                 is_stream=False,
             )
 
@@ -592,6 +643,23 @@ class OpenAILLMService(BaseLLMService):
         # 提取思考内容（OpenAI 推理模型通过 reasoning_content 返回）
         thinking_text = getattr(message, "reasoning_content", None)
 
+        # 提取音频输出（音频模型通过 message.audio 返回）
+        audio_data = None
+        if hasattr(message, "audio") and message.audio:
+            audio_data = {
+                "data": getattr(message.audio, "data", ""),
+                "transcript": getattr(message.audio, "transcript", ""),
+                "format": getattr(message.audio, "format", "wav"),
+                "id": getattr(message.audio, "id", ""),
+                "expires_at": getattr(message.audio, "expires_at", None),
+            }
+            if audio_data["transcript"] and not content_text:
+                content_text = audio_data["transcript"]
+            logger.info(
+                f"🎵 收到音频输出: format={audio_data['format']}, "
+                f"transcript_len={len(audio_data.get('transcript', ''))}"
+            )
+
         # 提取工具调用
         tool_calls = []
         if message.tool_calls:
@@ -608,7 +676,6 @@ class OpenAILLMService(BaseLLMService):
                 "input_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.completion_tokens,
             }
-            # 提取 reasoning tokens（如果有）
             if hasattr(response.usage, "completion_tokens_details"):
                 details = response.usage.completion_tokens_details
                 reasoning_tokens = getattr(details, "reasoning_tokens", 0) if details else 0
@@ -619,9 +686,8 @@ class OpenAILLMService(BaseLLMService):
                 f"output={usage['output_tokens']:,}"
             )
 
-        # 转换 stop_reason
         stop_reason = choice.finish_reason
-        if stop_reason == "tool_calls":
+        if stop_reason == "tool_calls" or (tool_calls and stop_reason == "stop"):
             stop_reason = "tool_use"
 
         # 构建 raw_content
@@ -635,7 +701,7 @@ class OpenAILLMService(BaseLLMService):
                 {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
             )
 
-        return LLMResponse(
+        llm_response = LLMResponse(
             content=content_text,
             thinking=thinking_text,
             tool_calls=tool_calls if tool_calls else None,
@@ -644,6 +710,11 @@ class OpenAILLMService(BaseLLMService):
             model=self.config.model,
             raw_content=raw_content,
         )
+
+        if audio_data:
+            llm_response.audio_data = audio_data
+
+        return llm_response
 
 
 # ============================================================
