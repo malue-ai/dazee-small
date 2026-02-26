@@ -371,9 +371,23 @@ async fn get_node_info() -> Result<NodeInfo, String> {
     #[cfg(target_os = "macos")]
     {
         capabilities.push("camera.snap".to_string());
+        capabilities.push("camera.list".to_string());
         capabilities.push("screen.record".to_string());
         capabilities.push("location.get".to_string());
     }
+
+    #[cfg(target_os = "windows")]
+    {
+        capabilities.push("camera.snap".to_string());
+        capabilities.push("camera.list".to_string());
+    }
+
+    // Canvas capabilities (all platforms)
+    capabilities.push("canvas.present".to_string());
+    capabilities.push("canvas.hide".to_string());
+    capabilities.push("canvas.navigate".to_string());
+    capabilities.push("canvas.eval".to_string());
+    capabilities.push("canvas.snapshot".to_string());
 
     Ok(NodeInfo {
         node_id,
@@ -549,6 +563,188 @@ async fn open_system_preferences(pane: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Canvas / WebView 控制窗口
+// ============================================================================
+
+const CANVAS_WINDOW_LABEL: &str = "canvas";
+
+/// 校验 URL 安全性，阻止危险协议
+fn is_canvas_url_safe(url_str: &str) -> bool {
+    let trimmed = url_str.trim().to_lowercase();
+
+    if trimmed.starts_with("javascript:")
+        || trimmed.starts_with("vbscript:")
+        || trimmed.starts_with("file:")
+    {
+        return false;
+    }
+
+    if trimmed.starts_with("data:") {
+        if let Some(comma) = trimmed.find(',') {
+            let header = &trimmed[5..comma];
+            if header.is_empty() {
+                return true;
+            }
+            let media = header.split(';').next().unwrap_or("").trim();
+            return media.is_empty() || media == "text/html" || media == "text/plain";
+        }
+        return false;
+    }
+
+    true
+}
+
+/// 展示（创建或复用）Canvas WebView 窗口
+#[tauri::command]
+async fn canvas_present(
+    app: tauri::AppHandle,
+    url: Option<String>,
+    html: Option<String>,
+    width: Option<f64>,
+    height: Option<f64>,
+    title: Option<String>,
+    always_on_top: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+
+    let w = width.unwrap_or(800.0);
+    let h = height.unwrap_or(600.0);
+    let t = title.unwrap_or_else(|| "Canvas".to_string());
+
+    if let Some(ref u) = url {
+        if !is_canvas_url_safe(u) {
+            return Err(format!(
+                "URL blocked for security: {}",
+                &u[..u.len().min(80)]
+            ));
+        }
+    }
+
+    // Reuse existing window
+    if let Some(win) = app.get_webview_window(CANVAS_WINDOW_LABEL) {
+        let _ = win.set_title(&t);
+        let _ = win.set_size(tauri::LogicalSize::new(w, h));
+        if let Some(aot) = always_on_top {
+            let _ = win.set_always_on_top(aot);
+        }
+        let _ = win.show();
+        let _ = win.set_focus();
+
+        if let Some(ref u) = url {
+            if let Ok(parsed) = url::Url::parse(u) {
+                let _ = win.navigate(parsed);
+            }
+        } else if let Some(ref html_content) = html {
+            let b64 =
+                base64::engine::general_purpose::STANDARD.encode(html_content.as_bytes());
+            let data_url = format!("data:text/html;base64,{}", b64);
+            if let Ok(parsed) = url::Url::parse(&data_url) {
+                let _ = win.navigate(parsed);
+            }
+        }
+
+        return Ok(serde_json::json!({"presented": true, "reused": true}));
+    }
+
+    // Build URL for new window
+    let webview_url = if let Some(ref u) = url {
+        tauri::WebviewUrl::External(
+            url::Url::parse(u).map_err(|e| format!("Invalid URL: {}", e))?,
+        )
+    } else if let Some(ref html_content) = html {
+        let b64 =
+            base64::engine::general_purpose::STANDARD.encode(html_content.as_bytes());
+        let data_url = format!("data:text/html;base64,{}", b64);
+        tauri::WebviewUrl::External(url::Url::parse(&data_url).unwrap())
+    } else {
+        tauri::WebviewUrl::External(url::Url::parse("about:blank").unwrap())
+    };
+
+    let mut builder =
+        tauri::WebviewWindowBuilder::new(&app, CANVAS_WINDOW_LABEL, webview_url)
+            .title(&t)
+            .inner_size(w, h)
+            .center()
+            .resizable(true)
+            .visible(true);
+
+    if let Some(aot) = always_on_top {
+        builder = builder.always_on_top(aot);
+    }
+
+    builder.build().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({"presented": true, "reused": false}))
+}
+
+/// 隐藏 Canvas 窗口
+#[tauri::command]
+async fn canvas_hide(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let win = app
+        .get_webview_window(CANVAS_WINDOW_LABEL)
+        .ok_or("Canvas window not found")?;
+    win.hide().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({"hidden": true}))
+}
+
+/// Canvas 窗口导航到指定 URL
+#[tauri::command]
+async fn canvas_navigate(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<serde_json::Value, String> {
+    if !is_canvas_url_safe(&url) {
+        return Err(format!(
+            "URL blocked for security: {}",
+            &url[..url.len().min(80)]
+        ));
+    }
+    let win = app
+        .get_webview_window(CANVAS_WINDOW_LABEL)
+        .ok_or("Canvas window not found")?;
+    let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    win.navigate(parsed).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({"navigated": true}))
+}
+
+/// 在 Canvas 窗口中执行 JavaScript
+#[tauri::command]
+async fn canvas_eval(
+    app: tauri::AppHandle,
+    script: String,
+) -> Result<serde_json::Value, String> {
+    let win = app
+        .get_webview_window(CANVAS_WINDOW_LABEL)
+        .ok_or("Canvas window not found")?;
+    win.eval(&script).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({"executed": true}))
+}
+
+/// 获取 Canvas 窗口快照信息（位置、大小、URL）
+///
+/// 返回窗口元数据，调用方可结合 screenshot(region) 截取窗口内容。
+#[tauri::command]
+async fn canvas_snapshot(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let win = app
+        .get_webview_window(CANVAS_WINDOW_LABEL)
+        .ok_or("Canvas window not found")?;
+
+    let url = win.url().map_err(|e| e.to_string())?;
+    let title = win.title().unwrap_or_default();
+    let size = win.inner_size().map_err(|e| e.to_string())?;
+    let position = win.outer_position().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "url": url.to_string(),
+        "title": title,
+        "width": size.width,
+        "height": size.height,
+        "x": position.x,
+        "y": position.y,
+    }))
 }
 
 // ============================================================================
@@ -860,14 +1056,18 @@ fn main() {
         })
         .on_window_event(|window, event| {
             match event {
-                // 拦截窗口关闭请求 → 隐藏到托盘而非退出
+                // 仅拦截主窗口关闭 → 隐藏到托盘；其他窗口（如 canvas）正常关闭
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
-                    let _ = window.hide();
+                    if window.label() == "main" {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
-                // 窗口真正销毁时终止 sidecar（第一层防护）
+                // 主窗口销毁时终止 sidecar（第一层防护）
                 tauri::WindowEvent::Destroyed => {
-                    kill_sidecar(window.app_handle());
+                    if window.label() == "main" {
+                        kill_sidecar(window.app_handle());
+                    }
                 }
                 _ => {}
             }
@@ -889,6 +1089,11 @@ fn main() {
             create_local_file,
             create_local_dir,
             get_startup_paths,
+            canvas_present,
+            canvas_hide,
+            canvas_navigate,
+            canvas_eval,
+            canvas_snapshot,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

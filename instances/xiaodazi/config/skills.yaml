@@ -37,17 +37,17 @@ skill_groups:
     description: "社交媒体内容创作（Twitter/LinkedIn/Instagram）、Newsletter/周报/公告、视频脚本（短视频/YouTube/教学）、数据可视化视频、多平台发布策略、X/Twitter 发帖"
     skills: [social-media-creator, newsletter-writer, video-script-writer, remotion, bird]
   data_analysis:
-    description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理"
-    skills: [excel-analyzer, excel-fixer, invoice-organizer]
+    description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理、SQL 分析引擎、数据可视化图表、安全代码沙箱执行"
+    skills: [excel-analyzer, excel-fixer, invoice-organizer, duckdb-sql, chart-image, code-sandbox]
   file_operation:
-    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印/扫描件 OCR 提取、批量格式转换（图片/文档）、视频帧提取、桌面智能整理、极速全盘文件搜索"
-    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, multi-lang-ocr, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder, windows-explorer-advanced, everything-search]
+    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印/扫描件 OCR 提取、PDF 结构化解析为 Markdown、批量格式转换（图片/文档）、图片批量处理（缩放/裁剪/压缩）、视频帧提取、桌面智能整理、极速全盘文件搜索"
+    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, mineru-pdf, multi-lang-ocr, batch-file-converter, image-resize, video-frames, smart-desktop-organizer, macos-finder, windows-explorer-advanced, everything-search]
   translation:
     description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
     skills: [translator, locale-aware-formatter, multi-lang-ocr]
   research:
-    description: "学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研、高性能网页爬取(Crawl4AI)"
-    skills: [literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research, web-scraper]
+    description: "通用网络搜索（DuckDuckGo/Brave/Tavily）、网页内容提取、学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研、高性能网页爬取(Crawl4AI)、本地 RAG 知识检索、个人知识库"
+    skills: [ddg-search, brave-search, jina-reader, tavily, raglite, knowledge-base, literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research, web-scraper]
   meeting:
     description: "会议记录分析、提取行动项、参与度评估"
     skills: [meeting-insights-analyzer, meeting-notes-to-action-items]
@@ -55,11 +55,11 @@ skill_groups:
     description: "求职辅助、简历优化、JD 分析、模拟面试、定制简历生成"
     skills: [job-application-optimizer, tailored-resume]
   learning:
-    description: "个人导师、学习计划、测验出题、间隔复习、读书笔记管理、跨书籍主题关联"
-    skills: [skill-tutor, quiz-maker, reading-companion]
+    description: "个人导师、学习计划、测验出题、间隔复习、读书笔记管理、跨书籍主题关联、卡片笔记法（Zettelkasten）"
+    skills: [skill-tutor, quiz-maker, reading-companion, zettelkasten]
   creative:
-    description: "头脑风暴、创意发散、方案构思、GIF 搜索、Gemini CLI 问答与生成"
-    skills: [brainstorming, gifgrep, gemini]
+    description: "头脑风暴、创意发散、方案构思、GIF 搜索、Gemini CLI 问答与生成、QR 码生成与识别"
+    skills: [brainstorming, gifgrep, gemini, qr-code]
   diagram:
     description: "流程图、架构图、思维导图、手绘图表"
     skills: [draw-io, excalidraw]
@@ -67,29 +67,35 @@ skill_groups:
     description: "AI 图像生成（DALL·E、Gemini）"
     skills: [openai-image-gen, nano-banana-pro]
   media:
-    description: "语音转文字、文字转语音、音频理解、音乐播放、视频帧/片段提取、React 编程式视频生成（Remotion）"
-    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, sag, spotify-player, video-frames, remotion, audio-processing]
+    description: "语音转文字（Whisper/MLX）、文字转语音（TTS 本地/云端）、音乐播放、视频帧/片段提取、React 编程式视频生成（Remotion）"
+    skills: [openai-whisper, openai-whisper-api, mlx-whisper, sherpa-onnx-tts, kokoro-tts, edge-tts, sag, spotify-player, video-frames, remotion]
   health:
-    description: "营养分析、饮食建议、用药管理、健康追踪"
-    skills: [nutrition-analyzer, medication-tracker]
+    description: "营养分析、饮食建议、用药管理、健康追踪、卡路里追踪、健身记录"
+    skills: [nutrition-analyzer, medication-tracker, calorie-counter, workout-logger]
   productivity:
-    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项/Microsoft To Do）、日历、邮件、Google 全家桶、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
-    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks, microsoft-todo]
+    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项/Microsoft To Do/Todoist）、日历（Apple/Google）、邮件（Apple Mail/Outlook/Gmail/IMAP）、照片管理、Google Workspace、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
+    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, apple-mail, apple-photos, gog, google-workspace, 1password, todoist, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks, microsoft-todo]
   app_automation:
-    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化（macOS peekaboo / Windows pywinauto / Claude Computer Use 终极方案）、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化、Windows Terminal 管理"
-    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, windows-open, windows-terminal, pywinauto, openhue, goplaces, cross-app-workflow, claude-computer-use]
+    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化（macOS peekaboo / Windows pywinauto / Claude Computer Use 终极方案）、截图、系统通知、智能家居（Home Assistant 全屋控制）、周边地点搜索、跨应用工作流编排、浏览器自动化、macOS 快捷指令生成、Windows Terminal 管理"
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, windows-open, windows-terminal, pywinauto, openhue, home-assistant, goplaces, cross-app-workflow, shortcuts-generator, claude-computer-use]
   system_maintenance:
-    description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查、软件安装与升级（winget）、定时任务管理、WSL 管理"
-    skills: [disk-health-monitor, winget, task-scheduler, wsl]
+    description: "系统信息诊断（CPU/内存/磁盘）、磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查、软件安装与升级（Homebrew/winget）、定时任务管理、WSL 管理"
+    skills: [system-info, disk-health-monitor, homebrew, winget, task-scheduler, wsl]
   lifestyle:
-    description: "个人记账、消费报告、预算管理、旅行规划、行程安排、打包清单"
-    skills: [personal-finance, travel-planner]
+    description: "个人记账、消费报告、预算管理、旅行规划、行程安排、打包清单、每日简报、习惯追踪、番茄钟、自然语言提醒"
+    skills: [personal-finance, travel-planner, daily-briefing, habit-tracker, pomodoro, reminder]
   security:
-    description: "隐私审计、敏感文件扫描、权限检查、本地文件加密/解密、数据保护"
-    skills: [privacy-auditor, local-file-encrypt]
+    description: "隐私审计、敏感文件扫描、权限检查、本地文件加密/解密、数据保护、密码管理（Bitwarden）"
+    skills: [privacy-auditor, local-file-encrypt, bitwarden]
   code:
-    description: "GitHub 仓库管理、Issue 追踪、代码相关"
-    skills: [github]
+    description: "GitHub 仓库管理、Issue 追踪、代码相关、安全代码沙箱执行"
+    skills: [github, code-sandbox]
+  feishu:
+    description: "飞书生态：消息收发、文档读写与搜索、日历日程、任务待办、审批查询、会议妙记转写"
+    skills: [feishu]
+  screen_memory:
+    description: "屏幕记忆回溯、历史操作查询、应用使用统计、会议录音回顾"
+    skills: [screenpipe]
   _always:
     description: "始终注入（基础能力）"
     skills: [local-search, app-recommender, weather]
@@ -183,7 +189,27 @@ skills:
       # --- 安全隐私 ---
       - { name: privacy-auditor,         backend_type: local, skill_source: instance, description: "隐私审计：扫描敏感文件、检查权限、风险报告" }
 
+      # --- 搜索 ---
+      - { name: ddg-search,              backend_type: local, skill_source: instance, description: "DuckDuckGo 网络搜索（隐私友好，无需 API Key）" }
+      - { name: jina-reader,             backend_type: local, skill_source: instance, description: "网页内容提取为 Markdown（免费，无需 API Key）" }
+
+      # --- 飞书 ---
+      - { name: feishu,                  backend_type: local, skill_source: instance, description: "飞书：消息、文档、日历、审批（中国技术团队核心协作工具）" }
+
+      # --- 生活增强 ---
+      - { name: daily-briefing,          backend_type: local, skill_source: instance, description: "每日简报：天气+日程+待办+要闻" }
+      - { name: habit-tracker,           backend_type: local, skill_source: instance, description: "习惯追踪：打卡、连续天数、进度报告" }
+      - { name: pomodoro,                backend_type: local, skill_source: instance, description: "番茄钟：专注计时、休息提醒、任务追踪" }
+      - { name: reminder,                backend_type: local, skill_source: instance, description: "自然语言设置提醒，对接系统原生通知" }
+      - { name: calorie-counter,         backend_type: local, skill_source: instance, description: "卡路里追踪：饮食记录、营养目标、周报" }
+      - { name: workout-logger,          backend_type: local, skill_source: instance, description: "健身记录：运动日志、进步追踪、PR 记录" }
+      - { name: zettelkasten,            backend_type: local, skill_source: instance, description: "卡片笔记法：原子笔记、双向链接、知识网络" }
+
+      # --- 系统 ---
+      - { name: system-info,             backend_type: local, skill_source: instance, description: "系统信息诊断：CPU/内存/磁盘/进程" }
+
     lightweight:
+      - { name: code-sandbox,        backend_type: local, skill_source: instance, description: "安全代码沙箱：在 Docker/E2B 隔离环境中执行 AI 生成的代码，保护用户系统" }
       - { name: web-scraper,         backend_type: local, skill_source: instance, python_packages: ["crawl4ai"], auto_install: true, post_install: "crawl4ai-setup", description: "Crawl4AI 高性能爬虫：Playwright 反爬 + 异步并发 + LLM 优化 Markdown (59k Stars, 完全免费)" }
       - { name: browser,             backend_type: tool,  tool_name: browser, skill_source: library, python_packages: ["playwright"], description: "Playwright browser automation: navigate, snapshot, click/type by ref" }
       - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
@@ -196,6 +222,13 @@ skills:
       - { name: batch-file-converter, backend_type: local, skill_source: instance, python_packages: ["Pillow"], auto_install: true, description: "批量文件格式转换（图片/文档）" }
       - { name: local-file-encrypt,  backend_type: local, skill_source: instance, python_packages: ["cryptography"], auto_install: true, description: "本地文件加密/解密（AES-256）" }
       - { name: video-frames,        backend_type: local, skill_source: library, bins: ["ffmpeg"], description: "从视频提取帧或短片（ffmpeg）" }
+      - { name: mineru-pdf,         backend_type: local, skill_source: instance, python_packages: ["magic-pdf"], description: "PDF 结构化解析为 Markdown（本地 CPU，隐私优先）" }
+      - { name: chart-image,        backend_type: local, skill_source: instance, python_packages: ["matplotlib"], auto_install: true, description: "数据可视化图表生成（柱状图/折线图/饼图等）" }
+      - { name: edge-tts,           backend_type: local, skill_source: library,  python_packages: ["edge-tts"], auto_install: true, description: "免费语音合成（微软 Edge TTS，300+ 声音）" }
+      - { name: duckdb-sql,         backend_type: local, skill_source: library,  python_packages: ["duckdb"], auto_install: true, description: "SQL 分析引擎：直接查询 CSV/Parquet/JSON" }
+      - { name: raglite,            backend_type: local, skill_source: library,  python_packages: ["raglite"], description: "本地 RAG 知识检索：文档蒸馏 + 语义搜索" }
+      - { name: knowledge-base,     backend_type: local, skill_source: instance, python_packages: ["sqlite-utils"], auto_install: true, description: "个人知识库：SQLite + FTS5 全文搜索" }
+      - { name: qr-code,            backend_type: local, skill_source: library,  python_packages: ["qrcode", "Pillow"], auto_install: true, description: "QR 码生成与识别" }
 
     external:
       - { name: summarize,           backend_type: local, skill_source: library, bins: ["summarize"], description: "URL / 视频 / 文档一键摘要" }
@@ -212,10 +245,15 @@ skills:
       - { name: draw-io,              backend_type: local, skill_source: instance, requires_app: "draw.io", description: "生成专业流程图、架构图（draw.io 格式）" }
       - { name: excalidraw,           backend_type: local, skill_source: instance, description: "生成手绘风格图表（Excalidraw 格式）" }
       # multi-lang-ocr: 按 OS 分区注册（darwin/builtin 零安装，win32+linux/lightweight pip 安装）
+      - { name: screenpipe,            backend_type: mcp,   skill_source: instance, description: "Screenpipe AI 屏幕记忆：回溯任何看过的内容/说过的话/用过的应用（17k Stars，本地隐私优先）" }
+      - { name: home-assistant,       backend_type: mcp,   skill_source: instance, description: "Home Assistant 智能家居：控制全屋灯光/空调/窗帘/门锁/传感器（78k Stars，2600+ 品牌）" }
       - { name: bird,                 backend_type: local, skill_source: library, bins: ["bird"], description: "X/Twitter CLI：读、搜、发帖与互动" }
       - { name: wacli,                backend_type: local, skill_source: library, bins: ["wacli"], description: "WhatsApp 消息发送与历史同步" }
       - { name: gemini,               backend_type: local, skill_source: library, bins: ["gemini"], description: "Gemini CLI 问答与生成" }
       - { name: remotion,              backend_type: local, skill_source: library, description: "React 编程式视频生成：动态图表、数据可视化视频（需 Node.js + Remotion 项目）" }
+      - { name: kokoro-tts,             backend_type: local, skill_source: library, description: "高质量本地语音合成（Kokoro TTS，零 API 成本）" }
+      - { name: bitwarden,              backend_type: local, skill_source: library, bins: ["bw"], description: "Bitwarden 开源密码管理" }
+      - { name: image-resize,           backend_type: local, skill_source: library, bins: ["magick"], description: "ImageMagick 图片批量处理（缩放/裁剪/转格式/压缩）" }
 
     cloud_api:
       # --- Claude Computer Use（终极 UI 自动化：截屏+视觉理解+坐标操作） ---
@@ -232,6 +270,12 @@ skills:
         capability: "document_analysis"
         description: "长文档深度阅读与问答（PDF 年报/合同/论文/手册），基于树索引的推理检索"
 
+      # --- Google Workspace ---
+      - name: google-workspace
+        backend_type: mcp
+        skill_source: instance
+        description: "Google Calendar + Gmail + Drive + Docs（官方 MCP，OAuth2 安全授权）"
+
       # --- API Skills ---
       - { name: notion,              backend_type: api,   skill_source: library, description: "Notion 笔记与数据库" }
       - { name: trello,              backend_type: local, skill_source: library, description: "Trello 看板任务管理" }
@@ -245,6 +289,9 @@ skills:
       - { name: slidespeak-editor,    backend_type: local, skill_source: library, description: "SlideSpeak API 编辑已有 PPT 形状内容" }
       - { name: slidespeak-slide-editor, backend_type: local, skill_source: library, description: "SlideSpeak API 插入/删除/重生成幻灯片" }
       - { name: sag,                 backend_type: local, skill_source: library, description: "ElevenLabs 文字转语音（需 ELEVENLABS_API_KEY）" }
+      - { name: brave-search,       backend_type: local, skill_source: instance, description: "Brave 高质量网络搜索（需 BRAVE_API_KEY）" }
+      - { name: todoist,            backend_type: local, skill_source: library,  description: "Todoist 跨平台待办管理（需 TODOIST_API_TOKEN）" }
+      - { name: tavily,             backend_type: local, skill_source: library,  description: "Tavily AI 优化搜索（需 TAVILY_API_KEY）" }
 
   # ==================== macOS 专属 ====================
 
@@ -258,11 +305,16 @@ skills:
       - { name: applescript,         backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
       - { name: app-scanner,         backend_type: local, skill_source: instance, system: true, description: "发现已安装应用" }
       - { name: multi-lang-ocr,     backend_type: local, skill_source: instance, description: "多语言 OCR 图片文字提取（macOS Vision 内置，中英混排，零安装）" }
+      - { name: apple-mail,        backend_type: local, skill_source: instance, description: "Apple 邮件：搜索、阅读、撰写（AppleScript）" }
+      - { name: apple-photos,      backend_type: local, skill_source: library,  description: "Apple 照片：搜索、导出、相册管理" }
+      - { name: shortcuts-generator, backend_type: local, skill_source: library, description: "生成 macOS/iOS 快捷指令" }
+      - { name: homebrew,          backend_type: local, skill_source: library, bins: ["brew"], description: "Homebrew 包管理：搜索、安装、升级" }
 
     lightweight:
       - { name: apple-notes,         backend_type: local, skill_source: library, system_auth: "accessibility", description: "Apple 备忘录" }
       - { name: apple-reminders,     backend_type: local, skill_source: library, system_auth: "reminders", description: "Apple 提醒事项" }
       - { name: apple-calendar,      backend_type: local, skill_source: instance, system_auth: "calendar", description: "Apple 日历" }
+      - { name: mlx-whisper,         backend_type: local, skill_source: library, python_packages: ["mlx-whisper"], description: "Apple Silicon 本地语音转文字（MLX，速度快 10x）" }
 
     external:
       - { name: peekaboo,            backend_type: local, skill_source: library, bins: ["peekaboo"], description: "macOS UI 自动化" }
