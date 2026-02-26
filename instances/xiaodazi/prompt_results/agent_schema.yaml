@@ -67,7 +67,7 @@ output_formatter:
   include_metadata: false
 skills: []
 tools: []
-model: kimi-k2.5
+model: ''
 max_turns: 15
 execution_strategy: rvr-b
 allow_parallel_tools: false
