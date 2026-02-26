@@ -108,7 +108,7 @@ export const modelApi = {
       {
         provider,
         api_key: apiKey,
-        ...(baseUrl ? { base_url: baseUrl } : {}),
+        ...(baseUrl !== undefined ? { base_url: baseUrl } : {}),
       },
     )
     return data as ValidateKeyResult
@@ -125,7 +125,7 @@ export const modelApi = {
       {
         provider,
         api_key: apiKey,
-        ...(baseUrl ? { base_url: baseUrl } : {}),
+        ...(baseUrl !== undefined ? { base_url: baseUrl } : {}),
       },
     )
     return data as ProviderActivateResult
