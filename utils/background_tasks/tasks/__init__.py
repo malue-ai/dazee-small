@@ -25,6 +25,7 @@ _KNOWN_TASK_MODULES = [
     'recommended_questions',
     'title_generation',
     'playbook_extraction',
+    'persona_build',
 ]
 
 

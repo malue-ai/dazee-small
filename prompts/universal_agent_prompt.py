@@ -623,7 +623,7 @@ Steps:
 
 ### Skills + Tools 架构理解
 
-根据 [Anthropic 官方文档](https://claude.com/blog/extending-claude-capabilities-with-skills-mcp-servers)：
+Skills + Tools 协作模式：
 
 > **Tools 提供连接**（access to external systems）
 > **Skills 提供专业知识**（workflow logic + domain expertise）
@@ -633,7 +633,7 @@ Steps:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    Claude + Skill                    │
+│                    Agent + Skill                     │
 │              （工作流逻辑 + 领域专业知识）            │
 └─────────────────────────┬───────────────────────────┘
                           │ 编排
@@ -764,7 +764,7 @@ Direct Tool Call（REST API/自定义工具）
 
 **工作流（Skills 已自动加载）：**
 
-Skills 已通过 Claude Skills API 预加载，你可以直接：
+Skills 已预加载到当前会话，你可以直接：
 1. 分析用户需求，Skill 指导会自动融入你的思考
 2. 使用 `code_execution` 工具执行复杂数据处理
 3. 调用相关 Skill 或 api_calling 完成任务（如 PPT Skill）

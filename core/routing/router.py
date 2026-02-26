@@ -141,6 +141,7 @@ class AgentRouter:
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         user_id: Optional[str] = None,
         tracker=None,
+        current_step_hint: Optional[str] = None,
     ) -> RoutingDecision:
         """
         执行路由决策
@@ -155,6 +156,8 @@ class AgentRouter:
             conversation_history: 对话历史
             user_id: 用户ID
             tracker: UsageTracker 实例（可选）
+            current_step_hint: Current plan step title for Step-Aware
+                skill group selection.
 
         Returns:
             RoutingDecision: 路由决策
@@ -169,7 +172,9 @@ class AgentRouter:
         messages.append({"role": "user", "content": user_query})
 
         # 2. 意图分析
-        intent = await self.intent_analyzer.analyze(messages, tracker=tracker)
+        intent = await self.intent_analyzer.analyze(
+            messages, tracker=tracker, current_step_hint=current_step_hint
+        )
 
         logger.info(
             f"路由决策: strategy=rvr-b (固定), "

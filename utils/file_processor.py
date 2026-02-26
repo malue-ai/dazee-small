@@ -22,7 +22,7 @@ import aiofiles
 import httpx
 
 from logger import get_logger
-from utils.app_paths import get_storage_dir
+from utils.app_paths import get_storage_dir, get_instance_storage_dir
 
 logger = get_logger("file_processor")
 
@@ -31,6 +31,7 @@ class FileCategory(Enum):
     """文件分类"""
 
     IMAGE = "image"  # 图片：直接传给 LLM
+    AUDIO = "audio"  # 音频：base64 编码传给支持音频的 LLM
     TEXT = "text"  # 纯文本：读取内容拼进消息
     DOCUMENT = "document"  # 复杂文档：提供 URL，让 Agent 决定
 
@@ -75,6 +76,13 @@ class FileProcessor:
     # 图片 MIME 类型
     IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
+    # 音频 MIME 类型
+    AUDIO_MIME_TYPES = {
+        "audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp3", "audio/mp4",
+        "audio/ogg", "audio/webm", "audio/flac", "audio/x-m4a", "audio/aac",
+        "audio/x-flac",
+    }
+
     # 纯文本 MIME 类型
     TEXT_MIME_TYPES = {
         "text/plain",
@@ -101,8 +109,17 @@ class FileProcessor:
 
         /api/v1/files/uploads/20260208/abc_test.txt
         -> {storage_dir}/uploads/20260208/abc_test.txt
+
+        /api/v1/files/@xiaodazi/uploads/20260208/abc_test.txt
+        -> {instances_data}/xiaodazi/storage/uploads/20260208/abc_test.txt
         """
         relative_path = url[len(self.LOCAL_FILE_PREFIX):]
+        # New format: @instance/... → resolve to that instance's storage
+        if relative_path.startswith("@"):
+            sep = relative_path.index("/") if "/" in relative_path else len(relative_path)
+            instance_name = relative_path[1:sep]
+            file_path = relative_path[sep + 1:] if sep < len(relative_path) else ""
+            return get_instance_storage_dir(instance_name) / file_path
         return get_storage_dir() / relative_path
 
     async def _read_local_file(self, local_path: Path) -> bytes:
@@ -250,6 +267,52 @@ class FileProcessor:
                 file_url=display_path,
             )
 
+        if category == FileCategory.AUDIO:
+            try:
+                if is_local:
+                    audio_bytes = await self._read_local_file(resolved_path)
+                else:
+                    audio_bytes = await self._download_from_url(url)
+
+                b64_data = base64.standard_b64encode(audio_bytes).decode("utf-8")
+                _AUDIO_FORMAT_MAP = {
+                    "mpeg": "mp3",
+                    "x-wav": "wav",
+                    "x-m4a": "m4a",
+                    "x-flac": "flac",
+                    "mp4": "m4a",
+                }
+                raw_subtype = mime_type.split("/")[-1]
+                audio_format = _AUDIO_FORMAT_MAP.get(raw_subtype, raw_subtype)
+                content_block = {
+                    "type": "input_audio",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": b64_data,
+                        "format": audio_format,
+                    },
+                }
+                logger.info(f"🎵 音频文件使用 base64: {filename} ({audio_format})")
+
+                return ProcessedFile(
+                    category=category,
+                    filename=filename,
+                    mime_type=mime_type,
+                    content_block=content_block,
+                    file_size=file_size,
+                    file_url=display_path,
+                )
+            except Exception as e:
+                logger.warning(f"读取音频文件失败: {e}, 降级为文档")
+                return ProcessedFile(
+                    category=FileCategory.DOCUMENT,
+                    filename=filename,
+                    mime_type=mime_type,
+                    file_url=display_path,
+                    file_size=file_size,
+                )
+
         if category == FileCategory.TEXT:
             # Text files: read full content
             if file_size and file_size > self.MAX_TEXT_SIZE:
@@ -296,6 +359,8 @@ class FileProcessor:
         """根据 MIME 类型分类"""
         if mime_type in self.IMAGE_MIME_TYPES:
             return FileCategory.IMAGE
+        if mime_type in self.AUDIO_MIME_TYPES:
+            return FileCategory.AUDIO
         if mime_type in self.TEXT_MIME_TYPES:
             return FileCategory.TEXT
         # 其他都当作复杂文档
@@ -362,6 +427,16 @@ class FileProcessor:
             ".json": "application/json",
             ".xml": "application/xml",
             ".html": "text/html",
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
+            ".m4a": "audio/x-m4a",
+            ".ogg": "audio/ogg",
+            ".flac": "audio/flac",
+            ".aac": "audio/aac",
+            ".webm": "audio/webm",
+            ".mp4": "video/mp4",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
         }
 
         ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -411,6 +486,16 @@ class FileProcessor:
                 # 同时也把 URL 放到文本里，方便 Tool 调用（如视频生成工具需要 URL）
                 if pf.file_url:
                     attachment_texts.append(f"🖼️ {pf.filename} ({pf.mime_type}): {pf.file_url}")
+
+            elif pf.category == FileCategory.AUDIO:
+                if pf.content_block:
+                    content_blocks.append(pf.content_block)
+
+                if pf.file_url:
+                    size_str = self._format_file_size(pf.file_size) if pf.file_size else ""
+                    attachment_texts.append(
+                        f"🎵 {pf.filename} ({pf.mime_type}{', ' + size_str if size_str else ''}): {pf.file_url}"
+                    )
 
             elif pf.category == FileCategory.TEXT:
                 # Text files: preview in context, full content via file path

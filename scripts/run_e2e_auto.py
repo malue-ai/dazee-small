@@ -176,7 +176,7 @@ def start_server(port: int, provider: str = None) -> subprocess.Popen:
 
     Args:
         port: Server port.
-        provider: Override model provider ("qwen" / "claude" / "deepseek" / "glm") via AGENT_PROVIDER env var.
+        provider: Override model provider ("qwen" / "claude" / "deepseek" / "glm" / "minimax") via AGENT_PROVIDER env var.
     """
     venv_python = _find_venv_python()
     python = str(venv_python)
@@ -698,8 +698,8 @@ Examples:
     parser.add_argument("--no-start", action="store_true",
                         help="Skip auto-start, assume server already running")
     parser.add_argument("--provider", type=str, default=None,
-                        choices=["qwen", "claude", "deepseek", "glm"],
-                        help="Override model provider (qwen/claude/deepseek/glm)")
+                        choices=["qwen", "claude", "deepseek", "glm", "minimax"],
+                        help="Override model provider (qwen/claude/deepseek/glm/minimax)")
     parser.add_argument("--suite", type=str, default=None,
                         help="Suite name (phase1_core / phase2_scenarios) or path to YAML")
     parser.add_argument("--defer-grading", action="store_true",

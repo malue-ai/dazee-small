@@ -7,6 +7,7 @@
 
 import io
 import mimetypes
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -17,22 +18,22 @@ from fastapi.responses import FileResponse
 
 from infra.storage.local import LocalStorage
 from logger import get_logger
-from utils.app_paths import get_storage_dir
+from utils.app_paths import get_storage_dir, get_instance_storage_dir, get_user_data_dir
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
-# 本地存储实例（懒初始化，避免模块导入时 AGENT_INSTANCE 未设置）
-_storage: LocalStorage | None = None
+# 按 instance 缓存存储实例，避免切换项目后仍使用旧实例的 base_dir
+_storage_cache: dict[str, LocalStorage] = {}
 
 
 def _get_storage() -> LocalStorage:
-    """Get or create the LocalStorage singleton."""
-    global _storage
-    if _storage is None:
-        _storage = LocalStorage()
-    return _storage
+    """Get or create a LocalStorage for the current AGENT_INSTANCE."""
+    instance = os.getenv("AGENT_INSTANCE", "default")
+    if instance not in _storage_cache:
+        _storage_cache[instance] = LocalStorage(instance_name=instance)
+    return _storage_cache[instance]
 
 # 上传文件子目录
 UPLOADS_DIR = "uploads"
@@ -45,8 +46,6 @@ def _generate_storage_path(original_filename: str) -> str:
     Format: uploads/{date}/{uuid}_{filename}
     Uses os.path.join for cross-platform path separators.
     """
-    import os
-
     date_str = datetime.now().strftime("%Y%m%d")
     unique_id = uuid.uuid4().hex[:8]
     safe_name = original_filename.replace(" ", "_")
@@ -98,10 +97,11 @@ async def upload_file(
 
     # local_path: 真实文件系统路径（Agent 直接读取）
     # file_url: API URL（前端预览/下载用, 必须使用 /）
+    # 包含 instance 名称，确保切换项目后仍能正确定位文件
     local_path = str(full_path)
-    # On Windows, storage_path may contain backslashes; URLs always use /
+    instance_name = os.getenv("AGENT_INSTANCE", "default")
     url_path = storage_path.replace("\\", "/")
-    file_url = f"/api/v1/files/{url_path}"
+    file_url = f"/api/v1/files/@{instance_name}/{url_path}"
 
     logger.info(f"✅ 文件上传成功: {filename} -> {local_path} ({file_size} bytes)")
 
@@ -125,14 +125,19 @@ async def serve_file(file_path: str) -> FileResponse:
     """
     Serve a file from local storage.
 
+    Supports two URL formats:
+      - New: /api/v1/files/@{instance}/uploads/{date}/{filename}
+      - Old: /api/v1/files/uploads/{date}/{filename}  (uses current AGENT_INSTANCE,
+        falls back to scanning all instances if not found)
+
     Args:
         file_path: The relative path within storage.
 
     Returns:
         The file content with proper MIME type.
     """
-    storage_dir = get_storage_dir()
-    full_path = storage_dir / file_path
+    storage_dir, relative_path = _resolve_instance_storage(file_path)
+    full_path = storage_dir / relative_path
 
     if not full_path.exists():
         logger.warning(f"文件不存在: {file_path}")
@@ -152,3 +157,41 @@ async def serve_file(file_path: str) -> FileResponse:
         media_type=mime_type,
         filename=full_path.name,
     )
+
+
+def _resolve_instance_storage(file_path: str) -> tuple[Path, str]:
+    """
+    Parse instance from file_path and return (storage_dir, relative_path).
+
+    New format: @{instance}/uploads/...  → use that instance's storage
+    Old format: uploads/...              → current AGENT_INSTANCE, fallback to scan
+    """
+    # New format: @instance/relative_path
+    if file_path.startswith("@"):
+        sep = file_path.index("/") if "/" in file_path else len(file_path)
+        instance_name = file_path[1:sep]
+        relative_path = file_path[sep + 1:] if sep < len(file_path) else ""
+        target_dir = get_instance_storage_dir(instance_name)
+        if (target_dir / relative_path).exists():
+            return target_dir, relative_path
+        # File not in the declared instance (e.g. saved before fix),
+        # fall through to scan all instances
+        file_path = relative_path
+
+    # Old format: try current instance first
+    current_dir = get_storage_dir()
+    if (current_dir / file_path).exists():
+        return current_dir, file_path
+
+    # Fallback: scan all instance data directories for the file
+    instances_root = get_user_data_dir() / "data" / "instances"
+    if instances_root.exists():
+        for instance_dir in instances_root.iterdir():
+            if not instance_dir.is_dir():
+                continue
+            candidate = instance_dir / "storage" / file_path
+            if candidate.exists():
+                logger.info(f"文件在实例 {instance_dir.name} 中找到: {file_path}")
+                return instance_dir / "storage", file_path
+
+    return current_dir, file_path

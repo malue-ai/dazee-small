@@ -219,28 +219,40 @@ class InstanceMemoryManager:
                     f"采用 last-write-wins 策略覆盖旧记忆"
                 )
 
-        # Layer 1: 写入 MEMORY.md
+        # Layer 1: 写入 MEMORY.md（source of truth）
         section = _SECTION_MAP.get(category, "历史经验")
+        replace = category == "identity"
         if project_id:
             await self._file_layer.append_project_memory(
                 project_id, section, content
             )
+            fts_action = "appended"
+            fts_old = ""
         else:
-            await self._file_layer.append_to_section(section, content)
+            result = await self._file_layer.append_to_section(
+                section, content, replace_by_key=replace
+            )
+            fts_action = result.action
+            fts_old = result.old_content
 
-        # Layer 2: 更新 FTS5 索引
-        await self._fts5_index_entry(content, category)
+        # Layer 2: FTS5 CRUD based on MEMORY.md write result
+        if fts_action == "replaced" and fts_old:
+            await self._fts5_delete_by_content(fts_old)
+            await self._fts5_index_entry(content, category)
+        elif fts_action == "appended":
+            await self._fts5_index_entry(content, category)
+        # skipped: no FTS5 change needed
 
         # Layer 3: 写入 Mem0 向量存储
         mem0_ok = False
         if self._mem0_enabled:
             mem0_ok = await self._mem0_add(content, category)
 
-        # Log with layer status — "degraded" means Mem0 was expected but failed
+        # Log with layer status
         degraded = self._mem0_enabled and not mem0_ok
         logger.info(
             f"记忆已保存: [{category}] {content[:50]}... "
-            f"(fts5=ok, mem0={'ok' if mem0_ok else 'skip' if not self._mem0_enabled else 'FAIL'})"
+            f"(fts5={fts_action}, mem0={'ok' if mem0_ok else 'skip' if not self._mem0_enabled else 'FAIL'})"
         )
         if degraded:
             logger.warning(
@@ -276,22 +288,39 @@ class InstanceMemoryManager:
         if not valid:
             return
 
-        # Phase 1: Fast writes (L1 file + L2 FTS5) — sequential, ~1ms each
+        # Phase 1: Batch write to MEMORY.md (1 read + 1 write) + FTS5 CRUD
+        # Uses batch_append_to_section for single-cycle file I/O.
+        batch_entries = [
+            (
+                _SECTION_MAP.get(mem["category"], "历史经验"),
+                mem["content"],
+                mem["category"] == "identity",
+            )
+            for mem in valid
+        ]
+        try:
+            results = await self._file_layer.batch_append_to_section(
+                batch_entries
+            )
+        except Exception as e:
+            logger.warning(f"MEMORY.md 批量写入失败: {e}")
+            results = []
+
+        # FTS5 CRUD based on each entry's write result
         ok = 0
-        for mem in valid:
-            content = mem["content"]
-            category = mem["category"]
-            section = _SECTION_MAP.get(category, "历史经验")
+        for mem, result in zip(valid, results):
             try:
-                await self._file_layer.append_to_section(section, content)
-                await self._fts5_index_entry(content, category)
+                if result.action == "replaced" and result.old_content:
+                    await self._fts5_delete_by_content(result.old_content)
+                    await self._fts5_index_entry(mem["content"], mem["category"])
+                elif result.action == "appended":
+                    await self._fts5_index_entry(mem["content"], mem["category"])
+                # skipped: no FTS5 change
                 ok += 1
             except Exception as e:
-                logger.warning(f"L1/L2 写入失败（跳过）: {e}")
+                logger.warning(f"FTS5 写入失败（跳过）: {e}")
 
-        # Phase 2: Mem0 batch write (optional, best-effort)
-        # Combine all fragments into one message for a single Mem0 add() call.
-        # This turns 16× (embedding + LLM + DB) into 1× — ~5s instead of ~80s.
+        # Phase 3: Mem0 batch write (optional, best-effort)
         mem0_ok = False
         if self._mem0_enabled and valid:
             try:
@@ -331,12 +360,23 @@ class InstanceMemoryManager:
             return
 
         # Extract memory fragments (uses LLM, independent of Mem0)
-        # mem0_enabled only controls whether Mem0 vector store is written to,
-        # extraction itself always runs (uses FragmentExtractor + LLM Profile)
-        extracted = await self._extract_from_conversation(
+        # Returns both the full FragmentMemory (10-dim) and long_term_memories list.
+        fragment, extracted = await self._extract_from_conversation(
             session_id, messages
         )
+
+        # Persist long_term_memories to MEMORY.md + FTS5
         await self.remember_batch(extracted)
+
+        # Persist full FragmentMemory (10 dimensions) to fragment_store
+        # for PersonaBuilder and BehaviorAnalyzer to query later.
+        if fragment:
+            try:
+                from core.memory.fragment_store import get_fragment_store
+                store = get_fragment_store()
+                await store.save(fragment)
+            except Exception as e:
+                logger.warning(f"Fragment 持久化失败（非致命）: {e}")
 
         # Layer 1: 写入每日日志
         user_msgs = [
@@ -377,11 +417,13 @@ class InstanceMemoryManager:
 
     async def _sync_markdown_to_fts5(self, md_content: str) -> None:
         """
-        Detect if MEMORY.md was externally edited and re-index to FTS5.
+        Opportunistic sync: re-index MEMORY.md to FTS5 when content changes.
 
-        Uses a simple content hash to detect changes.
-        Only re-indexes when the hash differs from last sync.
-        Uses a SINGLE session for all writes (pool_size=1 safe).
+        Handles the case where users manually edit MEMORY.md outside the app.
+        Normal writes go through remember/remember_batch which do targeted
+        FTS5 CRUD; this method is only a fallback for external edits.
+
+        Uses content hash to detect changes — skips if unchanged.
         """
         if not md_content or not self._enabled:
             return
@@ -588,6 +630,28 @@ class InstanceMemoryManager:
         except Exception as e:
             logger.warning(f"FTS5 索引写入失败: {e}")
 
+    async def _fts5_delete_by_content(self, content: str) -> None:
+        """Delete FTS5 entry by exact content match (for CRUD Update)."""
+        await self._ensure_fts()
+        if not self._fts_initialized:
+            return
+
+        try:
+            from sqlalchemy import text as sa_text
+
+            async with await self._get_fts_session() as session:
+                await session.execute(
+                    sa_text(
+                        f"DELETE FROM {self._fts_config.table_name} "
+                        f"WHERE {self._fts_config.content_column} = :content"
+                    ),
+                    {"content": content},
+                )
+                await session.commit()
+            logger.debug(f"FTS5 删除: {content[:50]}...")
+        except Exception as e:
+            logger.warning(f"FTS5 删除失败（非致命）: {e}")
+
     async def _file_layer_search(
         self, query: str, limit: int
     ) -> List[Dict[str, Any]]:
@@ -715,16 +779,17 @@ class InstanceMemoryManager:
         self,
         session_id: str,
         messages: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple:
         """
         Session-level memory extraction: one LLM call for the full conversation.
 
         Concatenates all messages into a single conversation text, sends to
-        FragmentExtractor once, and converts 10-dimension hints into flat
-        (content, category) pairs for downstream remember() calls.
+        FragmentExtractor once. Returns both the full FragmentMemory (for
+        10-dimension persistence) and the flat long_term_memories list
+        (for MEMORY.md/FTS5 write).
 
         Returns:
-            [{"content": str, "category": str}, ...]
+            (fragment_or_none, [{"content": str, "category": str}, ...])
         """
         if not self._extractor:
             try:
@@ -734,7 +799,7 @@ class InstanceMemoryManager:
                 self._extractor = FragmentExtractor()
             except Exception as e:
                 logger.warning(f"FragmentExtractor 初始化失败: {e}")
-                return []
+                return None, []
 
         # Concatenate full conversation for single LLM call
         conversation_text = "\n".join(
@@ -744,7 +809,7 @@ class InstanceMemoryManager:
         )
 
         if not conversation_text or len(conversation_text) < 20:
-            return []
+            return None, []
 
         try:
             fragment = await self._extractor.extract(
@@ -753,17 +818,9 @@ class InstanceMemoryManager:
                 message=conversation_text,
             )
             if not fragment:
-                return []
+                return None, []
 
-            # ── LLM-driven memory persistence ──
-            # The LLM decides what's worth remembering long-term via the
-            # `long_term_memories` field. No hardcoded dimension filtering
-            # in code — the semantic judgment of "is this worth keeping
-            # across sessions?" is made by the LLM at extraction time.
-            #
-            # This avoids the noise problem where session-scoped data
-            # (task descriptions, goals, emotions) floods MEMORY.md.
-
+            # Extract long_term_memories for MEMORY.md/FTS5 write
             extracted: List[Dict[str, Any]] = []
             long_term = fragment.metadata.get("long_term_memories", [])
 
@@ -775,7 +832,6 @@ class InstanceMemoryManager:
                 category = mem.get("category", "general")
                 if not content:
                     continue
-                # Normalize unknown categories to "general"
                 if category not in valid_categories:
                     category = "general"
                 extracted.append({
@@ -787,7 +843,7 @@ class InstanceMemoryManager:
                 f"会话级记忆提取: {len(extracted)} 条碎片, "
                 f"1 次 LLM 调用, 对话长度={len(conversation_text)} 字符"
             )
-            return extracted
+            return fragment, extracted
 
         except Exception as e:
             logger.warning(f"记忆提取失败（非致命）: {e}")
@@ -834,3 +890,45 @@ class InstanceMemoryManager:
                 deduped.append(r)
 
         return deduped
+
+
+# ==================== Factory with instance cache ====================
+
+_manager_cache: Dict[str, "InstanceMemoryManager"] = {}
+
+
+def get_instance_memory_manager(
+    user_id: str = "default",
+    instance_name: Optional[str] = None,
+    mem0_enabled: bool = True,
+    enabled: bool = True,
+) -> "InstanceMemoryManager":
+    """
+    Get or create a cached InstanceMemoryManager.
+
+    Caches by (instance_name, user_id) to avoid repeated FTS5
+    ensure_table and Mem0 init on every request.
+
+    Args:
+        user_id: User identifier for Mem0 isolation.
+        instance_name: Instance name for storage path isolation.
+        mem0_enabled: Whether to enable Mem0 vector layer.
+        enabled: Whether memory system is enabled.
+
+    Returns:
+        Cached or newly created InstanceMemoryManager.
+    """
+    import os
+    inst = instance_name or os.getenv("AGENT_INSTANCE", "default")
+    cache_key = f"{inst}:{user_id}"
+    cached = _manager_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    mgr = InstanceMemoryManager(
+        user_id=user_id,
+        instance_name=inst,
+        mem0_enabled=mem0_enabled,
+        enabled=enabled,
+    )
+    _manager_cache[cache_key] = mgr
+    return mgr
