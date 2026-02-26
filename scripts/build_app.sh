@@ -247,13 +247,15 @@ if [ "$(uname)" = "Darwin" ]; then
   #     这里用 hdiutil 从完整的 .app 创建 DMG 安装包。
   info "生成 DMG 安装包..."
 
-  # 读取版本号用于 DMG 文件名
   VERSION=$(cat "$PROJECT_ROOT/VERSION" 2>/dev/null || echo "0.0.0")
   ARCH=$(uname -m)
   [ "$ARCH" = "arm64" ] && ARCH="aarch64"
   DMG_DIR="$FRONTEND_DIR/src-tauri/target/release/bundle/dmg"
-  DMG_FILENAME="$(basename "$APP_PATH" .app)_${VERSION}_${ARCH}.dmg"
-  DMG_PATH="$DMG_DIR/$DMG_FILENAME"
+  # 带版本号的文件名（用于 GitHub Release 归档）
+  DMG_FILENAME_VERSIONED="$(basename "$APP_PATH" .app)_${VERSION}_${ARCH}.dmg"
+  # 固定文件名（用于官网永久下载链接）
+  DMG_FILENAME_STABLE="xiaodazi-macos-${ARCH}.dmg"
+  DMG_PATH="$DMG_DIR/$DMG_FILENAME_VERSIONED"
   VOL_NAME=$(basename "$APP_PATH" .app)
   TMP_DMG="/tmp/xiaodazi_dmg_tmp.dmg"
   TMP_MOUNT="/tmp/xiaodazi_dmg_mount"
@@ -285,8 +287,12 @@ if [ "$(uname)" = "Darwin" ]; then
   rm -f "$TMP_DMG"
   rmdir "$TMP_MOUNT" 2>/dev/null || true
 
+  # 复制一份固定文件名版本，供官网永久下载链接使用
+  cp "$DMG_PATH" "$DMG_DIR/$DMG_FILENAME_STABLE"
+
   DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
-  info "DMG 生成完成: $DMG_FILENAME ($DMG_SIZE)"
+  info "DMG 生成完成: $DMG_FILENAME_VERSIONED ($DMG_SIZE)"
+  info "固定文件名副本: $DMG_FILENAME_STABLE"
 
   info "macOS 后处理完成"
 fi
