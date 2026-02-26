@@ -289,9 +289,15 @@ class ModelRegistry:
         # 通过 LLMRegistry 创建服务
         from .registry import LLMRegistry
 
+        # 优先使用用户激活时保存的自定义 base_url，否则使用目录默认值
+        effective_base_url = config.base_url
+        entry = cls.get_activated_entry(model_name)
+        if entry and entry.base_url:
+            effective_base_url = entry.base_url
+
         # 合并配置
         service_kwargs = {
-            "base_url": config.base_url,
+            "base_url": effective_base_url,
             "max_tokens": config.capabilities.max_tokens,
             **config.extra_config,
             **kwargs,
@@ -965,7 +971,7 @@ def _register_preset_models() -> None:
     """
     # ==================== OpenAI 系列 ====================
 
-    _OPENAI_COMMON = dict(
+    _OPENAI_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://api.openai.com/v1",
         api_key_env="OPENAI_API_KEY",
@@ -1270,7 +1276,7 @@ def _register_preset_models() -> None:
 
     # ==================== Claude 系列 ====================
 
-    _CLAUDE_COMMON = dict(
+    _CLAUDE_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.CLAUDE,
         base_url="https://api.anthropic.com",
         api_key_env="ANTHROPIC_API_KEY",
@@ -1431,7 +1437,7 @@ def _register_preset_models() -> None:
 
     # ==================== Qwen 系列 ====================
 
-    _QWEN_COMMON = dict(
+    _QWEN_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         api_key_env="DASHSCOPE_API_KEY",
@@ -1763,7 +1769,7 @@ def _register_preset_models() -> None:
 
     # ==================== GLM（智谱AI）系列 ====================
 
-    _GLM_COMMON = dict(
+    _GLM_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key_env="ZHIPUAI_API_KEY",
@@ -1942,7 +1948,7 @@ def _register_preset_models() -> None:
 
     # ==================== Gemini 系列 ====================
 
-    _GEMINI_COMMON = dict(
+    _GEMINI_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.GEMINI,
         base_url="https://generativelanguage.googleapis.com/v1beta",
         api_key_env="GOOGLE_API_KEY",
@@ -1996,7 +2002,7 @@ def _register_preset_models() -> None:
 
     # ==================== DeepSeek 系列 ====================
 
-    _DEEPSEEK_COMMON = dict(
+    _DEEPSEEK_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://api.deepseek.com/v1",
         api_key_env="DEEPSEEK_API_KEY",
@@ -2041,7 +2047,7 @@ def _register_preset_models() -> None:
 
     # ==================== Kimi (Moonshot) 系列 ====================
 
-    _KIMI_COMMON = dict(
+    _KIMI_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://api.moonshot.cn/v1",
         api_key_env="MOONSHOT_API_KEY",
@@ -2110,7 +2116,7 @@ def _register_preset_models() -> None:
 
     # ==================== MiniMax 系列（Anthropic API 兼容） ====================
 
-    _MINIMAX_COMMON = dict(
+    _MINIMAX_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.CLAUDE,
         base_url="https://api.minimaxi.com/anthropic",
         api_key_env="MINIMAX_API_KEY",
