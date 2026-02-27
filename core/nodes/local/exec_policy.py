@@ -9,7 +9,7 @@ Windows 执行审批策略引擎
 - 持久化存储（JSON 文件）
 - 远程管理（通过 system.execApprovals.get/set 命令）
 
-规则评估顺序：从上到下，第一个匹配规则生效；无匹配则使用 defaultAction（默认 deny）。
+规则评估顺序：从上到下，第一个匹配规则生效；无匹配则使用 defaultAction（默认 allow）。
 """
 
 import fnmatch
@@ -124,7 +124,7 @@ class ExecApprovalPolicy:
     def __init__(self, data_dir: str) -> None:
         self._policy_path = os.path.join(data_dir, "exec-policy.json")
         self._rules: List[ExecRule] = []
-        self._default_action: ExecAction = ExecAction.DENY
+        self._default_action: ExecAction = ExecAction.ALLOW
         self._load()
 
     @property
@@ -186,12 +186,87 @@ class ExecApprovalPolicy:
         rules: List[Dict[str, Any]],
         default_action: Optional[str] = None,
     ) -> None:
-        """更新策略规则（远程管理入口）"""
+        """更新策略规则（全量替换，远程管理入口）"""
         self._rules = [ExecRule.from_dict(r) for r in rules]
         if default_action:
             self._default_action = ExecAction(default_action)
         self._save()
         logger.info(f"[EXEC-POLICY] 策略已更新：{len(self._rules)} 条规则，默认={self._default_action.value}")
+
+    def add_rule(self, rule_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        添加单条规则（HITL 审批后调用）
+
+        插入策略：
+        - allow 规则插入到第一条同模式 deny 规则之前，确保优先级高于 deny
+        - deny 规则追加到末尾
+        - 如果已存在相同 pattern + action 的规则，跳过去重
+
+        Returns:
+            操作结果：{"added": bool, "position": int, "reason": str}
+        """
+        new_rule = ExecRule.from_dict(rule_data)
+
+        # 去重：相同 pattern + action 不重复添加
+        for existing in self._rules:
+            if (existing.pattern.lower() == new_rule.pattern.lower()
+                    and existing.action == new_rule.action
+                    and existing.enabled):
+                logger.info(
+                    f"[EXEC-POLICY] 规则已存在，跳过: "
+                    f"'{new_rule.pattern}' ({new_rule.action.value})"
+                )
+                return {
+                    "added": False,
+                    "position": self._rules.index(existing),
+                    "reason": f"规则已存在: {new_rule.pattern} → {new_rule.action.value}",
+                }
+
+        if new_rule.action == ExecAction.ALLOW:
+            # allow 规则需要插入到匹配的 deny 规则之前，否则永远不会生效
+            insert_pos = self._find_insert_position(new_rule)
+            self._rules.insert(insert_pos, new_rule)
+            logger.info(
+                f"[EXEC-POLICY] 添加 ALLOW 规则: '{new_rule.pattern}' "
+                f"插入位置={insert_pos}（在匹配的 deny 规则之前）"
+            )
+        else:
+            self._rules.append(new_rule)
+            insert_pos = len(self._rules) - 1
+            logger.info(
+                f"[EXEC-POLICY] 添加 DENY 规则: '{new_rule.pattern}' "
+                f"追加到末尾 位置={insert_pos}"
+            )
+
+        self._save()
+        return {
+            "added": True,
+            "position": insert_pos,
+            "reason": f"已添加: {new_rule.pattern} → {new_rule.action.value}",
+        }
+
+    def _find_insert_position(self, new_rule: ExecRule) -> int:
+        """
+        为 allow 规则找到正确的插入位置。
+
+        策略：插入到第一条会覆盖该命令的 deny 规则之前。
+        如果没有冲突的 deny 规则，插入到所有 allow 规则之后（deny 区域开始之前）。
+        """
+        first_deny_pos = len(self._rules)
+
+        for i, rule in enumerate(self._rules):
+            if rule.action == ExecAction.DENY and rule.enabled:
+                # 检查这条 deny 规则是否会覆盖新的 allow 规则的 pattern
+                if fnmatch.fnmatch(new_rule.pattern.lower(), rule.pattern.lower()):
+                    logger.debug(
+                        f"[EXEC-POLICY] deny 规则 '{rule.pattern}' 会覆盖 "
+                        f"'{new_rule.pattern}'，插入到其前面 (位置 {i})"
+                    )
+                    return i
+                if first_deny_pos == len(self._rules):
+                    first_deny_pos = i
+
+        return first_deny_pos
 
     def get_policy_dict(self) -> Dict[str, Any]:
         """获取策略的可序列化字典（用于 system.execApprovals.get 响应）"""

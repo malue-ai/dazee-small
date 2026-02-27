@@ -92,3 +92,9 @@ class BaseTerminator:
             TerminationDecision
         """
         raise NotImplementedError
+
+    def confirm_long_running(self) -> None:
+        """用户确认继续长任务后调用（子类可覆盖）"""
+
+    def confirm_cost_continue(self, level: str = "confirm") -> None:
+        """用户确认费用后继续执行（子类可覆盖）"""
