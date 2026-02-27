@@ -240,6 +240,25 @@ if [ "$(uname)" = "Darwin" ]; then
       fi
     done
     info "已在 Frameworks/ 创建 $LINK_COUNT 个 symlink → Resources/_internal/"
+
+    # PyInstaller 6.x bootloader 根据构建时的 Python 安装类型查找共享库：
+    #   - Framework Python (python.org): 查找 "Python"
+    #   - Homebrew Python: 查找 "libpython3.XX.dylib"
+    # 确保两种名字都能找到，无论构建机器用的是哪种 Python
+    if [ ! -e "$FRAMEWORKS_DIR/Python" ] && [ ! -L "$FRAMEWORKS_DIR/Python" ]; then
+      PY_LIB=$(find "$RESOURCES_DIR/_internal" -maxdepth 1 -name "libpython3*.dylib" -type f 2>/dev/null | head -1)
+      if [ -n "$PY_LIB" ]; then
+        ln -s "../Resources/_internal/$(basename "$PY_LIB")" "$FRAMEWORKS_DIR/Python"
+        info "已创建 Python 库兼容 symlink: Frameworks/Python → $(basename "$PY_LIB")"
+      fi
+    fi
+    for PY_LIB in "$RESOURCES_DIR/_internal"/libpython3*.dylib; do
+      [ -e "$PY_LIB" ] || continue
+      PY_NAME=$(basename "$PY_LIB")
+      if [ ! -e "$FRAMEWORKS_DIR/$PY_NAME" ] && [ ! -L "$FRAMEWORKS_DIR/$PY_NAME" ]; then
+        ln -s "../Resources/_internal/$PY_NAME" "$FRAMEWORKS_DIR/$PY_NAME"
+      fi
+    done
   else
     warn "Resources/_internal/ 不存在，无法创建 Frameworks symlink"
   fi

@@ -739,6 +739,25 @@ build_for_arch() {
       fi
     done
     info "已在 Frameworks/ 创建 $link_count 个 symlink → Resources/_internal/"
+
+    # PyInstaller 6.x bootloader 根据构建时的 Python 安装类型查找共享库：
+    #   - Framework Python (python.org): 查找 "Python"
+    #   - Homebrew Python: 查找 "libpython3.XX.dylib"
+    # 确保两种名字都能找到，无论构建机器用的是哪种 Python
+    if [ ! -e "$frameworks_dir/Python" ] && [ ! -L "$frameworks_dir/Python" ]; then
+      local py_lib=$(find "$resources_dir/_internal" -maxdepth 1 -name "libpython3*.dylib" -type f 2>/dev/null | head -1)
+      if [ -n "$py_lib" ]; then
+        ln -s "../Resources/_internal/$(basename "$py_lib")" "$frameworks_dir/Python"
+        info "已创建 Python 库兼容 symlink: Frameworks/Python → $(basename "$py_lib")"
+      fi
+    fi
+    for py_lib in "$resources_dir/_internal"/libpython3*.dylib; do
+      [ -e "$py_lib" ] || continue
+      local py_name=$(basename "$py_lib")
+      if [ ! -e "$frameworks_dir/$py_name" ] && [ ! -L "$frameworks_dir/$py_name" ]; then
+        ln -s "../Resources/_internal/$py_name" "$frameworks_dir/$py_name"
+      fi
+    done
   else
     warn "Resources/_internal/ 不存在，无法创建 Frameworks symlink"
   fi
