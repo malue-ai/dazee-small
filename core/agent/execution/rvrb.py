@@ -1600,7 +1600,7 @@ class RVRBExecutor(RVRExecutor):
                 )
 
         # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
-        if ctx.detect_repeated_call(threshold=2):
+        if ctx.detect_repeated_call(threshold=4):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
@@ -1760,7 +1760,7 @@ class RVRBExecutor(RVRExecutor):
                 )
 
         # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
-        if ctx.detect_repeated_call(threshold=2):
+        if ctx.detect_repeated_call(threshold=4):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
