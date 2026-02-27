@@ -113,6 +113,17 @@
                       验证
                     </button>
                   </div>
+                  <p v-if="p.api_key_url" class="text-[11px] text-muted-foreground mt-1.5">
+                    前往
+                    <button
+                      @click="openExternalUrl(p.api_key_url)"
+                      class="inline-flex items-center gap-0.5 text-accent-foreground hover:text-accent-foreground/80 underline underline-offset-2 transition-colors cursor-pointer"
+                    >
+                      <span>{{ p.display_name }} API Keys</span>
+                      <ExternalLink class="w-2.5 h-2.5" />
+                    </button>
+                    获取你的 API Key
+                  </p>
                 </div>
 
                 <!-- Base URL（可选） -->
@@ -150,7 +161,7 @@
                     <div class="text-[10px] text-success/70 mb-1.5">
                       共 {{ validateResults[p.name].model_details.length }} 个可用模型
                     </div>
-                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-thin pr-1">
+                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-overlay pr-1">
                       <div
                         v-for="m in validateResults[p.name].model_details"
                         :key="m.model_name"
@@ -1188,9 +1199,12 @@ async function validateProviderKey(providerName: string) {
   delete validateResults[providerName]
 
   try {
-    const customBaseUrl = providerBaseUrls[providerName]?.trim() || undefined
+    const customBaseUrl = providerBaseUrls[providerName]?.trim()
     const result = await modelApi.validateKey(providerName, key, customBaseUrl)
     validateResults[providerName] = result
+    if (!result.valid) {
+      providerKeys[providerName] = ''
+    }
   } catch (e: any) {
     validateResults[providerName] = {
       valid: false,
@@ -1199,6 +1213,7 @@ async function validateProviderKey(providerName: string) {
       models: [],
       model_details: [],
     }
+    providerKeys[providerName] = ''
   } finally {
     validating[providerName] = false
   }
@@ -1222,6 +1237,13 @@ async function loadAll() {
     for (const p of providerData) {
       const existingKey = settingsData?.['api_keys']?.[p.api_key_env] || ''
       providerKeys[p.name] = existingKey
+
+      // 回显已保存的自定义 Base URL
+      const baseUrlEnv = p.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+      const existingBaseUrl = settingsData?.['api_keys']?.[baseUrlEnv] || ''
+      if (existingBaseUrl) {
+        providerBaseUrls[p.name] = existingBaseUrl
+      }
     }
 
     // 引导系统：如果有已配置的 Key，允许跳过
@@ -1275,7 +1297,7 @@ async function saveSettings() {
     toSave.push({
       detail: p,
       key,
-      baseUrl: providerBaseUrls[p.name]?.trim() || undefined,
+      baseUrl: providerBaseUrls[p.name]?.trim() ?? '',
       masked: p.api_key_configured && isMaskedKey(key),
     })
   }
@@ -1303,6 +1325,7 @@ async function saveSettings() {
         validateResults[item.detail.name] = result
         if (!result.valid) {
           failedProviders.push(`${item.detail.display_name}: ${result.message || '验证失败'}`)
+          providerKeys[item.detail.name] = ''
         }
       } catch (e: any) {
         failedProviders.push(`${item.detail.display_name}: ${e?.response?.data?.detail?.message || e?.message || '验证失败'}`)
@@ -1313,6 +1336,7 @@ async function saveSettings() {
           models: [],
           model_details: [],
         }
+        providerKeys[item.detail.name] = ''
       } finally {
         validating[item.detail.name] = false
       }
@@ -1335,11 +1359,9 @@ async function saveSettings() {
         updates['api_keys'][item.detail.api_key_env] = item.key
       }
 
-      // 保存自定义 Base URL（如有）
-      if (item.baseUrl) {
-        const baseUrlEnv = item.detail.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
-        updates['api_keys'][baseUrlEnv] = item.baseUrl
-      }
+      // 保存自定义 Base URL（空字符串 = 清除旧值）
+      const baseUrlEnv = item.detail.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+      updates['api_keys'][baseUrlEnv] = item.baseUrl || ''
 
       // 记录第一个有验证结果的模型列表（用于默认模型）
       if (!firstValidModels.length) {

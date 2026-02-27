@@ -597,10 +597,12 @@ class ClaudeAdaptor(BaseAdaptor):
 
                     if block_type == "tool_result":
                         tool_result_blocks.append(block)
+                    elif block_type == "input_audio":
+                        assistant_blocks.append({
+                            "type": "text",
+                            "text": "[音频文件: 当前模型不支持音频输入]",
+                        })
                     elif block_type in ("thinking", "redacted_thinking"):
-                        # 只保留有有效 signature 的 thinking 块
-                        # 无 signature 的 thinking 块会导致 Claude API 400 错误：
-                        # "messages.X.content.Y.thinking.signature: Field required"
                         if block.get("signature"):
                             assistant_blocks.append(block)
                         else:
@@ -618,8 +620,19 @@ class ClaudeAdaptor(BaseAdaptor):
                 if tool_result_blocks:
                     converted_messages.append({"role": "user", "content": tool_result_blocks})
             else:
-                # 其他情况直接添加
-                converted_messages.append({"role": msg.role, "content": content})
+                if isinstance(content, list):
+                    filtered_content = []
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "input_audio":
+                            filtered_content.append({
+                                "type": "text",
+                                "text": "[音频文件: 当前模型不支持音频输入]",
+                            })
+                        else:
+                            filtered_content.append(block)
+                    converted_messages.append({"role": msg.role, "content": filtered_content})
+                else:
+                    converted_messages.append({"role": msg.role, "content": content})
 
         # 🔧 关键：确保 tool_use/tool_result 配对且邻接（移除未配对/非邻接的 tool_use）
         converted_messages = ClaudeAdaptor.ensure_tool_pairs(converted_messages)
@@ -792,6 +805,15 @@ class OpenAIAdaptor(BaseAdaptor):
                                 "image_url": {"url": f"data:{media_type};base64,{data}"},
                             }
                         )
+
+                elif block_type == "input_audio":
+                    source = block.get("source", {})
+                    data = source.get("data", "")
+                    fmt = source.get("format", "wav")
+                    content_parts.append({
+                        "type": "input_audio",
+                        "input_audio": {"data": data, "format": fmt},
+                    })
 
                 elif block_type == "thinking":
                     # OpenAI 不支持 thinking，跳过
@@ -1266,8 +1288,27 @@ class GeminiAdaptor(BaseAdaptor):
             if block_type == "text":
                 parts.append({"text": block.get("text", "")})
 
+            elif block_type == "input_audio":
+                source = block.get("source", {})
+                mime_type = source.get("media_type", "audio/wav")
+                data = source.get("data", "")
+                parts.append({
+                    "inline_data": {"mime_type": mime_type, "data": data},
+                })
+
+            elif block_type == "image":
+                source = block.get("source", {})
+                source_type = source.get("type")
+                if source_type == "base64":
+                    mime_type = source.get("media_type", "image/jpeg")
+                    data = source.get("data", "")
+                    parts.append({
+                        "inline_data": {"mime_type": mime_type, "data": data},
+                    })
+                elif source_type == "url":
+                    parts.append({"text": f"[Image URL: {source.get('url', '')}]"})
+
             elif block_type == "thinking":
-                # Gemini 不支持 thinking，跳过
                 pass
 
             elif block_type == "tool_use":

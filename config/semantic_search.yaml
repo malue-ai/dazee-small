@@ -1,0 +1,7 @@
+semantic_search:
+  mode: local
+  local:
+    repo: ''
+    model: ''
+  cloud:
+    model: ''

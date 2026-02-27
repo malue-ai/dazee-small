@@ -69,6 +69,15 @@ capability_categories:
     - 分析表格数据
     - 生成统计报表
 
+- id: audio_processing
+  category_type: business
+  description: 音频处理（TTS/STT/音频理解）
+  use_when: 需要语音合成、语音识别、音频分析
+  examples:
+    - 把这段话转成语音
+    - 帮我听一下这个音频说了什么
+    - 分析这段录音
+
 # ========== 框架内部类别 ==========
 
 - id: knowledge_base
@@ -677,6 +686,58 @@ capabilities:
     required: [operation]
 
 # ========== 动态工具（Level 2，按需加载）==========
+
+- name: audio_processing
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: false
+  implementation:
+    module: tools.audio_processing
+    class: AudioProcessingTool
+  capabilities:
+    - audio_processing
+    - tts
+    - stt
+  priority: 70
+  cost:
+    time: variable
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+  metadata:
+    description: |
+      Audio processing tool: TTS, STT, and audio understanding.
+      - tts: Convert text to speech audio file
+      - stt: Transcribe audio file to text
+      - understand: Analyze audio content with multimodal model
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [tts, stt, understand]
+        description: "tts = text to speech, stt = speech to text, understand = audio analysis"
+      text:
+        type: string
+        description: Input text (TTS action)
+      audio_url:
+        type: string
+        description: Audio file path or URL (STT/understand actions)
+      voice:
+        type: string
+        description: TTS voice (optional)
+      model:
+        type: string
+        description: Model to use (optional, auto-selected)
+      format:
+        type: string
+        enum: [wav, mp3, opus, aac, flac, pcm]
+        description: Output audio format (TTS, default wav)
+    required: [action]
 
 # ========== 内置代码执行 ==========
 

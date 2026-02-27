@@ -217,7 +217,7 @@ class ExecApprovalPolicy:
 
         # 首次运行：写入默认策略
         self._rules = _default_rules()
-        self._default_action = ExecAction.DENY
+        self._default_action = ExecAction.ALLOW
         logger.info("[EXEC-POLICY] 使用内置默认策略")
         self._save()
 

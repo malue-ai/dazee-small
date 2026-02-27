@@ -11,7 +11,7 @@
     </div>
 
     <!-- 主内容区 -->
-    <div class="flex-1 overflow-y-auto scrollbar-thin">
+    <div class="flex-1 overflow-y-auto scrollbar-overlay">
       <div class="max-w-xl mx-auto py-10 px-6 space-y-6">
 
         <!-- 搜索能力状态卡片 -->

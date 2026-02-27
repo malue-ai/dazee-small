@@ -1,22 +1,23 @@
-name: GeneralAgent
-description: 通用智能助手（高质量默认配置）
+name: XiaoDazi
+description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，能执行本地桌面任务并记住用户偏好
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - low
+  - simple
   - medium
-  - high
+  - complex
   task_types:
-  - question_answering
-  - data_analysis
-  - content_generation
-  - code_execution
-  - web_search
   - file_operation
+  - data_analysis
+  - writing
+  - translation
+  - ui_automation
+  - memory_recall
+  - preference_adaptation
   output_formats:
   - text
-  - json
   - markdown
+  - file
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,14 +26,14 @@ intent_analyzer:
 plan_manager:
   enabled: true
   trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 15
-  granularity: medium
+  max_steps: 20
+  granularity: fine
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 2
+  max_replan_attempts: 3
   replan_strategy: incremental
-  failure_threshold: 0.3
+  failure_threshold: 0.4
 tool_selector:
   enabled: true
   available_tools: []
@@ -40,35 +41,53 @@ tool_selector:
   allow_parallel: false
   max_parallel_tools: 3
   base_tools:
-  - plan_todo
+  - nodes
+  - knowledge_search
+  - open_system_preferences
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
-  retention_policy: session
-  episodic_memory: false
-  working_memory_limit: 20
+  retention_policy: user
+  episodic_memory: true
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: text
+  default_format: markdown
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: true
-  max_output_length: 50000
+  code_highlighting: false
+  max_output_length: 2000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills: []
-tools: []
-model: claude-sonnet-4-5-20250929
-max_turns: 15
+skills:
+- name: excel-generator
+  enabled: true
+  description: ''
+- name: multi-lang-ocr
+  enabled: true
+  description: ''
+- name: elegant-reports
+  enabled: true
+  description: ''
+tools:
+- web_search
+- api_calling
+- nodes
+- knowledge_search
+- open_system_preferences
+- hitl
+model: qwen3-max
+max_turns: null
 execution_strategy: rvr-b
 allow_parallel_tools: false
 context_limits:
@@ -81,4 +100,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。
+reasoning: 小搭子需处理复杂桌面任务（文件操作、UI自动化、多步规划），具备强记忆与偏好学习能力，强调本地执行、安全操作和用户引导。需启用细粒度规划、用户级记忆、HITL确认机制及基础工具集，支持OCR、报告生成等关键技能，并通过intent_analyzer识别任务复杂度与类型以触发合适行为模式。

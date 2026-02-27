@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full overflow-y-auto scrollbar-thin" v-if="plan">
+  <div class="h-full overflow-y-auto scrollbar-overlay" v-if="plan">
     <!-- 标题区域 -->
     <div class="mb-4">
       <h3 class="text-base font-semibold text-foreground mb-1">{{ plan.name || '任务计划' }}</h3>

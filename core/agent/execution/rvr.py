@@ -59,30 +59,38 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# ==================== 图片剥离辅助函数 ====================
+# ==================== 媒体剥离辅助函数 ====================
 
 IMAGE_PLACEHOLDER = "[截图已省略，仅保留最近轮次的截图]"
+AUDIO_PLACEHOLDER = "[音频已省略，仅保留最近轮次的音频]"
+
+_MEDIA_BLOCK_TYPES = {"image", "input_audio"}
 
 
-def _content_has_image(content) -> bool:
-    """递归检查 content 是否包含 image block"""
+def _content_has_media(content) -> bool:
+    """递归检查 content 是否包含 image 或 input_audio block"""
     if isinstance(content, list):
         return any(
-            (isinstance(b, dict) and b.get("type") == "image")
+            (isinstance(b, dict) and b.get("type") in _MEDIA_BLOCK_TYPES)
             or (isinstance(b, dict) and b.get("type") == "tool_result"
-                and _content_has_image(b.get("content")))
+                and _content_has_media(b.get("content")))
             for b in content
         )
     if isinstance(content, dict):
-        return content.get("type") == "image"
+        return content.get("type") in _MEDIA_BLOCK_TYPES
     return False
 
 
-def _strip_images_from_blocks(blocks: list) -> list:
-    """
-    递归替换 content blocks 中的 image block 为文本占位符
+def _content_has_image(content) -> bool:
+    """递归检查 content 是否包含 image block（向后兼容）"""
+    return _content_has_media(content)
 
-    保留 text block 和 tool_use/tool_result 的结构，仅替换 image。
+
+def _strip_media_from_blocks(blocks: list) -> list:
+    """
+    递归替换 content blocks 中的 image/input_audio block 为文本占位符
+
+    保留 text block 和 tool_use/tool_result 的结构。
     """
     result = []
     for block in blocks:
@@ -93,14 +101,15 @@ def _strip_images_from_blocks(blocks: list) -> list:
         block_type = block.get("type", "")
 
         if block_type == "image":
-            # 替换 base64 图片为文本占位符
             result.append({"type": "text", "text": IMAGE_PLACEHOLDER})
+        elif block_type == "input_audio":
+            result.append({"type": "text", "text": AUDIO_PLACEHOLDER})
         elif block_type == "tool_result":
             inner = block.get("content")
-            if isinstance(inner, list) and _content_has_image(inner):
+            if isinstance(inner, list) and _content_has_media(inner):
                 result.append({
                     **block,
-                    "content": _strip_images_from_blocks(inner),
+                    "content": _strip_media_from_blocks(inner),
                 })
             else:
                 result.append(block)
@@ -108,6 +117,11 @@ def _strip_images_from_blocks(blocks: list) -> list:
             result.append(block)
 
     return result
+
+
+def _strip_images_from_blocks(blocks: list) -> list:
+    """Backward-compatible alias."""
+    return _strip_media_from_blocks(blocks)
 
 
 class RVRExecutor(BaseExecutor):
@@ -157,22 +171,22 @@ class RVRExecutor(BaseExecutor):
         return system_prompt or ""
 
     @staticmethod
-    def _strip_old_images(
+    def _strip_old_media(
         messages: List[Dict], preserve_last_n: int = 2
     ) -> List[Dict]:
         """
-        剥离非最近 N 条消息中的 base64 图片数据
+        剥离非最近 N 条消息中的 base64 图片和音频数据
 
         observe_screen 等工具返回的截图以 base64 嵌入 tool_result，
-        每张图片 ~0.6MB，会快速耗尽 200K token 上下文窗口。
-        将旧消息中的图片替换为文本占位符，保留最近消息的图片。
+        每张图片 ~0.6MB，音频文件更大，会快速耗尽上下文窗口。
+        将旧消息中的媒体替换为文本占位符，保留最近消息的媒体。
 
         Args:
             messages: 消息列表（dict 格式）
-            preserve_last_n: 保留最近 N 条消息的图片不剥离
+            preserve_last_n: 保留最近 N 条消息的媒体不剥离
 
         Returns:
-            处理后的消息列表（浅拷贝，仅修改含图片的消息）
+            处理后的消息列表（浅拷贝，仅修改含媒体的消息）
         """
         if not messages:
             return messages
@@ -180,7 +194,6 @@ class RVRExecutor(BaseExecutor):
         stripped_count = 0
         result = []
 
-        # 保留最后 N 条消息的图片
         strip_boundary = len(messages) - preserve_last_n
 
         for i, msg in enumerate(messages):
@@ -193,34 +206,38 @@ class RVRExecutor(BaseExecutor):
                 result.append(msg)
                 continue
 
-            # 检查是否包含图片 block
-            has_image = any(
-                isinstance(block, dict) and block.get("type") == "image"
+            has_media = any(
+                isinstance(block, dict) and block.get("type") in _MEDIA_BLOCK_TYPES
                 for block in content
             )
 
-            if not has_image:
-                # 递归检查 tool_result 内部
-                has_image = any(
+            if not has_media:
+                has_media = any(
                     isinstance(block, dict)
                     and block.get("type") == "tool_result"
-                    and _content_has_image(block.get("content"))
+                    and _content_has_media(block.get("content"))
                     for block in content
                 )
 
-            if not has_image:
+            if not has_media:
                 result.append(msg)
                 continue
 
-            # 替换图片为占位符
-            new_content = _strip_images_from_blocks(content)
+            new_content = _strip_media_from_blocks(content)
             stripped_count += 1
             result.append({**msg, "content": new_content})
 
         if stripped_count > 0:
-            logger.info(f"🖼️ 已剥离 {stripped_count} 条消息中的 base64 图片")
+            logger.info(f"🖼️🎵 已剥离 {stripped_count} 条消息中的 base64 媒体数据")
 
         return result
+
+    @staticmethod
+    def _strip_old_images(
+        messages: List[Dict], preserve_last_n: int = 2
+    ) -> List[Dict]:
+        """Backward-compatible alias for _strip_old_media."""
+        return RVRExecutor._strip_old_media(messages, preserve_last_n)
 
     def _trim_messages_if_needed(
         self,
@@ -243,8 +260,8 @@ class RVRExecutor(BaseExecutor):
             for m in llm_messages
         ]
 
-        # 始终剥离旧消息中的 base64 图片（保留最近 2 条消息的图片）
-        messages_for_estimate = self._strip_old_images(messages_for_estimate)
+        # 始终剥离旧消息中的 base64 媒体数据（保留最近 2 条消息）
+        messages_for_estimate = self._strip_old_media(messages_for_estimate)
 
         # 快速字符级预过滤（<1ms）：在昂贵的 token 计算前截断超大消息
         messages_for_estimate = fast_prefilter_messages(messages_for_estimate)

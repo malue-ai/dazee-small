@@ -407,9 +407,8 @@ async def get_embedding_status() -> Dict[str, Any]:
             "recommendation": str,
         }
     """
-    # 从实例 memory.yaml 读取语义搜索配置（与 knowledge_service 同源）
     from services.knowledge_service import _load_knowledge_config
-    knowledge_config = _load_knowledge_config()
+    knowledge_config = await _load_knowledge_config()
     semantic_enabled = knowledge_config.get("semantic_enabled", False)
     provider_setting = knowledge_config.get("embedding_provider", "auto")
 
@@ -575,8 +574,8 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
             "error": f"Invalid mode: {mode}. Must be 'disabled', 'local', or 'cloud'.",
         }
 
-    # Step 1: Write to instance config/memory.yaml (the file knowledge_service reads)
-    await _write_instance_memory_config(mode)
+    # Step 1: Write to global config/semantic_search.yaml
+    await _write_semantic_search_config(mode)
     logger.info(f"Semantic search setup: mode={mode}")
 
     # Step 2: If local mode, check and download model
@@ -677,9 +676,7 @@ async def _background_download_and_apply(mode: str) -> None:
     try:
         result = await download_embedding_model()
         if result["success"]:
-            # Re-write config: initial write may have failed if AGENT_INSTANCE
-            # was not yet set at setup time (startup timing issue)
-            written = await _write_instance_memory_config(mode)
+            written = await _write_semantic_search_config(mode)
             if not written:
                 logger.warning(
                     "Config write failed after download, semantic search may not persist"
@@ -766,12 +763,9 @@ def reset_download_state() -> None:
     _download_task = None
 
 
-async def _write_instance_memory_config(mode: str) -> bool:
+async def _write_semantic_search_config(mode: str) -> bool:
     """
-    Write semantic search mode to the active instance's config/memory.yaml.
-
-    This is where knowledge_service._load_knowledge_config() reads from.
-    Only updates semantic_search.mode, preserves other sections (memory, etc.).
+    Write semantic search mode to global config/semantic_search.yaml.
 
     Args:
         mode: "disabled" | "local" | "cloud"
@@ -779,30 +773,9 @@ async def _write_instance_memory_config(mode: str) -> bool:
     Returns:
         True if config was written successfully, False otherwise.
     """
-    instance_name = os.getenv("AGENT_INSTANCE", "")
-
-    # Fallback: resolve from AgentRegistry when env var not yet set (startup timing)
-    if not instance_name:
-        try:
-            from services.agent_registry import get_agent_registry
-            agents = get_agent_registry().list_agents()
-            if agents:
-                instance_name = agents[0]["agent_id"]
-                logger.info(
-                    f"AGENT_INSTANCE not set, resolved from AgentRegistry: {instance_name}"
-                )
-        except Exception:
-            pass
-
-    if not instance_name:
-        logger.warning("AGENT_INSTANCE not set and no instance found, cannot write config")
-        return False
-
-    from utils.app_paths import get_instances_dir
-    config_path = get_instances_dir() / instance_name / "config" / "memory.yaml"
+    config_path = Path(__file__).resolve().parent.parent / "config" / "semantic_search.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Read existing config (preserve comments are lost with yaml.dump, acceptable)
     if config_path.exists():
         async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
             content = await f.read()
@@ -810,11 +783,9 @@ async def _write_instance_memory_config(mode: str) -> bool:
     else:
         config = {}
 
-    # Update only semantic_search.mode
     config.setdefault("semantic_search", {})
     config["semantic_search"]["mode"] = mode
 
-    # Write back
     async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
         content = yaml.dump(
             config,
@@ -824,7 +795,7 @@ async def _write_instance_memory_config(mode: str) -> bool:
         )
         await f.write(content)
 
-    logger.info(f"Instance memory config updated: {config_path} (mode={mode})")
+    logger.info(f"Semantic search config updated: {config_path} (mode={mode})")
     return True
 
 

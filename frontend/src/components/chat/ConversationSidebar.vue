@@ -24,7 +24,7 @@
     </div>
 
     <!-- 内容区（展开时显示） -->
-    <div v-show="!collapsed" class="flex-1 flex flex-col px-3 py-2 overflow-y-auto scrollbar-thin gap-6">
+    <div v-show="!collapsed" class="flex-1 flex flex-col px-3 py-2 overflow-y-auto scrollbar-overlay gap-6">
       <!-- 顶部操作 / 搜索框 -->
       <div class="flex flex-col gap-1">
         <!-- 搜索模式 -->

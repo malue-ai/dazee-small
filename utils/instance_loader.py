@@ -304,7 +304,7 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
     1. ``config.yaml``              - user config (required)
     2. ``config/skills.yaml``       - skills & skill_groups
     3. ``config/llm_profiles.yaml`` - provider templates & LLM profiles
-    4. ``config/memory.yaml``       - memory, semantic_search & state_consistency
+    4. ``config/memory.yaml``       - memory & state_consistency
 
     Each config key lives in exactly ONE file. The loader merges them into
     a single ``raw_config`` dict for downstream processing.
@@ -338,13 +338,12 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
             raw_config["skill_groups"] = skills_file["skill_groups"]
         logger.info(f"   已合并 config/skills.yaml")
 
-    # Memory config (memory, semantic_search, state_consistency)
+    # Memory config (memory, state_consistency)
+    # semantic_search lives in global config/semantic_search.yaml
     memory_file = await _load_yaml(instance_dir / "config" / "memory.yaml")
     if memory_file:
         if "memory" in memory_file:
             raw_config["memory"] = memory_file["memory"]
-        if "semantic_search" in memory_file:
-            raw_config["semantic_search"] = memory_file["semantic_search"]
         if "state_consistency" in memory_file:
             raw_config["state_consistency"] = memory_file["state_consistency"]
         logger.info("   已合并 config/memory.yaml")

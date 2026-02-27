@@ -86,7 +86,7 @@ async def index_configured_directories() -> int:
     Returns:
         Total number of files indexed
     """
-    config = _load_knowledge_config()
+    config = await _load_knowledge_config()
     directories = config.get("directories", [])
 
     if not directories:
@@ -131,7 +131,7 @@ async def _create_knowledge_manager():
     """
     from core.knowledge.local_search import LocalKnowledgeManager
 
-    config = _load_knowledge_config()
+    config = await _load_knowledge_config()
 
     if not config.get("enabled", True):
         logger.info("Knowledge module disabled in config")
@@ -184,14 +184,10 @@ async def _create_knowledge_manager():
     return km
 
 
-def _load_knowledge_config() -> dict:
+async def _load_knowledge_config() -> dict:
     """
-    Load knowledge config from active instance's config/memory.yaml.
+    Load semantic search config from global config/semantic_search.yaml.
 
-    Reads AGENT_INSTANCE env var to locate the instance directory,
-    then parses semantic_search section from config/memory.yaml.
-
-    Config file: instances/{name}/config/memory.yaml
     Key mapping:
         semantic_search.mode: "disabled"|"local"|"cloud"
         → semantic_enabled: bool
@@ -200,22 +196,19 @@ def _load_knowledge_config() -> dict:
     Returns:
         Knowledge config dict with standardized keys
     """
+    import aiofiles
     import yaml
 
-    instance_name = os.getenv("AGENT_INSTANCE", "")
-    if not instance_name:
+    config_path = Path(__file__).resolve().parent.parent / "config" / "semantic_search.yaml"
+
+    if not config_path.exists():
         return {"enabled": True, "semantic_enabled": False}
 
     try:
-        from utils.app_paths import get_instances_dir
-        config_path = get_instances_dir() / instance_name / "config" / "memory.yaml"
-        if not config_path.exists():
-            return {"enabled": True, "semantic_enabled": False}
+        async with aiofiles.open(config_path, mode="r", encoding="utf-8") as f:
+            content = await f.read()
+        config = yaml.safe_load(content) or {}
 
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-
-        # Read semantic_search.mode → convert to internal keys
         ss_config = config.get("semantic_search", {})
         mode = ss_config.get("mode", "disabled")
 
@@ -229,7 +222,6 @@ def _load_knowledge_config() -> dict:
             }.get(mode, "auto"),
         }
 
-        # Local mode: custom repo/model if specified
         if mode == "local":
             local_config = ss_config.get("local", {})
             local_repo = local_config.get("repo", "")
@@ -239,7 +231,6 @@ def _load_knowledge_config() -> dict:
             if local_model:
                 result["gguf_model"] = local_model
 
-        # Cloud mode: custom model/base_url/api_key if specified
         if mode == "cloud":
             cloud_config = ss_config.get("cloud", {})
             cloud_model = cloud_config.get("model", "")

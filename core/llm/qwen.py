@@ -218,6 +218,7 @@ class QwenLLMService(BaseLLMService):
                 provider=config.provider,
                 model=config.model,
                 api_key=config.api_key,
+                base_url=config.base_url,
                 max_tokens=config.max_tokens,
                 temperature=config.temperature,
                 enable_thinking=config.enable_thinking,
@@ -243,8 +244,8 @@ class QwenLLMService(BaseLLMService):
         masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
         logger.info(f"🔑 Qwen API Key: {masked_key} (长度: {len(api_key)})")
 
-        # 获取 API 端点（优先使用 base_url，否则根据 region 选择）
-        base_url = getattr(self.config, "base_url", None)
+        # 获取 API 端点（优先级：config.base_url > DASHSCOPE_BASE_URL 环境变量 > region 选择）
+        base_url = getattr(self.config, "base_url", None) or os.getenv("DASHSCOPE_BASE_URL")
         if base_url:
             logger.info(f"🌐 千问端点（自定义）: {base_url}")
         else:
@@ -473,6 +474,17 @@ class QwenLLMService(BaseLLMService):
         Returns:
             LLMResponse 响应对象
         """
+        # Qwen Omni 模型强制使用流式（API 要求 stream=True）
+        if QwenModelCapability.supports_audio(self.config.model):
+            logger.info(f"🎵 Qwen Omni 模型 {self.config.model} 强制使用流式请求")
+            final_response = None
+            async for resp in self.create_message_stream(
+                messages=messages, system=system, tools=tools,
+                override_thinking=override_thinking, **kwargs,
+            ):
+                final_response = resp
+            return final_response
+
         # 使用 adaptor 转换消息
         converted = self._adaptor.convert_messages_to_provider(messages)
         openai_messages = converted["messages"]
@@ -667,6 +679,7 @@ class QwenLLMService(BaseLLMService):
         # 累积变量
         accumulated_thinking = ""
         accumulated_content = ""
+        accumulated_audio_data = ""
         tool_calls = []
         stop_reason = None
         usage = {}
@@ -731,9 +744,26 @@ class QwenLLMService(BaseLLMService):
                         on_content(delta.content)
                     yield LLMResponse(
                         content=delta.content,
-                        model=self.config.model,  # 🆕 流式中间块也需要 model
+                        model=self.config.model,
                         is_stream=True,
                     )
+
+                # 处理音频输出（Qwen Omni 通过 delta.audio 返回流式音频）
+                if hasattr(delta, "audio") and delta.audio:
+                    audio_chunk = getattr(delta.audio, "data", None)
+                    if audio_chunk:
+                        accumulated_audio_data += audio_chunk
+
+                    audio_transcript = getattr(delta.audio, "transcript", None)
+                    if audio_transcript:
+                        accumulated_content += audio_transcript
+                        if on_content:
+                            on_content(audio_transcript)
+                        yield LLMResponse(
+                            content=audio_transcript,
+                            model=self.config.model,
+                            is_stream=True,
+                        )
 
                 # 处理工具调用
                 if delta.tool_calls:
@@ -914,15 +944,29 @@ class QwenLLMService(BaseLLMService):
                 stop_reason = "tool_use"
                 logger.debug("🔄 转换 stop_reason: tool_calls -> tool_use")
 
+            # 构建音频输出数据
+            audio_data = None
+            if accumulated_audio_data:
+                audio_data = {
+                    "data": accumulated_audio_data,
+                    "transcript": accumulated_content,
+                    "format": getattr(self.config, "audio_format", "wav"),
+                }
+                logger.info(
+                    f"🎵 Qwen Omni 音频输出: format={audio_data['format']}, "
+                    f"data_len={len(accumulated_audio_data)}"
+                )
+
             # 返回最终响应
             yield LLMResponse(
                 content=accumulated_content,
                 thinking=accumulated_thinking if accumulated_thinking else None,
                 tool_calls=formatted_tool_calls if formatted_tool_calls else None,
-                stop_reason=stop_reason or "stop",  # ✅ 已转换为 Claude 格式
+                stop_reason=stop_reason or "stop",
                 usage=usage if usage else None,
-                model=self.config.model,  # 🆕 实际使用的模型名称
+                model=self.config.model,
                 raw_content=raw_content,
+                audio_data=audio_data,
                 is_stream=False,
             )
 
@@ -1086,6 +1130,20 @@ class QwenLLMService(BaseLLMService):
         if QwenModelCapability.supports_vision(self.config.model):
             if getattr(self.config, "vl_high_resolution_images", False):
                 extra["vl_high_resolution_images"] = True
+
+        # 音频模型参数
+        if QwenModelCapability.supports_audio(self.config.model):
+            modalities = getattr(self.config, "modalities", None) or ["text", "audio"]
+            extra["modalities"] = modalities
+            if "audio" in modalities:
+                voice = getattr(self.config, "audio_voice", None) or "Cherry"
+                audio_format = getattr(self.config, "audio_format", "wav")
+                extra["audio"] = {"voice": voice, "format": audio_format}
+
+        # 其他参数
+        seed = getattr(self.config, "seed", None)
+        if seed is not None:
+            extra["seed"] = seed
 
         top_k = getattr(self.config, "top_k", None)
         if top_k is not None:
