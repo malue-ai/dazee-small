@@ -453,6 +453,8 @@ def compress_fresh_tool_result(content: str) -> str:
         return content
     if len(content) <= _IMMEDIATE_COMPRESS_THRESHOLD:
         return content
+    if content.startswith("[COMPRESSED:"):
+        return content
 
     omitted = len(content) - _IMMEDIATE_KEEP_HEAD - _IMMEDIATE_KEEP_TAIL
     return (
