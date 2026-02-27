@@ -80,29 +80,22 @@ jobs:
           done
 
           if [ -n "$MACOS_SIG" ] || [ -n "$WINDOWS_SIG" ]; then
-            python3 - "$VERSION" "$PUB_DATE" "$MACOS_SIG" "$MACOS_URL" "$WINDOWS_SIG" "$WINDOWS_URL" << 'PYEOF'
-import json, sys, os
-
-version, pub_date, mac_sig, mac_url, win_sig, win_url = sys.argv[1:7]
-notes = os.environ.get("RELEASE_BODY", "")[:500]
-
-platforms = {}
-if mac_sig and mac_url:
-    platforms["darwin-aarch64"] = {"signature": mac_sig, "url": mac_url}
-if win_sig and win_url:
-    platforms["windows-x86_64"] = {"signature": win_sig, "url": win_url}
-
-data = {
-    "version": version,
-    "notes": notes,
-    "pub_date": pub_date,
-    "platforms": platforms,
-}
-
-with open("latest.json", "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-PYEOF
+            cat > _gen_latest.py << 'PYEOF'
+            import json, sys, os
+            version, pub_date, mac_sig, mac_url, win_sig, win_url = sys.argv[1:7]
+            notes = os.environ.get("RELEASE_BODY", "")[:500]
+            platforms = {}
+            if mac_sig and mac_url:
+                platforms["darwin-aarch64"] = {"signature": mac_sig, "url": mac_url}
+            if win_sig and win_url:
+                platforms["windows-x86_64"] = {"signature": win_sig, "url": win_url}
+            data = {"version": version, "notes": notes, "pub_date": pub_date, "platforms": platforms}
+            with open("latest.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+          PYEOF
+            python3 _gen_latest.py "$VERSION" "$PUB_DATE" "$MACOS_SIG" "$MACOS_URL" "$WINDOWS_SIG" "$WINDOWS_URL"
+            rm -f _gen_latest.py
 
             echo "Generated latest.json:"
             cat latest.json
