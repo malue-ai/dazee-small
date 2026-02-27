@@ -140,8 +140,20 @@ if [ -f "$SIGN_KEY_FILE" ]; then
 elif [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
   info "使用环境变量中的 updater 签名密钥"
 else
-  warn "未找到 updater 签名密钥，跳过更新包签名"
-  warn "如需签名，请运行: npx @tauri-apps/cli signer generate -p '<password>' -w keys/xiaodazi.key"
+  warn "未找到 updater 签名密钥（开发构建）"
+  info "生成临时签名密钥..."
+  TEMP_KEY_DIR=$(mktemp -d)
+  DEV_KEY_PWD="dev-build-temp"
+  npx @tauri-apps/cli signer generate -p "$DEV_KEY_PWD" -w "$TEMP_KEY_DIR/temp.key" 2>/dev/null
+  if [ -f "$TEMP_KEY_DIR/temp.key" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY="$(cat "$TEMP_KEY_DIR/temp.key")"
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$DEV_KEY_PWD"
+    info "已生成临时密钥（更新包签名仅用于本次构建，不可用于正式发布）"
+  else
+    warn "临时密钥生成失败，构建可能会报错"
+    warn "如需签名，请运行: npx @tauri-apps/cli signer generate -p '<password>' -w keys/xiaodazi.key"
+  fi
+  rm -rf "$TEMP_KEY_DIR"
 fi
 
 # 构建 Tauri（只打包 .app，跳过 Tauri 自带的 DMG 打包，Step 3 会自己生成完整 DMG）
