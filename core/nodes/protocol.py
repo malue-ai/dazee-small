@@ -21,7 +21,8 @@ class NodeCommand(Enum):
     - system.which: 检查可执行文件是否存在
     - system.notify: 发送系统通知
     - system.execApprovals.get: 获取当前执行审批策略
-    - system.execApprovals.set: 更新执行审批策略
+    - system.execApprovals.set: 更新执行审批策略（全量替换）
+    - system.execApprovals.addRule: 添加单条审批规则（HITL 授权后使用）
     - camera.snap: 摄像头拍照
     - camera.list: 枚举可用摄像头
     - camera.clip: 摄像头录制短视频
@@ -43,6 +44,7 @@ class NodeCommand(Enum):
     SYSTEM_NOTIFY = "system.notify"
     SYSTEM_EXEC_APPROVALS_GET = "system.execApprovals.get"
     SYSTEM_EXEC_APPROVALS_SET = "system.execApprovals.set"
+    SYSTEM_EXEC_APPROVALS_ADD_RULE = "system.execApprovals.addRule"
     CAMERA_SNAP = "camera.snap"
     CAMERA_LIST = "camera.list"
     CAMERA_CLIP = "camera.clip"
