@@ -176,6 +176,7 @@ class PromptResultsWriter:
         # 源文件路径
         self.prompt_path = self.instance_path / "prompt.md"
         self.config_path = self.instance_path / "config.yaml"
+        self.skills_config_path = self.instance_path / "config" / "skills.yaml"
 
     # ============================================================
     # 公共方法
@@ -253,6 +254,7 @@ class PromptResultsWriter:
                 source_hashes={
                     "prompt.md": await self._get_source_hash_async(self.prompt_path),
                     "config.yaml": await self._get_source_hash_async(self.config_path),
+                    "skills.yaml": await self._get_source_hash_async(self.skills_config_path),
                 },
                 result_hashes=result_hashes,
                 manually_edited=manually_edited,
@@ -316,14 +318,18 @@ class PromptResultsWriter:
         # 检查源文件是否变化
         current_prompt_hash = await self._get_source_hash_async(self.prompt_path)
         current_config_hash = await self._get_source_hash_async(self.config_path)
+        current_skills_hash = await self._get_source_hash_async(self.skills_config_path)
 
         prompt_changed = current_prompt_hash != metadata.source_hashes.get("prompt.md")
         config_changed = current_config_hash != metadata.source_hashes.get("config.yaml")
+        skills_changed = current_skills_hash != metadata.source_hashes.get("skills.yaml", "")
 
         if prompt_changed:
             logger.info("   🔄 prompt.md 已变化，需要重新生成")
         if config_changed:
             logger.info("   🔄 config.yaml 已变化，需要重新生成 agent_schema")
+        if skills_changed:
+            logger.info("   🔄 skills.yaml 已变化，需要重新生成 intent_prompt")
 
         # 检测运营手动编辑
         await self._detect_manual_edits_async(metadata)
@@ -331,14 +337,13 @@ class PromptResultsWriter:
         # 根据变化情况决定哪些需要重新生成
         for file_key in result.keys():
             if file_key in metadata.manually_edited:
-                # 运营手动编辑的文件不重新生成
                 result[file_key] = False
                 logger.info(f"   🛡️ {file_key} 被运营手动编辑，跳过重新生成")
             elif file_key == "agent_schema":
-                # agent_schema 在 prompt 或 config 变化时重新生成
                 result[file_key] = prompt_changed or config_changed
+            elif file_key == "intent_prompt":
+                result[file_key] = prompt_changed or skills_changed
             else:
-                # 其他提示词只在 prompt 变化时重新生成
                 result[file_key] = prompt_changed
 
         return result
