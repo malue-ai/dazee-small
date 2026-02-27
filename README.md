@@ -150,6 +150,53 @@ Each skill is a directory with a `SKILL.md` file. No Python code required for mo
 
 Despite 200+ skills, **zero are loaded by default**. Each request activates only the skill groups matching the user's intent (typically 0–15 out of 200+). A simple "hi" costs 0 skill tokens; a complex research task costs ~1,200.
 
+### Command Execution Safety — Transparent rules for what AI can and cannot do
+
+xiaodazi can execute commands directly on your computer (file operations, network diagnostics, script execution, etc.), but **every command passes through a built-in security policy engine**. Rules are evaluated top-to-bottom; the first match wins. Unmatched commands default to **allow**.
+
+<details>
+<summary><strong>✅ Allowed commands</strong></summary>
+
+| Pattern | Description | Shell |
+|---------|-------------|-------|
+| `echo *` | Echo output | All |
+| `Get-*` | PowerShell read-only query cmdlets | powershell / pwsh |
+| `dir` / `dir *` | Directory listing | All |
+| `hostname` | Hostname query | All |
+| `whoami` | Current user | All |
+| `systeminfo` | System information | All |
+| `ipconfig` / `ipconfig *` | Network configuration | All |
+| `ping *` | Network connectivity test | All |
+| `type *` | Read file contents | cmd |
+| `cat *` | Read file contents | All |
+| `tasklist*` | Process list | All |
+| `netstat*` | Network connections | All |
+| `python *` / `python3 *` | Python script execution | All |
+| `pip *` / `pip3 *` | Python package management | All |
+| `git *` | Git version control | All |
+| `node *` / `npm *` | Node.js runtime & package management | All |
+
+</details>
+
+<details>
+<summary><strong>🚫 Explicitly blocked dangerous commands</strong></summary>
+
+| Pattern | Reason |
+|---------|--------|
+| `Remove-Item *` / `rm *` / `del *` | Prevent accidental file deletion |
+| `Format-*` | Prevent disk formatting |
+| `Stop-Computer*` / `shutdown*` | Prevent unexpected shutdown |
+| `Restart-Computer*` | Prevent unexpected restart |
+| `*Invoke-WebRequest*` | Prevent downloading and executing unknown programs |
+| `*Start-Process*` | Prevent bypassing security policy to launch processes |
+| `*reg *` | Prevent registry modification |
+| `net user*` / `net localgroup*` | Prevent account and permission tampering |
+| `schtasks *` | Prevent scheduled task creation |
+
+</details>
+
+> **Customizable:** Policy rules are stored in a local `exec-policy.json` file. You can modify them via remote management commands (`system.execApprovals.get/set`) or by editing the JSON file directly. Adjust the allowlist and blocklist to fit your use case.
+
 ### Local-First — Your data stays on your machine
 
 | Storage | Technology | Purpose |
