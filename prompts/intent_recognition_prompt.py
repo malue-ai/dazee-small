@@ -194,6 +194,31 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["diagram"]}}</output>
 </example>
 
+<example>
+<query>电脑越来越慢了，帮我看看什么占了空间</query>
+<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["system_maintenance"]}}</output>
+</example>
+
+<example>
+<query>帮我生成一张赛博朋克风格的头像</query>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["image_gen"]}}</output>
+</example>
+
+<example>
+<query>刚才屏幕上看到一个报价，帮我找回来</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["screen_memory"]}}</output>
+</example>
+
+<example>
+<query>记录今天午餐吃了什么，算下卡路里</query>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["health"]}}</output>
+</example>
+
+<example>
+<query>帮我规划国庆去成都的行程</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["lifestyle"]}}</output>
+</example>
+
 <!-- 多动作 → 必须多选 ⚠️ -->
 
 <example>
@@ -250,6 +275,35 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <note>视频转文字 → media ＋ 翻译 → translation ＋ 写博客 → writing ＋ 内容发布 → content_creation</note>
 </example>
 
+<example>
+<query>帮我优化简历，翻译成英文投这个外企岗位</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["career", "translation"]}}</output>
+<note>优化简历 → career ＋ 翻译英文 → translation</note>
+</example>
+
+<example>
+<query>在飞书上找到上周会议妙记，提取行动项发给参会人</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["feishu", "meeting"]}}</output>
+<note>飞书会议妙记 → feishu ＋ 提取行动项 → meeting</note>
+</example>
+
+<example>
+<query>帮我看看这个 GitHub Issue 什么问题，写个修复方案</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["code", "writing"]}}</output>
+<note>查看 Issue → code ＋ 写方案 → writing</note>
+</example>
+
+<example>
+<query>帮我加密桌面上这些合同文件</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["security", "file_operation"]}}</output>
+<note>加密 → security ＋ 操作文件 → file_operation</note>
+</example>
+
+<example>
+<query>出 20 道 Python 基础测验题</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["learning"]}}</output>
+</example>
+
 ---
 
 ## 重要说明
@@ -258,7 +312,7 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 - 不确定 skip_memory 时选 false（保守）
 - 不确定 is_follow_up 时选 false（保守）
 - 不确定 wants_rollback 时选 false（保守，只有明确恢复/撤销请求才为 true）
-- **relevant_skill_groups 经常需要多选**（上面示例中近半数是多选）
+- **relevant_skill_groups 经常需要多选**（上面示例中近半数是多选）。多选是为了保证召回率：漏选一个分组 = 该能力完全不可用，而多选仅多加载少量提示词，代价极低
 - 拆分用户请求中的每个动作，分别匹配分组
 - **不确定某个分组是否需要时 → 选上**（多选无害，漏选致命）
 
