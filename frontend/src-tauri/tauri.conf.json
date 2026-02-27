@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "xiaodazi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.zenflux.agent",
   "build": {
     "beforeBuildCommand": "npm run build",
@@ -33,13 +33,14 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/YOUR_ORG/xiaodazi/releases/latest/download/latest.json"
+        "https://github.com/malue-ai/dazee-small/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFGMzU4RUQ4N0IxMDRDQkIKUldTN1RCQjcySTQxSDdPY2lva2pDZkpxWDdRUmNvc3hiMktqaHN0cWpsZ28wYUlpKysySzNId0IK"
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
     "copyright": "© 2024 xiaodazi",
     "externalBin": [

@@ -66,6 +66,7 @@ from services.session_service import (
 )
 from utils.background_tasks import TaskContext, get_background_task_service
 from utils.file_processor import get_file_processor
+from utils.image_constraints import validate_image_files_for_model
 from utils.message_utils import (
     append_to_last_user_message,
     dict_list_to_messages,
@@ -258,6 +259,12 @@ class ChatServiceError(Exception):
 
 class AgentExecutionError(ChatServiceError):
     """Agent 执行失败异常"""
+
+    pass
+
+
+class AttachmentValidationError(ChatServiceError):
+    """附件校验失败异常（如图片超过模型限制）"""
 
     pass
 
@@ -760,6 +767,10 @@ class ChatService:
                     raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
 
         effective_agent_id = agent_id or self.default_agent_key
+        effective_model_name = None
+        agent_config = self.agent_registry.get_agent_config(effective_agent_id)
+        if agent_config and getattr(agent_config, "instance_config", None):
+            effective_model_name = getattr(agent_config.instance_config, "model", None)
 
         # 2. 创建/校验 Conversation
         try:
@@ -824,7 +835,21 @@ class ChatService:
                     elif hasattr(f, "model_dump"):
                         files_data.append(f.model_dump())  # type: ignore[union-attr]
                 if files_data:
-                    processed_files = await self.file_processor.process_files(files_data)
+                    # 先做按模型的图片限制校验（仅在 PIL 不可用、无法自动压缩时才严格拦截）
+                    # 若 PIL 可用，process_files 会自动压缩超出限制的图片
+                    from utils.image_constraints import PIL_AVAILABLE as _pil_ok
+                    if not _pil_ok:
+                        try:
+                            await validate_image_files_for_model(
+                                files=files_data,
+                                model_name=effective_model_name,
+                            )
+                        except ValueError as e:
+                            raise AttachmentValidationError(str(e)) from e
+
+                    processed_files = await self.file_processor.process_files(
+                        files_data, model_name=effective_model_name
+                    )
                     if processed_files:
                         files_metadata = [
                             {

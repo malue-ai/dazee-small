@@ -81,7 +81,7 @@
     <!-- 多文件夹列表 -->
     <div 
       v-else 
-      class="flex-1 overflow-y-auto scrollbar-thin"
+      class="flex-1 overflow-y-auto scrollbar-overlay"
       :class="isDragOver ? 'bg-primary/5' : ''"
     >
       <!-- 拖拽提示条 -->

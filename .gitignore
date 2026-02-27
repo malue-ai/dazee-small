@@ -59,8 +59,11 @@ coverage.xml
 .~*
 
 # 配置文件（包含 API Key 等敏感信息）
-config.yaml
+/config.yaml
 .env
+
+# 计算巢部署配置（含敏感参数）
+.computenest/
 
 # 实例敏感信息（API Keys）
 instances/*/.env
@@ -114,3 +117,13 @@ node_modules/
 
 # Vite cache
 frontend/.vite/
+
+# Tauri updater 签名密钥（私钥绝对不能提交！）
+keys/
+
+# 打包产物（安装包 / 安装程序）
+*.exe
+*.dmg
+*.msi
+*.AppImage
+*.deb

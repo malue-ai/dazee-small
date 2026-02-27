@@ -14,7 +14,7 @@
       </div>
 
       <!-- 消息列表 -->
-      <div ref="messageListRef" class="flex-1 overflow-y-auto scrollbar-thin px-6 py-6 space-y-4">
+      <div ref="messageListRef" class="flex-1 overflow-y-auto scrollbar-overlay px-6 py-6 space-y-4">
         <div
           v-for="(msg, index) in messages"
           :key="index"
@@ -196,7 +196,7 @@
       </Transition>
 
       <!-- 配置内容区域 -->
-      <div ref="configAreaRef" class="flex-1 overflow-y-auto scrollbar-thin p-6">
+      <div ref="configAreaRef" class="flex-1 overflow-y-auto scrollbar-overlay p-6">
         <!-- 配置标签 -->
         <div v-if="activeTab === 'config'" class="max-w-lg mx-auto space-y-6">
           <!-- 图标 -->
@@ -329,7 +329,7 @@
                   v-if="modelDropdownOpen && availableModels.length > 0"
                   class="absolute z-50 mt-1.5 w-full bg-card border border-border rounded-xl shadow-lg overflow-hidden"
                 >
-                  <div class="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
+                  <div class="max-h-[240px] overflow-y-auto scrollbar-overlay py-1">
                     <button
                       v-for="m in availableModels"
                       :key="m.model_name"

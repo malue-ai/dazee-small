@@ -1,0 +1,117 @@
+name: Add Stable Download Links & Updater Manifest
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  add-stable-names:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets and re-upload with stable names + latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_REPO: ${{ github.repository }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          echo "Processing release: $RELEASE_TAG (version: $VERSION)"
+
+          WORK_DIR=$(mktemp -d)
+          cd "$WORK_DIR"
+
+          # ===== 1. 下载所有相关资源 =====
+          gh release download "$RELEASE_TAG" -R "$RELEASE_REPO" \
+            --pattern "*.dmg" \
+            --pattern "*.exe" \
+            --pattern "*.app.tar.gz" \
+            --pattern "*.app.tar.gz.sig" \
+            --pattern "*.nsis.zip" \
+            --pattern "*.nsis.zip.sig" \
+            || true
+
+          echo "Downloaded files:"
+          ls -la
+
+          # ===== 2. 创建固定文件名副本（官网下载链接） =====
+          for f in *_*_aarch64.dmg; do
+            [ -f "$f" ] || continue
+            STABLE="xiaodazi-macos-aarch64.dmg"
+            cp "$f" "$STABLE"
+            gh release upload "$RELEASE_TAG" "$STABLE" -R "$RELEASE_REPO" --clobber
+            echo "Uploaded: $STABLE"
+          done
+
+          for f in *_*_x64-setup.exe; do
+            [ -f "$f" ] || continue
+            STABLE="xiaodazi-windows-x64-setup.exe"
+            cp "$f" "$STABLE"
+            gh release upload "$RELEASE_TAG" "$STABLE" -R "$RELEASE_REPO" --clobber
+            echo "Uploaded: $STABLE"
+          done
+
+          # ===== 3. 生成 latest.json（Tauri updater 端点） =====
+          REPO_URL="https://github.com/$RELEASE_REPO"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          MACOS_SIG=""
+          MACOS_URL=""
+          WINDOWS_SIG=""
+          WINDOWS_URL=""
+
+          for f in *.app.tar.gz.sig; do
+            [ -f "$f" ] || continue
+            MACOS_SIG=$(cat "$f" | tr -d '\n')
+            UPDATE_FILE="${f%.sig}"
+            MACOS_URL="$REPO_URL/releases/download/$RELEASE_TAG/$(basename "$UPDATE_FILE")"
+            echo "macOS update bundle: $UPDATE_FILE"
+          done
+
+          for f in *.nsis.zip.sig; do
+            [ -f "$f" ] || continue
+            WINDOWS_SIG=$(cat "$f" | tr -d '\n')
+            UPDATE_FILE="${f%.sig}"
+            WINDOWS_URL="$REPO_URL/releases/download/$RELEASE_TAG/$(basename "$UPDATE_FILE")"
+            echo "Windows update bundle: $UPDATE_FILE"
+          done
+
+          if [ -n "$MACOS_SIG" ] || [ -n "$WINDOWS_SIG" ]; then
+            python3 - "$VERSION" "$PUB_DATE" "$MACOS_SIG" "$MACOS_URL" "$WINDOWS_SIG" "$WINDOWS_URL" << 'PYEOF'
+import json, sys, os
+
+version, pub_date, mac_sig, mac_url, win_sig, win_url = sys.argv[1:7]
+notes = os.environ.get("RELEASE_BODY", "")[:500]
+
+platforms = {}
+if mac_sig and mac_url:
+    platforms["darwin-aarch64"] = {"signature": mac_sig, "url": mac_url}
+if win_sig and win_url:
+    platforms["windows-x86_64"] = {"signature": win_sig, "url": win_url}
+
+data = {
+    "version": version,
+    "notes": notes,
+    "pub_date": pub_date,
+    "platforms": platforms,
+}
+
+with open("latest.json", "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+PYEOF
+
+            echo "Generated latest.json:"
+            cat latest.json
+
+            gh release upload "$RELEASE_TAG" latest.json -R "$RELEASE_REPO" --clobber
+            echo "Uploaded: latest.json"
+          else
+            echo "No signed update bundles found, skipping latest.json"
+          fi
+
+          rm -rf "$WORK_DIR"
+          echo "Done!"

@@ -11,8 +11,10 @@ MiniMax LLM 服务实现
 - 流式断连重试与降级
 
 模型系列：
-- MiniMax-M2.1:           旗舰模型，~60 tps
-- MiniMax-M2.1-lightning:  极速版，~100 tps
+- MiniMax-M2.5:           最新旗舰，编码与智能体 SOTA，~60 tps
+- MiniMax-M2.5-highspeed:  M2.5 极速版，性能不变，~100 tps
+- MiniMax-M2.1:           上一代旗舰模型，~60 tps
+- MiniMax-M2.1-lightning:  M2.1 极速版，~100 tps
 - MiniMax-M2:             Agent/Coding 专精
 
 参考文档：
@@ -50,6 +52,8 @@ class MiniMaxModelCapability:
 
     # 支持思考模式的模型
     THINKING_MODELS = {
+        "MiniMax-M2.5",
+        "MiniMax-M2.5-highspeed",
         "MiniMax-M2.1",
         "MiniMax-M2.1-lightning",
         "MiniMax-M2",
@@ -57,6 +61,8 @@ class MiniMaxModelCapability:
 
     # 支持 Function Calling 的模型
     TOOL_CALLING_MODELS = {
+        "MiniMax-M2.5",
+        "MiniMax-M2.5-highspeed",
         "MiniMax-M2.1",
         "MiniMax-M2.1-lightning",
         "MiniMax-M2",
@@ -95,7 +101,7 @@ class MiniMaxLLMService(BaseLLMService):
     ```python
     config = LLMConfig(
         provider=LLMProvider.MINIMAX,
-        model="MiniMax-M2.1",
+        model="MiniMax-M2.5",
         api_key=os.getenv("MINIMAX_API_KEY"),
         enable_thinking=True
     )
@@ -753,7 +759,7 @@ class MiniMaxLLMService(BaseLLMService):
 
 
 def create_minimax_service(
-    model: str = "MiniMax-M2.1",
+    model: str = "MiniMax-M2.5",
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     enable_thinking: bool = True,
@@ -763,7 +769,8 @@ def create_minimax_service(
     Create a MiniMax service (convenience function).
 
     Args:
-        model: Model name (MiniMax-M2.1, MiniMax-M2.1-lightning, MiniMax-M2)
+        model: Model name (MiniMax-M2.5, MiniMax-M2.5-highspeed,
+               MiniMax-M2.1, MiniMax-M2.1-lightning, MiniMax-M2)
         api_key: API key (defaults to MINIMAX_API_KEY env var)
         base_url: Custom API endpoint
         enable_thinking: Enable thinking mode
@@ -773,15 +780,15 @@ def create_minimax_service(
         MiniMaxLLMService instance
 
     Examples:
-        # MiniMax-M2.1: flagship model (~60 tps)
+        # MiniMax-M2.5: latest flagship (~60 tps)
         llm = create_minimax_service(
-            model="MiniMax-M2.1",
+            model="MiniMax-M2.5",
             enable_thinking=True
         )
 
-        # MiniMax-M2.1-lightning: fast version (~100 tps)
+        # MiniMax-M2.5-highspeed: fast version (~100 tps)
         llm = create_minimax_service(
-            model="MiniMax-M2.1-lightning",
+            model="MiniMax-M2.5-highspeed",
             enable_thinking=False
         )
     """
@@ -819,10 +826,10 @@ def _register_minimax():
         name="minimax",
         service_class=MiniMaxLLMService,
         adaptor_class=ClaudeAdaptor,
-        default_model="MiniMax-M2.1",
+        default_model="MiniMax-M2.5",
         api_key_env="MINIMAX_API_KEY",
         display_name="MiniMax",
-        description="MiniMax M2 系列模型（Anthropic API 兼容）",
+        description="MiniMax M2.5/M2 系列模型（Anthropic API 兼容）",
         supported_features=[
             "streaming",
             "tool_calling",

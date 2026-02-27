@@ -464,11 +464,17 @@ class AgentFactory:
                 )
                 llm_kwargs["max_tokens"] = caps.max_tokens
 
+            # 优先使用用户激活时保存的自定义 base_url，否则使用目录默认值
+            effective_base_url = model_config.base_url
+            activated_entry = ModelRegistry.get_activated_entry(schema.model)
+            if activated_entry and activated_entry.base_url:
+                effective_base_url = activated_entry.base_url
+
             main_profile = {
                 "provider": model_config.provider,
                 "model": model_config.model_name,
                 "api_key_env": model_config.api_key_env,
-                "base_url": model_config.base_url,
+                "base_url": effective_base_url,
             }
             # ModelRegistry 的额外配置（如 region）
             main_profile.update(model_config.extra_config)

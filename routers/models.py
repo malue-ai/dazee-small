@@ -435,6 +435,7 @@ SUPPORTED_PROVIDERS = {
         "icon": "🟠",
         "base_url": "https://api.anthropic.com",
         "api_key_env": "ANTHROPIC_API_KEY",
+        "api_key_url": "https://console.anthropic.com/settings/keys",
         "description": "Anthropic Claude 系列，支持 Extended Thinking 和 Prompt Caching",
         "adapter": "claude",
         "validate_method": "anthropic",
@@ -444,6 +445,7 @@ SUPPORTED_PROVIDERS = {
         "icon": "🟢",
         "base_url": "https://api.openai.com/v1",
         "api_key_env": "OPENAI_API_KEY",
+        "api_key_url": "https://platform.openai.com/api-keys",
         "description": "OpenAI GPT 系列，支持视觉和工具调用",
         "adapter": "openai",
         "validate_method": "openai",
@@ -453,6 +455,7 @@ SUPPORTED_PROVIDERS = {
         "icon": "🔵",
         "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         "api_key_env": "DASHSCOPE_API_KEY",
+        "api_key_url": "https://dashscope.console.aliyun.com/apiKey",
         "description": "阿里云通义千问系列，支持 Thinking 和多模态",
         "adapter": "openai",
         "validate_method": "openai",
@@ -462,6 +465,7 @@ SUPPORTED_PROVIDERS = {
         "icon": "🐋",
         "base_url": "https://api.deepseek.com/v1",
         "api_key_env": "DEEPSEEK_API_KEY",
+        "api_key_url": "https://platform.deepseek.com/api_keys",
         "description": "DeepSeek 系列，高性价比推理模型",
         "adapter": "openai",
         "validate_method": "openai",
@@ -471,6 +475,7 @@ SUPPORTED_PROVIDERS = {
         "icon": "🌙",
         "base_url": "https://api.moonshot.cn/v1",
         "api_key_env": "MOONSHOT_API_KEY",
+        "api_key_url": "https://platform.moonshot.cn/console/api-keys",
         "description": "Moonshot AI Kimi 系列，支持超长上下文",
         "adapter": "openai",
         "validate_method": "openai",
@@ -478,17 +483,19 @@ SUPPORTED_PROVIDERS = {
     "minimax": {
         "display_name": "MiniMax",
         "icon": "🔶",
-        "base_url": "https://api.minimax.chat/v1",
+        "base_url": "https://api.minimaxi.com/anthropic",
         "api_key_env": "MINIMAX_API_KEY",
-        "description": "MiniMax 系列，支持超长上下文和语音",
-        "adapter": "openai",
-        "validate_method": "openai",
+        "api_key_url": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+        "description": "MiniMax M2.5/M2 系列，官方 Anthropic 兼容 / 第三方 OpenAI 兼容",
+        "adapter": "claude",
+        "validate_method": "auto",
     },
     "glm": {
         "display_name": "智谱 GLM (Zhipu AI)",
         "icon": "🔮",
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "api_key_env": "ZHIPUAI_API_KEY",
+        "api_key_url": "https://open.bigmodel.cn/usercenter/apikeys",
         "description": "智谱 GLM 系列，支持 Thinking、Function Calling 和视觉",
         "adapter": "openai",
         "validate_method": "openai",
@@ -539,6 +546,7 @@ async def list_supported_providers():
                 icon=meta["icon"],
                 base_url=meta["base_url"],
                 api_key_env=api_key_env,
+                api_key_url=meta.get("api_key_url"),
                 api_key_configured=api_key_configured,
                 default_model=default_model,
                 description=meta["description"],
@@ -575,8 +583,10 @@ async def _validate_openai_compatible(base_url: str, api_key: str) -> tuple[bool
         return False, f"验证失败 (HTTP {resp.status_code})", []
 
 
-async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, list[str]]:
-    """Validate API key for Anthropic Claude."""
+async def _validate_anthropic(
+    base_url: str, api_key: str, provider: str = "claude",
+) -> tuple[bool, str, list[str]]:
+    """Validate API key for Anthropic-compatible providers (Claude, MiniMax, etc.)."""
     base = base_url.rstrip("/")
     headers = {
         "x-api-key": api_key,
@@ -584,14 +594,17 @@ async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, l
         "content-type": "application/json",
     }
 
+    # Pick a lightweight probe model based on provider
+    catalog_models = ModelRegistry.list_models(provider=provider)
+    probe_model = catalog_models[0].model_name if catalog_models else "claude-3-5-haiku-20241022"
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Step 1: validate key via messages endpoint (empty body → expect 400)
         url = f"{base}/v1/messages"
-        body = {"model": "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": []}
+        body = {"model": probe_model, "max_tokens": 1, "messages": []}
         resp = await client.post(url, headers=headers, json=body)
 
         if resp.status_code not in (200, 400):
-            # Log the raw Anthropic error for debugging
             try:
                 err_body = resp.json()
                 err_msg = err_body.get("error", {}).get("message", resp.text[:200])
@@ -618,13 +631,11 @@ async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, l
                 data = models_resp.json().get("data", [])
                 models = [m.get("id", "") for m in data if m.get("id")]
         except Exception:
-            # Models listing failed; fall back to catalog models for this provider
-            catalog = ModelRegistry.list_models(provider="claude")
+            catalog = ModelRegistry.list_models(provider=provider)
             models = [m.model_name for m in catalog]
 
-        # If models API returned nothing, still fall back to catalog
         if not models:
-            catalog = ModelRegistry.list_models(provider="claude")
+            catalog = ModelRegistry.list_models(provider=provider)
             models = [m.model_name for m in catalog]
 
         return True, "API Key 验证通过", models
@@ -708,9 +719,18 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
     base_url = request.base_url or meta["base_url"]
     validate_method = meta["validate_method"]
 
+    # "auto": 用户改了 base_url → openai 验证，否则 → anthropic 验证
+    if validate_method == "auto":
+        default_url = meta["base_url"].rstrip("/")
+        custom_url = (request.base_url or "").rstrip("/")
+        if custom_url and custom_url != default_url:
+            validate_method = "openai"
+        else:
+            validate_method = "anthropic"
+
     try:
         if validate_method == "anthropic":
-            valid, message, models = await _validate_anthropic(base_url, request.api_key)
+            valid, message, models = await _validate_anthropic(base_url, request.api_key, provider)
         else:
             valid, message, models = await _validate_openai_compatible(base_url, request.api_key)
 

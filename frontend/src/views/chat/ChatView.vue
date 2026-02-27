@@ -42,7 +42,7 @@
       <!-- 聊天内容区域 -->
       <div 
         v-else
-        class="flex flex-col min-w-0 overflow-hidden transition-all duration-300"
+        class="flex flex-col min-w-0 min-h-0 overflow-hidden transition-all duration-300"
         :class="showRightSidebar ? 'w-1/2' : 'flex-1'"
       >
         <!-- Agent 项目顶部导航栏 -->
@@ -109,7 +109,7 @@
                 <div class="px-3 py-2 border-b border-border">
                   <span class="text-xs font-medium text-muted-foreground">历史对话（{{ historyTotalCount }}）</span>
                 </div>
-                <div class="max-h-64 overflow-y-auto scrollbar-thin">
+                <div class="max-h-64 overflow-y-auto scrollbar-overlay">
                   <!-- 无历史记录 -->
                   <div v-if="historyIds.length === 0" class="px-4 py-6 text-center">
                     <p class="text-xs text-muted-foreground/50">暂无对话记录</p>
@@ -243,6 +243,7 @@
             @upload-click="handleUploadClick"
             @files-dropped="handleFilesDropped"
             @workspace-file-dropped="handleWorkspaceFileDropped"
+            @file-preview="handleFilePreview"
           />
         </div>
       </div>
@@ -280,7 +281,7 @@
                 <X class="w-4 h-4" />
               </button>
             </div>
-            <div v-if="rightSidebarTab === 'plan'" class="flex-1 overflow-y-auto p-4 scrollbar-thin">
+            <div v-if="rightSidebarTab === 'plan'" class="flex-1 overflow-y-auto p-4 scrollbar-overlay">
               <PlanWidget v-if="currentPlan" :plan="currentPlan" />
               <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground/40 opacity-60">
                 <div class="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4 border border-border">
@@ -338,7 +339,7 @@
       ref="fileInputRef" 
       @change="handleFileSelect" 
       multiple 
-      accept="image/*,.pdf,.txt,.md,.csv,.json"
+      accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv,.json"
       class="absolute w-px h-px opacity-0 overflow-hidden pointer-events-none"
       style="left: -9999px;"
     />

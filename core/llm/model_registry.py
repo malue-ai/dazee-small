@@ -289,9 +289,15 @@ class ModelRegistry:
         # 通过 LLMRegistry 创建服务
         from .registry import LLMRegistry
 
+        # 优先使用用户激活时保存的自定义 base_url，否则使用目录默认值
+        effective_base_url = config.base_url
+        entry = cls.get_activated_entry(model_name)
+        if entry and entry.base_url:
+            effective_base_url = entry.base_url
+
         # 合并配置
         service_kwargs = {
-            "base_url": config.base_url,
+            "base_url": effective_base_url,
             "max_tokens": config.capabilities.max_tokens,
             **config.extra_config,
             **kwargs,
@@ -965,7 +971,7 @@ def _register_preset_models() -> None:
     """
     # ==================== OpenAI 系列 ====================
 
-    _OPENAI_COMMON = dict(
+    _OPENAI_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://api.openai.com/v1",
         api_key_env="OPENAI_API_KEY",
@@ -1204,6 +1210,38 @@ def _register_preset_models() -> None:
         )
     )
 
+    # --- GPT Audio (Omni) ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-audio",
+            model_type=ModelType.AUDIO,
+            display_name="GPT Audio",
+            description="OpenAI 全模态音频模型，支持音频输入/输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=16384, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=2.5, output_per_million=10.0),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-4o-audio-preview",
+            model_type=ModelType.AUDIO,
+            display_name="GPT-4o Audio Preview",
+            description="GPT-4o 音频预览版，支持音频输入/输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=16384, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=2.5, output_per_million=10.0),
+            **_OPENAI_COMMON,
+        )
+    )
+
     # --- Legacy ---
 
     ModelRegistry.register(
@@ -1238,7 +1276,7 @@ def _register_preset_models() -> None:
 
     # ==================== Claude 系列 ====================
 
-    _CLAUDE_COMMON = dict(
+    _CLAUDE_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.CLAUDE,
         base_url="https://api.anthropic.com",
         api_key_env="ANTHROPIC_API_KEY",
@@ -1399,7 +1437,7 @@ def _register_preset_models() -> None:
 
     # ==================== Qwen 系列 ====================
 
-    _QWEN_COMMON = dict(
+    _QWEN_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         api_key_env="DASHSCOPE_API_KEY",
@@ -1650,6 +1688,53 @@ def _register_preset_models() -> None:
         )
     )
 
+    # --- Qwen Omni（全模态音频）系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-omni-turbo",
+            model_type=ModelType.AUDIO,
+            display_name="Qwen-Omni-Turbo",
+            description="阿里云全模态模型，支持音频/视觉输入输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=33000, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.80, output_per_million=3.20),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-omni-flash",
+            model_type=ModelType.AUDIO,
+            display_name="Qwen3-Omni-Flash",
+            description="Qwen3 全模态快速模型，支持音频/视觉输入输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=33000, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.50),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-audio-turbo",
+            model_type=ModelType.AUDIO,
+            display_name="Qwen-Audio-Turbo",
+            description="阿里云音频理解模型",
+            capabilities=ModelCapabilities(
+                supports_tools=False, supports_vision=False, supports_audio=True,
+                max_tokens=8192, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.40, output_per_million=1.20),
+            **_QWEN_COMMON,
+        )
+    )
+
     # --- Qwen VL 经典 ---
 
     ModelRegistry.register(
@@ -1684,7 +1769,7 @@ def _register_preset_models() -> None:
 
     # ==================== GLM（智谱AI）系列 ====================
 
-    _GLM_COMMON = dict(
+    _GLM_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key_env="ZHIPUAI_API_KEY",
@@ -1861,9 +1946,63 @@ def _register_preset_models() -> None:
         )
     )
 
+    # ==================== Gemini 系列 ====================
+
+    _GEMINI_COMMON: Dict[str, Any] = dict(
+        adapter=AdapterType.GEMINI,
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        api_key_env="GOOGLE_API_KEY",
+        provider="gemini",
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gemini-2.5-pro",
+            model_type=ModelType.VLM,
+            display_name="Gemini 2.5 Pro",
+            description="Google 旗舰推理模型，支持多模态",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=1048576,
+            ),
+            pricing=ModelPricing(input_per_million=1.25, output_per_million=10.0),
+            **_GEMINI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gemini-2.5-flash",
+            model_type=ModelType.VLM,
+            display_name="Gemini 2.5 Flash",
+            description="Google 高性价比快速模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=1048576,
+            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=0.60),
+            **_GEMINI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gemini-2.5-flash-native-audio",
+            model_type=ModelType.AUDIO,
+            display_name="Gemini 2.5 Flash Native Audio",
+            description="Google 全模态音频模型，支持音频/视频输入输出",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_audio=True,
+                max_tokens=65536, max_input_tokens=1048576,
+            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=0.60),
+            **_GEMINI_COMMON,
+        )
+    )
+
     # ==================== DeepSeek 系列 ====================
 
-    _DEEPSEEK_COMMON = dict(
+    _DEEPSEEK_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://api.deepseek.com/v1",
         api_key_env="DEEPSEEK_API_KEY",
@@ -1908,7 +2047,7 @@ def _register_preset_models() -> None:
 
     # ==================== Kimi (Moonshot) 系列 ====================
 
-    _KIMI_COMMON = dict(
+    _KIMI_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
         base_url="https://api.moonshot.cn/v1",
         api_key_env="MOONSHOT_API_KEY",
@@ -1917,15 +2056,123 @@ def _register_preset_models() -> None:
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="kimi-k2-0711",
+            model_name="kimi-k2.5",
+            model_type=ModelType.VLM,
+            display_name="Kimi K2.5",
+            description="Kimi 迄今最全能模型，原生多模态，支持视觉与文本、思考与非思考，256K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=33000, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.92,
+                cache_read_per_million=0.10,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-0905-preview",
             model_type=ModelType.LLM,
-            display_name="Kimi K2",
-            description="Moonshot AI 最新旗舰模型",
+            display_name="Kimi K2 0905",
+            description="Kimi K2 升级版，更强 Agentic Coding 与上下文理解，256K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.22,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-0711-preview",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2 0711",
+            description="Kimi K2 基础模型，MoE 1T 参数，128K 上下文",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=True,
                 max_tokens=16384, max_input_tokens=131072,
             ),
-            pricing=ModelPricing(input_per_million=0.84, output_per_million=0.84),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.22,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-turbo-preview",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2 Turbo",
+            description="Kimi K2 高速版，输出最高 100 tok/s，对标最新 K2，256K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(
+                input_per_million=1.11, output_per_million=8.06,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-thinking",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2 Thinking",
+            description="Kimi K2 深度推理模型，通用 Agentic + 推理能力，256K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.56, output_per_million=2.22,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-thinking-turbo",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2 Thinking Turbo",
+            description="Kimi K2 深度推理高速版，适合需要深度推理且追求高速的场景，256K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(
+                input_per_million=1.11, output_per_million=8.06,
+                cache_read_per_million=0.14,
+            ),
+            **_KIMI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="moonshot-v1-128k-vision-preview",
+            model_type=ModelType.VLM,
+            display_name="Moonshot v1 128K Vision",
+            description="Moonshot AI 多模态视觉模型，支持图片理解（128K）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=1.39, output_per_million=4.17),
             **_KIMI_COMMON,
         )
     )
@@ -1938,9 +2185,9 @@ def _register_preset_models() -> None:
             description="Moonshot AI 长上下文模型（128K）",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=8192, max_input_tokens=128000,
+                max_tokens=8192, max_input_tokens=131072,
             ),
-            pricing=ModelPricing(input_per_million=0.84, output_per_million=0.84),
+            pricing=ModelPricing(input_per_million=1.39, output_per_million=4.17),
             **_KIMI_COMMON,
         )
     )
@@ -1953,9 +2200,9 @@ def _register_preset_models() -> None:
             description="Moonshot AI 标准模型（32K）",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=8192, max_input_tokens=32000,
+                max_tokens=8192, max_input_tokens=32768,
             ),
-            pricing=ModelPricing(input_per_million=0.34, output_per_million=0.34),
+            pricing=ModelPricing(input_per_million=0.69, output_per_million=2.78),
             **_KIMI_COMMON,
         )
     )
@@ -1968,20 +2215,54 @@ def _register_preset_models() -> None:
             description="Moonshot AI 轻量模型（8K）",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=4096, max_input_tokens=8000,
+                max_tokens=4096, max_input_tokens=8192,
             ),
-            pricing=ModelPricing(input_per_million=0.17, output_per_million=0.17),
+            pricing=ModelPricing(input_per_million=0.28, output_per_million=1.39),
             **_KIMI_COMMON,
         )
     )
 
     # ==================== MiniMax 系列（Anthropic API 兼容） ====================
 
-    _MINIMAX_COMMON = dict(
+    _MINIMAX_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.CLAUDE,
         base_url="https://api.minimaxi.com/anthropic",
         api_key_env="MINIMAX_API_KEY",
         provider="minimax",
+    )
+
+    # --- MiniMax M2.5 系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="MiniMax-M2.5",
+            model_type=ModelType.LLM,
+            display_name="MiniMax M2.5",
+            description="MiniMax 最新旗舰模型，编码与智能体任务 SOTA，~60 tps",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768, max_input_tokens=204800,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.10),
+            **_MINIMAX_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="MiniMax-M2.5-highspeed",
+            model_type=ModelType.LLM,
+            display_name="MiniMax M2.5 Highspeed",
+            description="MiniMax M2.5 极速版，性能不变，~100 tps",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                supports_streaming=True,
+                max_tokens=32768, max_input_tokens=204800,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.10),
+            **_MINIMAX_COMMON,
+        )
     )
 
     # --- MiniMax M2 系列 ---
