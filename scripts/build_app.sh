@@ -144,7 +144,14 @@ else
   info "生成临时签名密钥..."
   TEMP_KEY_DIR=$(mktemp -d)
   DEV_KEY_PWD="dev-build-temp"
-  npx @tauri-apps/cli signer generate -p "$DEV_KEY_PWD" -w "$TEMP_KEY_DIR/temp.key" 2>/dev/null
+
+  TAURI_CLI="$FRONTEND_DIR/node_modules/.bin/tauri"
+  if [ -x "$TAURI_CLI" ]; then
+    "$TAURI_CLI" signer generate -p "$DEV_KEY_PWD" -w "$TEMP_KEY_DIR/temp.key"
+  else
+    npx --yes @tauri-apps/cli signer generate -p "$DEV_KEY_PWD" -w "$TEMP_KEY_DIR/temp.key"
+  fi
+
   if [ -f "$TEMP_KEY_DIR/temp.key" ]; then
     export TAURI_SIGNING_PRIVATE_KEY="$(cat "$TEMP_KEY_DIR/temp.key")"
     export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$DEV_KEY_PWD"
