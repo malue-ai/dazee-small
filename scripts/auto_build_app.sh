@@ -629,6 +629,42 @@ build_for_arch() {
 
   unset CI
 
+  # 设置 Tauri updater 签名密钥
+  if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+    local sign_key_file="$PROJECT_ROOT/keys/xiaodazi.key"
+    local sign_key_pwd_file="$PROJECT_ROOT/keys/xiaodazi.key.password"
+    if [ -f "$sign_key_file" ]; then
+      export TAURI_SIGNING_PRIVATE_KEY="$(cat "$sign_key_file")"
+      if [ -f "$sign_key_pwd_file" ]; then
+        export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$sign_key_pwd_file")"
+      elif [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+        export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+      fi
+      info "已加载 updater 签名密钥"
+    else
+      warn "未找到 updater 签名密钥（开发构建）"
+      info "生成临时签名密钥..."
+      local temp_key_dir=$(mktemp -d)
+      local dev_key_pwd="dev-build-temp"
+      local tauri_cli="$FRONTEND_DIR/node_modules/.bin/tauri"
+      if [ -x "$tauri_cli" ]; then
+        "$tauri_cli" signer generate -p "$dev_key_pwd" -w "$temp_key_dir/temp.key"
+      else
+        npx --yes @tauri-apps/cli signer generate -p "$dev_key_pwd" -w "$temp_key_dir/temp.key"
+      fi
+      if [ -f "$temp_key_dir/temp.key" ]; then
+        export TAURI_SIGNING_PRIVATE_KEY="$(cat "$temp_key_dir/temp.key")"
+        export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$dev_key_pwd"
+        info "已生成临时密钥（更新包签名仅用于本次构建，不可用于正式发布）"
+      else
+        warn "临时密钥生成失败，构建可能会报错"
+      fi
+      rm -rf "$temp_key_dir"
+    fi
+  else
+    info "使用环境变量中的 updater 签名密钥"
+  fi
+
   if [ "$(uname)" = "Darwin" ]; then
     if [ "$is_cross" = true ]; then
       # 跨架构：指定 Rust target
