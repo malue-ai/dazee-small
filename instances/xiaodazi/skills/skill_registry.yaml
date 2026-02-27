@@ -134,3 +134,7 @@ skills:
   - { name: linux-clipboard,      enabled: true,  status: ready,       os: linux }
   - { name: linux-notification,   enabled: true,  status: unavailable, os: linux }
   - { name: xdotool,              enabled: true,  status: unavailable, os: linux }
+
+  # ========== Skill 管理 ==========
+  - { name: skill-creator,        enabled: true,  status: ready }
+  - { name: skill-finder,         enabled: true,  status: ready }
