@@ -493,7 +493,8 @@ class ToolExecutor:
         # 工具自声明压缩提示（从结果中提取并移除，不传递给 Agent）
         hint = result.pop("_compression_hint", None)
         if hint == "skip":
-            return result  # 工具明确要求不压缩（如读操作）
+            result["_skip_fresh_compress"] = True
+            return result
 
         # hint == "force" 时使用较低阈值，确保大输出也走 scratchpad
         threshold_override = 500 if hint == "force" else None

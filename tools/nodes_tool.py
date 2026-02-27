@@ -173,6 +173,7 @@ Actions:
     _READ_COMMANDS = frozenset({
         "cat", "head", "tail", "less", "more",
         "grep", "find", "ls", "wc", "file", "stat",
+        "osascript", "defaults", "plutil", "sqlite3",
     })
 
     async def _action_run(self, node_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
