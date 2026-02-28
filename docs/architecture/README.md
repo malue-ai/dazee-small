@@ -263,7 +263,6 @@ Read in order, top-down from user interface to infrastructure:
 - **[10 — Instance & Configuration](10-instance-and-config.md)** — Instance isolation, Prompt-Driven schema, LLM Profiles, config priority
 - **[11 — Evaluation & Quality](11-evaluation.md)** — Three-layer grading, E2E pipeline, failure detection, token audit
 - **[12 — Playbook Online Learning](12-playbook-learning.md)** — Closed-loop strategy learning from successful sessions, user confirmation, semantic matching, context injection
-- **[13 — Cloud Collaboration](13-cloud-collaboration.md)** — Local-first, cloud-enhanced architecture: two-layer routing, bidirectional ACP protocol, cloud-agent Skill delegation, device binding auth, event tunneling, Mobile/IM gateway
 
 ---
 
@@ -473,7 +472,7 @@ xiaodazi is under active development. We are honest about the problems that stil
 ### Platform
 
 - **macOS is the primary tested platform** — Development and testing are primarily done on macOS. The majority of skills, file path handling, and Tauri integration have been thoroughly validated on macOS. Windows support exists but has not received the same level of testing — you may encounter path issues, permission edge cases, or platform-specific skill failures on Windows. We are actively improving Windows compatibility and welcome bug reports from Windows users.
-- **Single-machine only (cloud collaboration in progress)** — xiaodazi currently runs on one desktop. Cloud collaboration via ACP protocol is designed ([see architecture](13-cloud-collaboration.md)) to enable mobile/IM access and persistent task execution, but is not yet implemented.
+- **Single-machine only** — xiaodazi runs on one desktop. There is no remote access, no mobile app, no multi-device sync. Cloud collaboration is planned but not yet implemented.
 - **No voice interface** — Text-only. No speech-to-text or text-to-speech integration yet.
 - **Limited channel support** — Currently 3 channels (Web, Telegram, Feishu). Adding more channels (WhatsApp, Discord, Slack) is planned but not yet implemented.
 
