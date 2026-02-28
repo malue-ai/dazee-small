@@ -538,6 +538,36 @@ else
   ok "instances/ 目录干净，无需清理"
 fi
 
+# ==================== Tauri Updater 签名密钥 ====================
+
+SIGN_KEY_FILE="$PROJECT_ROOT/keys/xiaodazi.key"
+SIGN_KEY_PWD_FILE="$PROJECT_ROOT/keys/xiaodazi.key.password"
+
+if [ -f "$SIGN_KEY_FILE" ]; then
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
+  if [ -f "$SIGN_KEY_PWD_FILE" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$SIGN_KEY_PWD_FILE")"
+  elif [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+  fi
+  ok "已加载 updater 签名密钥"
+elif [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+  ok "使用环境变量中的 updater 签名密钥"
+else
+  info "未找到签名密钥，自动生成临时密钥对..."
+  mkdir -p "$PROJECT_ROOT/keys"
+  cd "$FRONTEND_DIR"
+  npx @tauri-apps/cli signer generate -w "$SIGN_KEY_FILE" -p "" --ci --force 2>/dev/null || true
+  if [ -f "$SIGN_KEY_FILE" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+    ok "已生成临时签名密钥: $SIGN_KEY_FILE"
+  else
+    warn "签名密钥生成失败，尝试禁用 updater 签名..."
+    export TAURI_SIGNING_PRIVATE_KEY=""
+  fi
+fi
+
 # ==================== 确定构建目标 ====================
 
 BUILD_ARCHES=""
