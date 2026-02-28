@@ -231,21 +231,6 @@ export interface PlanData {
 }
 
 /**
- * 云端任务进度项
- */
-export interface CloudProgressItem {
-  phase: 'submitted' | 'working' | 'thinking' | 'tool_call' | 'done' | 'error'
-  task_id: string
-  message: string
-  tool_name?: string
-  status?: 'running' | 'done'
-  detail?: string
-  completed?: number
-  total?: number
-  timestamp?: number
-}
-
-/**
  * 前端 UI 消息（用于展示）
  */
 export interface UIMessage {
@@ -259,7 +244,6 @@ export interface UIMessage {
   recommendedQuestions?: string[]
   planResult?: PlanData | null
   playbookSuggestion?: PlaybookSuggestion | null
-  cloudProgress?: CloudProgressItem[]
   timestamp: Date
 }
 
