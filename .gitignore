@@ -127,3 +127,6 @@ keys/
 *.msi
 *.AppImage
 *.deb
+
+# Test
+test/

@@ -473,7 +473,7 @@ xiaodazi is under active development. We are honest about the problems that stil
 ### Platform
 
 - **macOS is the primary tested platform** — Development and testing are primarily done on macOS. The majority of skills, file path handling, and Tauri integration have been thoroughly validated on macOS. Windows support exists but has not received the same level of testing — you may encounter path issues, permission edge cases, or platform-specific skill failures on Windows. We are actively improving Windows compatibility and welcome bug reports from Windows users.
-- **Single-machine only (cloud collaboration in progress)** — xiaodazi currently runs on one desktop. Cloud collaboration via ACP protocol is designed ([see architecture](13-cloud-collaboration.md)) to enable mobile/IM access and persistent task execution, but is not yet implemented.
+- **Single-machine only** — xiaodazi runs on one desktop. There is no remote access, no mobile app, no multi-device sync. Cloud collaboration is planned but not yet implemented.
 - **No voice interface** — Text-only. No speech-to-text or text-to-speech integration yet.
 - **Limited channel support** — Currently 3 channels (Web, Telegram, Feishu). Adding more channels (WhatsApp, Discord, Slack) is planned but not yet implemented.
 
