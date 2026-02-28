@@ -40,12 +40,17 @@ tool_result_compression:
   threshold_chars: 1500         # 超过此字符数自动压缩
   store_full_content: true      # 是否存储完整内容以便恢复
   
-  # 工具可通过在返回 dict 中设置 _compression_hint 字段自主声明压缩策略：
+  # 工具自治优先：工具通过在返回 dict 中设置 _compression_hint 字段自主声明压缩策略，
+  # 压缩器不做硬编码工具分类。
   #   "skip"   = 不压缩（读操作等 Agent 需要完整内容的场景）
   #   "normal" = 按默认阈值压缩
   #   "force"  = 使用较低阈值强制压缩（超大输出走 scratchpad）
+  #   "search" = 搜索结果专用压缩（提取 top-N 条目摘要）
   #   不携带   = 走默认阈值逻辑
-  # 参见 core/tool/executor.py _maybe_compact() 和 tools/nodes_tool.py _action_run()
+  # 参见 core/tool/executor.py _maybe_compact() 和 core/context/compaction/tool_result.py
+
+  # hint="force" 时使用的压缩阈值（字符数）
+  force_threshold_chars: 500
 
   # 以下工具结果始终跳过压缩（兜底白名单）
   skip_tools:

@@ -149,6 +149,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   level: 1
+  state_category: executing
   implementation:
     module: tools.api_calling
     class: APICallingTool
@@ -201,6 +202,7 @@ capabilities:
   subtype: NATIVE
   provider: user
   level: 1
+  state_category: searching
   implementation:
     module: tools.knowledge_search
     class: KnowledgeSearchTool
@@ -238,6 +240,7 @@ capabilities:
   subtype: NATIVE
   provider: user
   level: 1
+  state_category: searching
   implementation:
     module: tools.memory_recall
     class: MemoryRecallTool
@@ -279,6 +282,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   level: 1
+  state_category: executing
   implementation:
     module: tools.request_human_confirmation
     class: HITLTool
@@ -351,6 +355,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 1
+  state_category: planning
   cache_stable: true
   implementation:
     module: tools.plan_todo_tool
@@ -425,6 +430,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 1
+  state_category: executing
   cache_stable: true
   implementation:
     module: tools.nodes_tool
@@ -451,6 +457,12 @@ capabilities:
       - which: 检查可执行文件是否存在
       - whitelist_add: 将命令加入白名单（需先通过 hitl 征得用户同意）
       - whitelist_info: 查看当前白名单状态
+
+      output_handling 使用规范（run action）:
+      - 当你需要阅读、分析、处理命令的输出内容时，设置 output_handling="full"
+        例如：读取文件内容、查看日志、检查配置、搜索文本、列出目录内容
+      - 当你只需确认命令是否执行成功时，使用默认值 "summary" 即可
+        例如：安装依赖、创建文件/目录、复制/移动文件、启动服务
   input_schema:
     type: object
     properties:
@@ -466,6 +478,15 @@ capabilities:
         items:
           type: string
         description: 要执行的命令（run action）
+      output_handling:
+        type: string
+        enum: [full, summary]
+        description: >
+          输出处理方式（仅 run action）。
+          full = 你需要完整输出来分析/处理（如读文件、查日志、查看配置）；
+          summary = 你只需确认执行结果（如安装包、创建目录、写文件）。
+          默认 summary。
+        default: summary
       cwd:
         type: string
         description: 工作目录（run action）
@@ -500,6 +521,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 2
+  state_category: browsing
   cache_stable: false
   implementation:
     module: tools.browser
@@ -547,6 +569,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 1
+  state_category: executing
   cache_stable: false
   implementation:
     module: tools.observe_screen
@@ -589,6 +612,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 1
+  state_category: executing
   cache_stable: true
   implementation:
     module: tools.open_system_preferences
@@ -621,6 +645,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 1
+  state_category: planning
   cache_stable: false
   implementation:
     module: tools.scheduled_task_tool
@@ -693,6 +718,7 @@ capabilities:
   provider: user
   invocation_hint: DIRECT
   level: 2
+  state_category: executing
   cache_stable: false
   implementation:
     module: tools.audio_processing

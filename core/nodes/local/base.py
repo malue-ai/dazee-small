@@ -5,6 +5,7 @@
 定义本地节点的通用接口，各平台继承实现。
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -126,6 +127,24 @@ class LocalNodeBase(ABC):
             elapsed_ms = int((time.time() - start_time) * 1000)
             return NodeInvokeResponse.success(request_id, result, elapsed_ms)
 
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.error("节点调用超时")
+            return NodeInvokeResponse.failure(
+                request_id, "执行超时", elapsed_ms, error_code="timeout",
+            )
+        except PermissionError as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.error(f"节点调用权限不足: {e}", exc_info=True)
+            return NodeInvokeResponse.failure(
+                request_id, str(e), elapsed_ms, error_code="permission_denied",
+            )
+        except FileNotFoundError as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.error(f"节点调用依赖缺失: {e}", exc_info=True)
+            return NodeInvokeResponse.failure(
+                request_id, str(e), elapsed_ms, error_code="dependency_missing",
+            )
         except Exception as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
             logger.error(f"节点调用失败: {e}", exc_info=True)
