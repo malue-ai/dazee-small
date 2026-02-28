@@ -37,6 +37,7 @@ json5>=0.9.0
 
 
 # Mem0 记忆系统
+mem0ai>=0.1.84            # Mem0 记忆框架（向量搜索、Playbook 匹配）
 sqlite-vec>=0.1.1         # SQLite 向量搜索扩展（本地向量存储）
 huggingface-hub>=0.20.0   # HuggingFace 模型下载（嵌入模型 GGUF）
 llama-cpp-python>=0.2.0   # GGUF 本地 Embedding（BGE-M3 Q4，推荐方案）

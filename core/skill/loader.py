@@ -150,6 +150,9 @@ class SkillsLoader:
         # 检查 Skill 间依赖关系（纯日志，不阻断）
         self._validate_dependencies()
 
+        # 检查 Skill 中引用的工具是否存在于 Registry
+        self._validate_tool_references()
+
         return self._entries
 
     def refresh_skill_status(self, name: str) -> Optional[SkillEntry]:
@@ -897,6 +900,42 @@ class SkillsLoader:
                 f"backend={entry.backend_type.value} "
                 f"status={entry.status.value}"
             )
+
+    def _validate_tool_references(self) -> None:
+        """
+        扫描 SKILL.md 中 `await {tool}(` 模式，校验引用的工具是否在 Registry 中。
+        纯日志警告，不阻断加载。
+        """
+        import re
+
+        try:
+            from core.tool.registry import create_capability_registry
+            registry = create_capability_registry()
+            registered_tools = {cap.name for cap in registry.all()}
+        except Exception:
+            return
+
+        pattern = re.compile(r"await\s+([a-z_][a-z0-9_]*)\s*\(", re.IGNORECASE)
+
+        for entry in self._entries:
+            if not entry.skill_path:
+                continue
+            skill_md = Path(entry.skill_path) / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            try:
+                content = skill_md.read_text(encoding="utf-8")
+                refs = set(pattern.findall(content))
+                for ref in refs:
+                    if ref not in registered_tools and ref not in (
+                        "crawler", "asyncio", "aiohttp",
+                    ):
+                        logger.warning(
+                            f"Skill '{entry.name}' 引用了不存在的工具 '{ref}'，"
+                            f"请确认 capabilities.yaml 中已注册"
+                        )
+            except Exception:
+                pass
 
     def _validate_dependencies(self) -> None:
         """

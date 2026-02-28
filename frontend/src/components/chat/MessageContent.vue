@@ -96,6 +96,12 @@
     <div v-if="contentBlocks.length === 0 && content" class="content-block text-block !mt-0">
       <MarkdownRenderer :content="content" :final="!isStreaming" />
     </div>
+
+    <!-- 云端任务进度卡片 -->
+    <CloudProgressCard
+      v-if="cloudProgress && cloudProgress.length > 0"
+      :cloud-progress="cloudProgress"
+    />
   </div>
 </template>
 
@@ -103,6 +109,7 @@
 import { ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import ToolBlock from './ToolBlock.vue'
+import CloudProgressCard from './CloudProgressCard.vue'
 import { resolveResourceUrl } from '@/api'
 import { 
   CheckCircle2, 
@@ -128,6 +135,11 @@ const props = defineProps({
   isStreaming: {
     type: Boolean,
     default: false
+  },
+  // 云端任务进度数组
+  cloudProgress: {
+    type: Array,
+    default: () => []
   }
 })
 

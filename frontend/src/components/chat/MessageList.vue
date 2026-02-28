@@ -110,6 +110,7 @@
                 :content="message.contentBlocks"
                 :tool-statuses="message.toolStatuses || {}"
                 :is-streaming="isMessageStreaming(message)"
+                :cloud-progress="message.cloudProgress || []"
               />
               <!-- 无内容块时 -->
               <template v-else>
