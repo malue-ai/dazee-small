@@ -91,7 +91,7 @@ FRAGMENT_EXTRACTION_PROMPT = """你是 Dazee 智能助理的记忆分析系统�
   }},
   "todo_hint": {{
     "content": "如果用户提到了待办事项，描述是什么",
-    "deadline_text": "原文中的截止时间表述（如：下周三、明天）",
+    "deadline_iso": "截止时间的 ISO 格式（如 2025-03-15T18:00:00），根据当前时间推算相对日期（明天、下周三等），无截止时间则 null",
     "priority": "low/medium/high/urgent",
     "confidence": 0.0-1.0
   }},
@@ -448,11 +448,10 @@ class FragmentExtractor:
         if not data or not data.get("content"):
             return None
 
-        # 解析截止时间
         deadline = None
-        deadline_text = data.get("deadline_text")
-        if deadline_text:
-            deadline = self._parse_deadline(deadline_text, base_timestamp)
+        deadline_iso = data.get("deadline_iso")
+        if deadline_iso:
+            deadline = self._parse_iso_deadline(deadline_iso)
 
         return TodoHint(
             content=data.get("content", ""),
@@ -461,52 +460,14 @@ class FragmentExtractor:
             confidence=data.get("confidence", 0.5),
         )
 
-    def _parse_deadline(self, deadline_text: str, base_timestamp: datetime) -> Optional[datetime]:
-        """
-        解析截止时间文本
-
-        使用简单的相对时间解析，复杂情况由 LLM 处理
-        """
-        from datetime import timedelta
-
-        text = deadline_text.strip()
-        base_date = base_timestamp.date()
-
-        # 简单的相对时间解析
-        if "明天" in text:
-            return datetime.combine(
-                base_date + timedelta(days=1), datetime.min.time().replace(hour=18)
-            )
-        elif "后天" in text:
-            return datetime.combine(
-                base_date + timedelta(days=2), datetime.min.time().replace(hour=18)
-            )
-        elif "今天" in text:
-            return datetime.combine(base_date, datetime.min.time().replace(hour=18))
-        elif "下周" in text:
-            # 下周X
-            weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-            for char, wd in weekday_map.items():
-                if f"下周{char}" in text:
-                    days_ahead = wd - base_date.weekday() + 7
-                    if days_ahead <= 0:
-                        days_ahead += 7
-                    return datetime.combine(
-                        base_date + timedelta(days=days_ahead), datetime.min.time().replace(hour=18)
-                    )
-        elif "周" in text:
-            # 本周X
-            weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-            for char, wd in weekday_map.items():
-                if f"周{char}" in text:
-                    days_ahead = wd - base_date.weekday()
-                    if days_ahead < 0:
-                        days_ahead += 7
-                    return datetime.combine(
-                        base_date + timedelta(days=days_ahead), datetime.min.time().replace(hour=18)
-                    )
-
-        return None
+    @staticmethod
+    def _parse_iso_deadline(deadline_iso: str) -> Optional[datetime]:
+        """Parse ISO format deadline from LLM output."""
+        try:
+            return datetime.fromisoformat(deadline_iso.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            logger.debug(f"无法解析截止时间: {deadline_iso}")
+            return None
 
     def _calculate_overall_confidence(self, extracted: Dict) -> float:
         """计算整体置信度"""

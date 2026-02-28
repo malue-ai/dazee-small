@@ -849,12 +849,19 @@ class RVRBExecutor(RVRExecutor):
             if cfg.enable_stream:
                 # 动态工具裁剪：连续失败的工具从可用列表中移除
                 effective_tools = tools_for_llm
-                if state.pruned_tools:
-                    effective_tools = [
+                if state.pruned_tools and tools_for_llm:
+                    candidate = [
                         t for t in tools_for_llm
                         if t.get("name") not in state.pruned_tools
                     ]
-                    logger.info(f"🚫 动态裁剪工具: {state.pruned_tools}")
+                    if candidate:
+                        effective_tools = candidate
+                        logger.info(f"🚫 动态裁剪工具: {state.pruned_tools}")
+                    else:
+                        logger.warning(
+                            f"⚠️ 所有工具均已裁剪，保底保留全部工具: "
+                            f"{state.pruned_tools}"
+                        )
 
                 # 流式处理（V10.1: 使用父类的 _process_stream）
                 async for event in self._process_stream(
@@ -1004,12 +1011,18 @@ class RVRBExecutor(RVRExecutor):
             else:
                 # 非流式处理 - 动态工具裁剪
                 effective_tools_ns = tools_for_llm
-                if state.pruned_tools:
-                    effective_tools_ns = [
+                if state.pruned_tools and tools_for_llm:
+                    candidate_ns = [
                         t for t in tools_for_llm
                         if t.get("name") not in state.pruned_tools
                     ]
-                    logger.info(f"🚫 动态裁剪工具(non-stream): {state.pruned_tools}")
+                    if candidate_ns:
+                        effective_tools_ns = candidate_ns
+                        logger.info(f"🚫 动态裁剪工具(non-stream): {state.pruned_tools}")
+                    else:
+                        logger.warning(
+                            f"⚠️ 所有工具均已裁剪(non-stream)，保底保留全部工具"
+                        )
                 response = await llm.create_message_async(
                     messages=llm_messages, system=system_prompt, tools=effective_tools_ns  # type: ignore[arg-type]
                 )
@@ -1510,10 +1523,12 @@ class RVRBExecutor(RVRExecutor):
             tool_input = tool_call["input"] or {}
             tool_id = tool_call["id"]
 
+            _skip_compress = False
             try:
                 # 使用 ToolExecutionFlow 执行单个工具
                 result_info = await flow.execute_single(tool_call, tool_context)
                 result = result_info.result
+                _skip_compress = isinstance(result, dict) and result.pop("_skip_fresh_compress", False)
                 result_content = result if isinstance(result, str) else stable_json_dumps(result)
                 is_error = result_info.is_error
 
@@ -1557,7 +1572,8 @@ class RVRBExecutor(RVRExecutor):
             # Immediate compression: prevent large tool outputs from bloating context
             from core.context.compaction import compress_fresh_tool_result
             compressed_content = (
-                compress_fresh_tool_result(result_content)
+                result_content if _skip_compress
+                else compress_fresh_tool_result(result_content)
                 if isinstance(result_content, str) else result_content
             )
             tool_results.append(
@@ -1600,7 +1616,7 @@ class RVRBExecutor(RVRExecutor):
                 )
 
         # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
-        if ctx.detect_repeated_call(threshold=2):
+        if ctx.detect_repeated_call(threshold=4):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
@@ -1686,10 +1702,12 @@ class RVRBExecutor(RVRExecutor):
             tool_input = tool_call["input"] or {}
             tool_id = tool_call["id"]
 
+            _skip_compress = False
             try:
                 # 使用 ToolExecutionFlow 执行单个工具
                 result_info = await flow.execute_single(tool_call, tool_context)
                 result = result_info.result
+                _skip_compress = isinstance(result, dict) and result.pop("_skip_fresh_compress", False)
                 result_content = result if isinstance(result, str) else stable_json_dumps(result)
                 is_error = result_info.is_error
 
@@ -1721,7 +1739,8 @@ class RVRBExecutor(RVRExecutor):
             # Immediate compression (non-stream path, same as stream)
             from core.context.compaction import compress_fresh_tool_result
             compressed_content = (
-                compress_fresh_tool_result(result_content)
+                result_content if _skip_compress
+                else compress_fresh_tool_result(result_content)
                 if isinstance(result_content, str) else result_content
             )
             tool_results.append(
@@ -1760,7 +1779,7 @@ class RVRBExecutor(RVRExecutor):
                 )
 
         # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
-        if ctx.detect_repeated_call(threshold=2):
+        if ctx.detect_repeated_call(threshold=4):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"

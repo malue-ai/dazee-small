@@ -314,24 +314,32 @@ class ToolExecutor:
                 error_type=ToolErrorType.PERMISSION_DENIED,
                 message=str(e),
             ).to_dict()
+        except FileNotFoundError as e:
+            from core.tool.types import ToolError, ToolErrorType
+            logger.error(f"工具 {tool_name} 依赖缺失: {e}", exc_info=True)
+            return ToolError(
+                error_type=ToolErrorType.DEPENDENCY_MISSING,
+                message=str(e),
+            ).to_dict()
         except Exception as e:
             from core.tool.types import ToolError, ToolErrorType
             error_str = str(e)
             logger.error(f"执行工具 {tool_name} 失败: {e}", exc_info=True)
 
-            # Classify common errors into structured types
             error_type = ToolErrorType.PERMANENT
             recovery = None
-            lower = error_str.lower()
-            if "timeout" in lower or "timed out" in lower:
-                error_type = ToolErrorType.TIMEOUT
-            elif "permission" in lower or "not authorized" in lower:
-                error_type = ToolErrorType.PERMISSION_DENIED
-            elif "not found" in lower or "not installed" in lower:
-                error_type = ToolErrorType.DEPENDENCY_MISSING
-            elif "rate limit" in lower or "429" in lower:
+
+            # Classify by exception attributes if available (e.g. httpx responses)
+            status_code = getattr(e, "status_code", None) or getattr(
+                getattr(e, "response", None), "status_code", None
+            )
+            if status_code == 429:
                 error_type = ToolErrorType.RATE_LIMITED
                 recovery = "retry_after:30"
+            elif status_code == 401:
+                error_type = ToolErrorType.AUTH_EXPIRED
+            elif status_code == 403:
+                error_type = ToolErrorType.PERMISSION_DENIED
 
             return ToolError(
                 error_type=error_type,
@@ -464,56 +472,52 @@ class ToolExecutor:
         """
         根据配置决定是否压缩结果
 
-        使用统一的 ToolResultCompressor：
-        - 超过阈值则压缩
-        - 完整内容存本地文件
-        - 返回压缩后的文本
+        核心原则：工具自治优先。
+        工具通过 _compression_hint 字段自主声明压缩策略，
+        本方法负责提取 hint 并原样传递给 ToolResultCompressor，
+        不做额外的硬编码分类判断。
 
-        工具可通过在返回 dict 中设置 _compression_hint 字段自主声明压缩策略：
-        - "skip": 不压缩（读操作等 Agent 需要完整内容的场景）
-        - "normal": 按默认阈值压缩
-        - "force": 使用较低阈值强制压缩（超大输出走 scratchpad）
-        - 不携带: 走默认阈值逻辑
+        _compression_hint 协议：
+        - "skip"   : 不压缩（Agent 需要完整内容）
+        - "normal" : 按默认阈值压缩（等同于不设置）
+        - "force"  : 使用较低阈值强制压缩
+        - "search" : 搜索结果专用压缩（提取 top-N 条目摘要）
+        - 不携带   : 走默认阈值逻辑
         """
         if not self.enable_compaction or skip_compaction or not self.compressor:
             return result
 
-        # 多模态内容块列表（如 observe_screen 返回的 [text, image]）不压缩
         if isinstance(result, list):
             return result
 
-        # 非 dict 结果不压缩
         if not isinstance(result, dict):
             return result
 
-        # 错误结果不压缩
         if not result.get("success", True) and "error" in result:
             return result
 
-        # 工具自声明压缩提示（从结果中提取并移除，不传递给 Agent）
+        # Extract and remove hint before passing to compressor
         hint = result.pop("_compression_hint", None)
+
+        # hint="skip": tool declares Agent needs full content.
+        # Signal rvrb.py to skip compress_fresh_tool_result, return dict as-is.
         if hint == "skip":
-            return result  # 工具明确要求不压缩（如读操作）
+            result["_skip_fresh_compress"] = True
+            return result
 
-        # hint == "force" 时使用较低阈值，确保大输出也走 scratchpad
-        threshold_override = 500 if hint == "force" else None
-
-        # 使用统一压缩器
         compressed_text, metadata = await self.compressor.compress_if_needed(
             tool_name=tool_name, tool_id=tool_id, result=result,
-            threshold_override=threshold_override,
+            hint=hint,
         )
 
-        # 如果被压缩了，返回压缩后的结果
         if metadata:
             return {
                 "success": True,
                 "compressed": True,
                 "content": compressed_text,
-                "_compression_metadata": metadata,  # 可用于更新 message.extra_data
+                "_compression_metadata": metadata,
             }
 
-        # 未压缩，返回原结果
         return result
 
     def get_available_tools(self) -> Dict[str, Dict]:
