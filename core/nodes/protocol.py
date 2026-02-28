@@ -137,6 +137,7 @@ class NodeInvokeResponse:
     ok: bool
     payload: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
     elapsed_ms: Optional[int] = None
 
     @classmethod
@@ -147,9 +148,18 @@ class NodeInvokeResponse:
         return cls(id=request_id, ok=True, payload=payload, elapsed_ms=elapsed_ms)
 
     @classmethod
-    def failure(cls, request_id: str, error: str, elapsed_ms: int = 0) -> "NodeInvokeResponse":
+    def failure(
+        cls,
+        request_id: str,
+        error: str,
+        elapsed_ms: int = 0,
+        error_code: Optional[str] = None,
+    ) -> "NodeInvokeResponse":
         """创建失败响应"""
-        return cls(id=request_id, ok=False, error=error, elapsed_ms=elapsed_ms)
+        return cls(
+            id=request_id, ok=False, error=error,
+            error_code=error_code, elapsed_ms=elapsed_ms,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -160,6 +170,8 @@ class NodeInvokeResponse:
             result["payload"] = self.payload
         if self.error is not None:
             result["error"] = self.error
+        if self.error_code is not None:
+            result["error_code"] = self.error_code
         if self.elapsed_ms is not None:
             result["elapsed_ms"] = self.elapsed_ms
         return result
