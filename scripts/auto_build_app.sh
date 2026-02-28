@@ -37,6 +37,7 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo "")"
 if [[ -z "$SCRIPT_DIR" || "$SCRIPT_DIR" == /dev/fd* || "$SCRIPT_DIR" == /dev ]]; then
   PROJECT_ROOT="$(pwd)"
+  SCRIPT_DIR="$PROJECT_ROOT/scripts"
 else
   PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
