@@ -34,7 +34,7 @@ Step 2: 制定调研计划
   ↓ 拆解为 3-5 个子课题
 
 Step 3: 批量搜索 + 内容抓取 (核心)
-  ↓ 3.1 web_search 获取相关 URL 列表 (10-20个)
+  ↓ 3.1 api_calling 调用 Jina Search 获取相关 URL 列表 (10-20个)
   ↓ 3.2 web-scraper (Crawl4AI) 并发抓取完整内容
   ↓     Playwright 浏览器引擎 → 突破反爬
   ↓     PruningContentFilter → 去除噪声
@@ -57,12 +57,13 @@ from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 from crawl4ai.content_filter_strategy import PruningContentFilter
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 
-# Step 1: 搜索获取 URL
+# Step 1: 通过 api_calling 调用 Jina Search 获取 URL（参考 ddg-search skill）
 search_queries = ["AI 办公助手 市场分析", "AI 办公助手 竞品对比"]
 
 all_urls = []
 for query in search_queries:
-    results = await web_search(query)
+    # 使用 api_calling: GET https://s.jina.ai/{query}
+    results = await api_calling(url=f"https://s.jina.ai/{query}", method="GET", headers={"Accept": "application/json"})
     all_urls.extend([r["url"] for r in results[:5]])
 
 unique_urls = list(set(all_urls))[:15]

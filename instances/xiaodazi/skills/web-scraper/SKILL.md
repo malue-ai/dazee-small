@@ -184,8 +184,9 @@ result.error_message            # 错误信息
 ### 场景 1: 收集一周新闻
 
 ```python
-# Step 1: web_search 获取 URL
-urls = await web_search("AI行业新闻 最近一周")
+# Step 1: 通过 api_calling 调用 Jina Search 获取 URL（参考 ddg-search skill）
+results = await api_calling(url="https://s.jina.ai/AI行业新闻 最近一周", method="GET", headers={"Accept": "application/json"})
+urls = [r["url"] for r in results]
 
 # Step 2: Crawl4AI 并发抓取 (10个URL约5-10秒)
 config = CrawlerRunConfig(
