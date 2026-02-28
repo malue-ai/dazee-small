@@ -263,6 +263,7 @@ Read in order, top-down from user interface to infrastructure:
 - **[10 — Instance & Configuration](10-instance-and-config.md)** — Instance isolation, Prompt-Driven schema, LLM Profiles, config priority
 - **[11 — Evaluation & Quality](11-evaluation.md)** — Three-layer grading, E2E pipeline, failure detection, token audit
 - **[12 — Playbook Online Learning](12-playbook-learning.md)** — Closed-loop strategy learning from successful sessions, user confirmation, semantic matching, context injection
+- **[13 — Cloud Collaboration](13-cloud-collaboration.md)** — Local-first, cloud-enhanced architecture: two-layer routing, bidirectional ACP protocol, cloud-agent Skill delegation, device binding auth, event tunneling, Mobile/IM gateway
 
 ---
 
