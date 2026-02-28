@@ -1,21 +1,16 @@
 #!/bin/bash
 #
-# xiaodazi 全自动构建脚本（零依赖启动）
+# xiaodazi 一键安装/升级脚本
 #
-# 与 build_app.sh 的区别：
-#   build_app.sh     — 假设环境已就绪，缺依赖直接报错退出
-#   auto_build_app.sh — 自动检测并安装所有缺失的依赖，适合全新机器
+# 面向终端用户：在本机编译并安装 xiaodazi.app 到 /Applications
+# 全自动处理依赖安装、源码下载、编译、安装、升级覆盖
 #
-# 自动安装的依赖：
-#   - Python 3.12（通过 Homebrew，或提示手动安装）
-#   - Node.js 18+（通过 Homebrew，或提示手动安装）
-#   - Rust toolchain（通过 rustup）
-#   - Python 虚拟环境 + pip 依赖（requirements.txt）
-#   - PyInstaller（后端打包工具）
-#   - 前端 npm 依赖（package.json）
+# Quick Start (直接在 Terminal 中粘贴):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/malue-ai/dazee-small/main/scripts/auto_build_app.sh)
 #
-# 用法:
-#   bash scripts/auto_build_app.sh                      # 当前架构构建
+# 高级用法:
+#   bash scripts/auto_build_app.sh                      # 编译 + 安装到 /Applications
+#   bash scripts/auto_build_app.sh --no-install          # 仅编译，不安装（开发者模式）
 #   bash scripts/auto_build_app.sh --arch arm64          # 仅 ARM64 (Apple Silicon)
 #   bash scripts/auto_build_app.sh --arch x86_64         # 仅 Intel（ARM Mac 通过 Rosetta）
 #   bash scripts/auto_build_app.sh --arch both           # 同时构建两个架构
@@ -32,15 +27,112 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 
 # ==================== 配置 ====================
 
+REPO_URL="${REPO_URL:-https://github.com/malue-ai/dazee-small.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+DEFAULT_CLONE_DIR="$HOME/dazee-small"
+
 # When run via process substitution (bash <(curl ...)), $0 becomes /dev/fd/N.
 # In that case, fall back to the current working directory as the project root.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo "")"
+IS_CURL_MODE=false
 if [[ -z "$SCRIPT_DIR" || "$SCRIPT_DIR" == /dev/fd* || "$SCRIPT_DIR" == /dev ]]; then
+  IS_CURL_MODE=true
   PROJECT_ROOT="$(pwd)"
   SCRIPT_DIR="$PROJECT_ROOT/scripts"
 else
   PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
+
+is_valid_project() {
+  [ -d "$1/frontend" ] && [ -f "$1/VERSION" ]
+}
+
+if ! is_valid_project "$PROJECT_ROOT"; then
+  if [ "$IS_CURL_MODE" = true ]; then
+    echo ""
+    echo "===> 当前目录 ($(pwd)) 不是项目根目录，正在自动查找..."
+    echo ""
+
+    # 在常见位置搜索已有项目
+    FOUND=false
+    for candidate in \
+      "$HOME/dazee-small" \
+      "$HOME/xiaodazi" \
+      "$HOME/zenflux_agent" \
+      "$HOME/Desktop/dazee-small" \
+      "$HOME/Documents/dazee-small"; do
+      if is_valid_project "$candidate"; then
+        PROJECT_ROOT="$candidate"
+        FOUND=true
+        echo "  ✓  在 $candidate 找到项目"
+        break
+      fi
+    done
+
+    # 未找到 → 自动 clone
+    if [ "$FOUND" = false ]; then
+      CLONE_DIR="${CLONE_DIR:-$DEFAULT_CLONE_DIR}"
+      echo "  未找到已有项目，正在自动下载源码..."
+      echo ""
+      echo "  仓库: $REPO_URL"
+      echo "  分支: $REPO_BRANCH"
+      echo "  位置: $CLONE_DIR"
+      echo ""
+
+      if ! command -v git &>/dev/null; then
+        echo ""
+        echo "ERROR: 需要 git 来下载源码"
+        echo ""
+        echo "  请先安装 git："
+        echo "    macOS:  xcode-select --install"
+        echo "    Ubuntu: sudo apt install git"
+        echo ""
+        exit 1
+      fi
+
+      if [ -d "$CLONE_DIR" ]; then
+        echo "  目录 $CLONE_DIR 已存在但不是有效项目，正在删除后重新下载..."
+        rm -rf "$CLONE_DIR"
+      fi
+
+      git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$CLONE_DIR"
+      if [ $? -ne 0 ]; then
+        echo ""
+        echo "ERROR: 源码下载失败"
+        echo ""
+        echo "  请检查："
+        echo "    1. 网络连接是否正常"
+        echo "    2. 仓库地址是否正确: $REPO_URL"
+        echo "    3. 或手动 clone 后重试："
+        echo "       git clone $REPO_URL $CLONE_DIR"
+        echo "       cd $CLONE_DIR && bash scripts/auto_build_app.sh"
+        echo ""
+        exit 1
+      fi
+
+      PROJECT_ROOT="$CLONE_DIR"
+
+      if ! is_valid_project "$PROJECT_ROOT"; then
+        echo ""
+        echo "ERROR: 下载的源码结构不正确（找不到 frontend/ 或 VERSION 文件）"
+        echo ""
+        exit 1
+      fi
+
+      echo ""
+      echo "  ✓  源码下载完成: $PROJECT_ROOT"
+    fi
+  else
+    echo ""
+    echo "ERROR: 项目根目录无效: $PROJECT_ROOT"
+    echo "  找不到 frontend/ 或 VERSION 文件，请确认脚本位于正确的项目中"
+    echo ""
+    exit 1
+  fi
+fi
+
+echo ""
+echo "===> 项目根目录: $PROJECT_ROOT"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 VENV_DIR="$PROJECT_ROOT/.venv"
 VENV_X86_DIR="$PROJECT_ROOT/.venv-x86_64"
@@ -51,6 +143,7 @@ NATIVE_ARCH=$(uname -m)  # arm64 or x86_64
 SKIP_BACKEND=false
 CLEAN=false
 DRY_RUN=false
+NO_INSTALL=false
 TARGET_ARCH="native"
 
 # ==================== 参数解析 ====================
@@ -60,6 +153,7 @@ while [ $# -gt 0 ]; do
     --skip-backend) SKIP_BACKEND=true ;;
     --clean)        CLEAN=true ;;
     --dry-run)      DRY_RUN=true ;;
+    --no-install)   NO_INSTALL=true ;;
     --arch)         shift; TARGET_ARCH="$1" ;;
     --arch=*)       TARGET_ARCH="${1#*=}" ;;
   esac
@@ -306,7 +400,7 @@ info "检查 Python 依赖..."
 
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec; do
     if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
@@ -342,7 +436,7 @@ fi
 
 info "检查前端依赖..."
 
-cd "$FRONTEND_DIR"
+cd "$FRONTEND_DIR" || fail "前端目录不存在: $FRONTEND_DIR"
 if [ ! -d "node_modules" ]; then
   info "安装前端 npm 依赖..."
   npm install
@@ -449,7 +543,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
 
   # 安装 x86_64 依赖
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec; do
     if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
@@ -504,7 +598,8 @@ fi
 # ==================== 版本同步 ====================
 
 info "同步版本号..."
-$PYTHON_CMD "$SCRIPT_DIR/sync_version.py" || fail "版本同步失败"
+[ -f "$PROJECT_ROOT/scripts/sync_version.py" ] || fail "找不到版本同步脚本: $PROJECT_ROOT/scripts/sync_version.py"
+$PYTHON_CMD "$PROJECT_ROOT/scripts/sync_version.py" || fail "版本同步失败"
 
 # ==================== 清理（可选）====================
 
@@ -603,9 +698,9 @@ build_for_arch() {
   if [ "$SKIP_BACKEND" = false ]; then
     info "Step 1/3: 构建 Python 后端 [$arch] (PyInstaller onedir)..."
     info "使用 Python: $build_python ($($arch_prefix $build_python --version 2>&1))"
-    cd "$PROJECT_ROOT"
+    cd "$PROJECT_ROOT" || fail "项目根目录不存在: $PROJECT_ROOT"
 
-    # 确保在 venv 环境中执行打包（PyInstaller 通过 sys.executable 获取 Python 路径）
+    [ -f "$PROJECT_ROOT/scripts/build_backend.py" ] || fail "找不到构建脚本: $PROJECT_ROOT/scripts/build_backend.py"
     $arch_prefix $build_python scripts/build_backend.py
     info "Python 后端构建完成 [$arch]"
   else
@@ -621,7 +716,7 @@ build_for_arch() {
   # ==================== Step 2: 构建 Tauri 应用 ====================
 
   info "Step 2/3: 构建 Tauri 应用 [$arch]..."
-  cd "$FRONTEND_DIR"
+  cd "$FRONTEND_DIR" || fail "前端目录不存在: $FRONTEND_DIR"
 
   if [ ! -d "node_modules" ]; then
     info "安装前端依赖..."
@@ -770,7 +865,7 @@ build_for_arch() {
   if [ -d "$resources_dir/_internal" ]; then
     while IFS= read -r -d '' lib; do
       codesign --force --sign - "$lib" 2>/dev/null && sign_count=$((sign_count + 1))
-    done < <(find "$resources_dir/_internal" \( -name "*.so" -o -name "*.dylib" \) -print0)
+    done < <(find "$resources_dir/_internal" '(' -name "*.so" -o -name "*.dylib" ')' -print0)
   fi
   info "已签名 $sign_count 个动态库"
 
@@ -844,55 +939,124 @@ for build_arch in $BUILD_ARCHES; do
   build_for_arch "$build_arch"
 done
 
-# ==================== 构建完成 ====================
+# ==================== 构建完成 · 安装 ====================
 
 info ""
 info "============================================"
-info "  构建完成!"
-info "  本机架构: $NATIVE_ARCH"
-info "  构建目标: $BUILD_ARCHES"
+info "  编译完成!"
 info "============================================"
 info ""
 
-# 复制产物到项目根目录，方便查找
+# ---------- 查找构建产物 ----------
+
+BUILT_APP=""
+for build_arch in $BUILD_ARCHES; do
+  local_rust_target=$(arch_to_rust_target "$build_arch")
+  if [ "$build_arch" != "$NATIVE_ARCH" ]; then
+    BUILT_APP=$(find "$FRONTEND_DIR/src-tauri/target/$local_rust_target/release/bundle/macos" -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+  else
+    BUILT_APP=$(find "$FRONTEND_DIR/src-tauri/target/release/bundle/macos" -name "*.app" -maxdepth 1 2>/dev/null | head -1)
+  fi
+  [ -n "$BUILT_APP" ] && break
+done
+
+if [ -z "$BUILT_APP" ]; then
+  fail "编译完成但未找到 .app 文件，请检查构建日志"
+fi
+
+APP_SIZE=$(du -sh "$BUILT_APP" | cut -f1)
+APP_BASENAME=$(basename "$BUILT_APP" .app)
+info "产物: $(basename "$BUILT_APP") ($APP_SIZE)"
+
+# ---------- 复制 DMG 到 dist/ ----------
+
 OUTPUT_DIR="$PROJECT_ROOT/dist"
 mkdir -p "$OUTPUT_DIR"
 
 if [ "$(uname)" = "Darwin" ]; then
-  # 收集所有架构的 DMG
-  DMG_COUNT=0
   while IFS= read -r -d '' dmg; do
     cp -f "$dmg" "$OUTPUT_DIR/"
-    SIZE=$(du -h "$dmg" | cut -f1)
-    info "DMG: $OUTPUT_DIR/$(basename "$dmg") ($SIZE)"
-    DMG_COUNT=$((DMG_COUNT + 1))
   done < <(find "$FRONTEND_DIR/src-tauri/target" -path "*/bundle/dmg/*.dmg" -print0 2>/dev/null)
-
-  if [ "$DMG_COUNT" -eq 0 ]; then
-    warn "未找到 DMG 产物"
-  fi
-
-  # 显示 .app 路径
-  for build_arch in $BUILD_ARCHES; do
-    local_rust_target=$(arch_to_rust_target "$build_arch")
-    if [ "$build_arch" != "$NATIVE_ARCH" ]; then
-      app=$(find "$FRONTEND_DIR/src-tauri/target/$local_rust_target/release/bundle/macos" -name "*.app" 2>/dev/null | head -1)
-    else
-      app=$(find "$FRONTEND_DIR/src-tauri/target/release/bundle/macos" -name "*.app" 2>/dev/null | head -1)
-    fi
-    if [ -n "$app" ]; then
-      SIZE=$(du -sh "$app" | cut -f1)
-      info "APP [$build_arch]: $app ($SIZE)"
-    fi
-  done
-
 elif [ "$(uname -o 2>/dev/null)" = "Msys" ] || [ "$(uname -o 2>/dev/null)" = "Cygwin" ]; then
   EXE_PATH=$(find "$FRONTEND_DIR/src-tauri/target/release/bundle/nsis" -name "*.exe" 2>/dev/null | head -1)
-  if [ -n "$EXE_PATH" ]; then
-    cp -f "$EXE_PATH" "$OUTPUT_DIR/"
-    info "Installer: $OUTPUT_DIR/$(basename "$EXE_PATH")"
-  fi
+  [ -n "$EXE_PATH" ] && cp -f "$EXE_PATH" "$OUTPUT_DIR/"
 fi
 
-info ""
-info "产物目录: $OUTPUT_DIR/"
+# ---------- macOS 自动安装到 /Applications ----------
+
+if [ "$(uname)" = "Darwin" ] && [ "$NO_INSTALL" = false ]; then
+
+  INSTALL_DIR="/Applications"
+  INSTALL_PATH="$INSTALL_DIR/$(basename "$BUILT_APP")"
+
+  # 检测旧版本是否正在运行
+  if pgrep -xq "$APP_BASENAME" 2>/dev/null; then
+    info "检测到 $APP_BASENAME 正在运行，正在关闭..."
+    osascript -e "tell application \"$APP_BASENAME\" to quit" 2>/dev/null || true
+    sleep 2
+    # 仍在运行则强制关闭
+    if pgrep -xq "$APP_BASENAME" 2>/dev/null; then
+      pkill -x "$APP_BASENAME" 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+
+  # 处理已有安装（升级覆盖）
+  if [ -d "$INSTALL_PATH" ]; then
+    info "检测到已安装版本，正在升级覆盖..."
+    rm -rf "$INSTALL_PATH" 2>/dev/null || {
+      warn "无法直接覆盖 $INSTALL_PATH，尝试使用 sudo..."
+      sudo rm -rf "$INSTALL_PATH" || {
+        warn "无法覆盖 /Applications 中的旧版本，安装到 ~/Applications/"
+        INSTALL_DIR="$HOME/Applications"
+        INSTALL_PATH="$INSTALL_DIR/$(basename "$BUILT_APP")"
+        mkdir -p "$INSTALL_DIR"
+        rm -rf "$INSTALL_PATH" 2>/dev/null || true
+      }
+    }
+  fi
+
+  # 复制 .app 到安装目录
+  info "安装到 $INSTALL_PATH ..."
+  cp -R "$BUILT_APP" "$INSTALL_PATH" 2>/dev/null || {
+    warn "无法安装到 /Applications，尝试 ~/Applications/"
+    INSTALL_DIR="$HOME/Applications"
+    INSTALL_PATH="$INSTALL_DIR/$(basename "$BUILT_APP")"
+    mkdir -p "$INSTALL_DIR"
+    cp -R "$BUILT_APP" "$INSTALL_PATH" || fail "安装失败：无法复制到 $INSTALL_PATH"
+  }
+
+  # 去除 quarantine 属性（本机编译的 app 无需 Gatekeeper 验证）
+  xattr -cr "$INSTALL_PATH" 2>/dev/null || true
+
+  echo ""
+  echo "  ╔══════════════════════════════════════════════════╗"
+  echo "  ║                                                  ║"
+  echo "  ║   ✅  安装成功!                                  ║"
+  echo "  ║                                                  ║"
+  echo "  ║   应用位置: $INSTALL_PATH"
+  echo "  ║                                                  ║"
+  echo "  ║   启动方式:                                      ║"
+  echo "  ║     • Launchpad 中搜索 \"$APP_BASENAME\"             ║"
+  echo "  ║     • 或 Finder → 应用程序 → $APP_BASENAME          ║"
+  echo "  ║                                                  ║"
+  echo "  ╚══════════════════════════════════════════════════╝"
+  echo ""
+
+  # 询问是否立即启动（10 秒超时自动启动）
+  printf "  是否现在启动 %s？[Y/n] " "$APP_BASENAME"
+  read -r -t 10 LAUNCH_ANSWER < /dev/tty 2>/dev/null || LAUNCH_ANSWER="y"
+  echo ""
+
+  if [[ ! "$LAUNCH_ANSWER" =~ ^[Nn]$ ]]; then
+    open "$INSTALL_PATH"
+    info "$APP_BASENAME 已启动 🚀"
+  fi
+
+elif [ "$NO_INSTALL" = true ]; then
+  info ""
+  info "已跳过安装（--no-install 模式）"
+  info "构建产物位置:"
+  info "  APP: $BUILT_APP"
+  info "  DMG: $OUTPUT_DIR/"
+fi

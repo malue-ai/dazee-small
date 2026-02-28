@@ -7,5 +7,8 @@
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <!-- 允许应用和子进程发起出站网络请求（搜索、API 调用等） -->
+    <key>com.apple.security.network.client</key>
+    <true/>
 </dict>
 </plist>

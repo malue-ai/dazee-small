@@ -1151,6 +1151,28 @@ class InstancePromptCache:
                     logger.warning(f"⚠️ AgentSchema 生成失败: {e}，使用默认配置")
                     self.agent_schema = DEFAULT_AGENT_SCHEMA
 
+                    # API Key 认证失败时通知前端
+                    error_str = str(e).lower()
+                    if "401" in error_str or "invalid" in error_str and "key" in error_str:
+                        await self._notify_api_key_error(str(e))
+
+    async def _notify_api_key_error(self, error_detail: str):
+        """API Key 认证失败时通过 WebSocket 通知前端"""
+        try:
+            from routers.websocket import get_notification_manager
+            mgr = get_notification_manager()
+            await mgr.broadcast_notification(
+                "api_key_error",
+                {
+                    "level": "error",
+                    "title": "API Key 认证失败",
+                    "message": "LLM API Key 无效或已过期，请在设置中更新。部分功能将受限。",
+                    "detail": error_detail[:200],
+                },
+            )
+        except Exception:
+            pass
+
     def _merge_config_overrides(self, config: Dict[str, Any]):
         """合并 config.yaml 中的覆盖配置"""
         if not self.agent_schema:

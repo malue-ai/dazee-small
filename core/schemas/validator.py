@@ -241,7 +241,7 @@ class ToolSelectorConfig(ComponentConfig):
 
     # 基础工具（始终包含）
     base_tools: List[str] = Field(
-        default_factory=lambda: ["plan_todo"], description="始终包含的基础工具"
+        default_factory=lambda: ["plan_todo", "api_calling"], description="始终包含的基础工具"
     )
 
     # 工具超时（秒）
@@ -680,7 +680,7 @@ DEFAULT_AGENT_SCHEMA = AgentSchema(
         selection_strategy="capability_based",
         allow_parallel=False,  # 默认串行（更稳定）
         max_parallel_tools=3,
-        base_tools=["plan_todo"],  # 始终包含计划工具
+        base_tools=["plan_todo", "api_calling"],  # 始终包含计划工具和 HTTP 请求能力
         tool_timeout=300,  # 5 分钟超时
     ),
     # 记忆管理器：session 级别，适度的工作记忆

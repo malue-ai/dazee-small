@@ -1,6 +1,6 @@
 ---
 name: ddg-search
-description: Search the web using DuckDuckGo. Privacy-friendly, no API key required.
+description: Search the web using Jina Search API. Privacy-friendly, no API key required.
 metadata:
   xiaodazi:
     dependency_level: builtin
@@ -9,26 +9,34 @@ metadata:
     user_facing: true
 ---
 
-# DuckDuckGo 网络搜索
+# 网络搜索
 
-通过 DuckDuckGo 搜索互联网，隐私友好，无需 API Key。
+通过 Jina Search API 搜索互联网，免费，无需 API Key，返回干净的 Markdown 格式结果。
 
 ## 使用场景
 
 - 用户说「帮我搜一下…」「查查…最新消息」
 - 用户需要了解某个话题的最新信息
 - 需要为其他任务（写作、调研）收集背景资料
-- 用户问了一个需要实时信息的问题（天气之外的时事、产品价格等）
+- 用户问了一个需要实时信息的问题（时事、产品价格等）
 
 ## 执行方式
 
-通过 `web_search` 工具搜索 DuckDuckGo，获取搜索结果摘要。
+通过 `api_calling` 工具调用 Jina Search API。
 
 ### 基本搜索
 
-```python
-results = await web_search("搜索关键词")
+```json
+{
+  "url": "https://s.jina.ai/搜索关键词",
+  "method": "GET",
+  "headers": {
+    "Accept": "application/json"
+  }
+}
 ```
+
+返回 JSON 格式的搜索结果，每条包含 `title`、`url`、`description`、`content` 字段。
 
 ### 搜索策略
 
@@ -37,17 +45,6 @@ results = await web_search("搜索关键词")
    - 中文话题可同时搜索中英文关键词以扩大覆盖面
 2. **多轮搜索**：复杂话题拆分为多个子查询
 3. **结果筛选**：优先选择权威来源（官方网站、知名媒体、学术机构）
-
-### 搜索结果处理
-
-```
-对每条搜索结果，提取：
-- title: 页面标题
-- url: 链接
-- snippet: 摘要片段
-
-综合多条结果，给用户一个结构化的回答。
-```
 
 ## 输出规范
 

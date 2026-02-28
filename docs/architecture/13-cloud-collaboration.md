@@ -606,14 +606,27 @@ When a request requires local capabilities but local is offline, the cloud respo
 
 ## 8 — Phased Implementation
 
-### Phase 1: Forward ACP + Cloud Skill (Local delegates to cloud)
+### Phase 0.5: Direct API Call (Current — Zero Cloud Changes)
 
-**Goal**: Local agent can delegate tasks to cloud and see real-time progress.
+**Goal**: Local cloud_agent Skill calls the cloud's existing `/api/v1/chat/stream` endpoint directly. No custom ACP protocol, no cloud-side changes.
 
 | Side | Work |
 |---|---|
-| **Cloud** | `routers/acp.py` (auth + task endpoints + SSE), `services/acp_service.py`, `services/acp_auth_service.py`, `infra/database/models/acp.py`, `main.py` registration |
-| **Local** | `skills/library/cloud-agent/SKILL.md`, `tools/cloud_agent.py`, `core/acp/client.py`, `core/acp/models.py`, `core/acp/token_store.py`, `config/capabilities.yaml`, `skills.yaml` |
+| **Cloud** | **Zero changes** — uses the existing containerized deployment as-is |
+| **Local** | `core/cloud/client.py` (CloudClient: login + chat_stream SSE), `tools/cloud_agent.py` (simplified), `skills/library/cloud-agent/SKILL.md`, `config/capabilities.yaml`, `skills.yaml` |
+| **Auth** | Reuses existing username/password → JWT (same as web frontend) |
+| **Verify** | `python scripts/test_cloud_e2e.py --cloud-url http://cloud:8001` |
+
+**Key insight**: The cloud already provides a complete agent-as-a-service API (`/api/v1/chat/stream`). The SSE events use the same zenflux format as the local agent, so no event mapping layer is needed. The cloud_agent tool just consumes the SSE stream and bridges `content_delta` / `content_start(tool_use)` events to local `cloud_progress` message deltas.
+
+### Phase 1: Forward ACP + Cloud Skill (Local delegates to cloud)
+
+**Goal**: Add task-level tracking, structured progress events, and reconnection support on top of Phase 0.5.
+
+| Side | Work |
+|---|---|
+| **Cloud** | `routers/acp.py` (task endpoints + SSE wrapper), `services/acp_service.py` (task state machine, event mapping) |
+| **Local** | `core/acp/client.py` (task lifecycle: create/stream/control), enhanced `tools/cloud_agent.py` |
 | **Frontend** | `CloudBindSettings.vue` (settings page), `CloudProgressCard.vue` (progress rendering), `useChat.ts` (cloud_progress handler) |
 | **Verify** | Local sends "run this Python script" → cloud sandbox executes → progress streams back → result displayed |
 
