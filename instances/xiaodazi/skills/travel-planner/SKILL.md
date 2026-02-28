@@ -21,7 +21,7 @@ metadata:
 
 ## 执行方式
 
-直接使用 LLM 能力规划行程，可配合 web_search 获取最新信息。
+直接使用 LLM 能力规划行程，可配合 ddg-search skill（通过 api_calling 工具）获取最新信息。
 
 ### 行程规划模板
 
@@ -107,5 +107,5 @@ metadata:
 
 - 行程标注每个活动的预计时间和交通方式
 - 预算使用用户习惯的货币单位
-- 如需最新信息（天气/价格），使用 web_search 获取
+- 如需最新信息（天气/价格），使用 ddg-search skill（通过 api_calling）获取
 - 打包清单用 checkbox 格式方便勾选

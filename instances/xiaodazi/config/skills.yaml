@@ -96,6 +96,10 @@ skill_groups:
   screen_memory:
     description: "屏幕记忆回溯、历史操作查询、应用使用统计、会议录音回顾"
     skills: [screenpipe]
+  cloud_skills:
+    description: "云端协同：持续运行的定时任务、沙箱代码执行与项目发布、手机/IM 随时可达的长时间任务"
+    skills: [cloud-agent]
+
   _always:
     description: "始终注入（基础能力）"
     skills: [local-search, app-recommender, weather]
@@ -207,6 +211,9 @@ skills:
 
       # --- 系统 ---
       - { name: system-info,             backend_type: local, skill_source: instance, description: "系统信息诊断：CPU/内存/磁盘/进程" }
+
+      # --- 云端协同 ---
+      - { name: cloud-agent,             backend_type: tool, tool_name: cloud_agent, skill_source: library, description: "云端任务委托：定时任务、沙箱执行、离线长任务" }
 
     lightweight:
       - { name: code-sandbox,        backend_type: local, skill_source: instance, description: "安全代码沙箱：在 Docker/E2B 隔离环境中执行 AI 生成的代码，保护用户系统" }
