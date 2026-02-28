@@ -648,95 +648,6 @@
           </div>
         </div>
 
-        <!-- ==================== 云端协同 ==================== -->
-        <div>
-          <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
-            云端协同
-          </h2>
-          <div class="bg-card rounded-lg border border-border overflow-hidden">
-            <!-- 未绑定状态 -->
-            <template v-if="!acpBound">
-              <div class="px-4 py-4 space-y-3">
-                <p class="text-xs text-muted-foreground">绑定云端后，本地 Agent 可将持续运行的任务委托给云端执行，并实时看到进度。</p>
-                <div class="space-y-2">
-                  <div>
-                    <label class="block text-xs font-medium text-foreground mb-1">云端地址</label>
-                    <input
-                      v-model="acpForm.cloudUrl"
-                      type="url"
-                      placeholder="https://your-cloud.example.com"
-                      class="w-full px-3 py-2 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-xs font-medium text-foreground mb-1">用户名</label>
-                    <input
-                      v-model="acpForm.username"
-                      type="text"
-                      placeholder="username"
-                      class="w-full px-3 py-2 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-xs font-medium text-foreground mb-1">密码</label>
-                    <input
-                      v-model="acpForm.password"
-                      type="password"
-                      placeholder="password"
-                      class="w-full px-3 py-2 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-xs font-medium text-foreground mb-1">设备名称</label>
-                    <input
-                      v-model="acpForm.deviceName"
-                      type="text"
-                      placeholder="我的 MacBook"
-                      class="w-full px-3 py-2 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                </div>
-                <div v-if="acpBindError" class="text-xs text-destructive">{{ acpBindError }}</div>
-                <button
-                  @click="handleAcpBind"
-                  :disabled="acpBinding"
-                  class="w-full px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-                >
-                  <Loader2 v-if="acpBinding" class="w-3.5 h-3.5 animate-spin" />
-                  <Cloud v-else class="w-3.5 h-3.5" />
-                  {{ acpBinding ? '绑定中...' : '绑定云端' }}
-                </button>
-              </div>
-            </template>
-
-            <!-- 已绑定状态 -->
-            <template v-else>
-              <div class="px-4 py-4 space-y-3">
-                <div class="flex items-center gap-2">
-                  <div class="w-2 h-2 rounded-full bg-success"></div>
-                  <span class="text-xs font-medium text-success">已绑定云端</span>
-                </div>
-                <div class="space-y-1.5 text-xs text-muted-foreground">
-                  <div class="flex justify-between">
-                    <span>云端地址</span>
-                    <span class="text-foreground font-medium truncate max-w-[180px]">{{ acpCloudUrl }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span>设备 ID</span>
-                    <span class="text-foreground font-mono text-[11px]">{{ acpDeviceId?.slice(0, 16) }}...</span>
-                  </div>
-                </div>
-                <button
-                  @click="handleAcpUnbind"
-                  class="text-xs text-destructive hover:text-destructive/80 transition-colors"
-                >
-                  解除绑定
-                </button>
-              </div>
-            </template>
-          </div>
-        </div>
-
         <!-- ==================== 操作按钮 ==================== -->
         <div class="flex items-center justify-between pt-2">
           <a
@@ -817,82 +728,6 @@ const providerBaseUrls = reactive<Record<string, string>>({})
 const showSecrets = reactive<Record<string, boolean>>({})
 const validating = reactive<Record<string, boolean>>({})
 const validateResults = reactive<Record<string, ValidateKeyResult>>({})
-
-// ==================== ACP 云端协同状态 ====================
-
-const acpBound = ref(false)
-const acpCloudUrl = ref('')
-const acpDeviceId = ref('')
-const acpBinding = ref(false)
-const acpBindError = ref('')
-const acpForm = reactive({
-  cloudUrl: '',
-  username: '',
-  password: '',
-  deviceName: navigator.userAgent.includes('Mac') ? `我的 Mac (${new Date().toLocaleDateString()})` : `我的设备 (${new Date().toLocaleDateString()})`,
-})
-
-function loadAcpState() {
-  const token = localStorage.getItem('acp_token')
-  const url = localStorage.getItem('acp_cloud_url')
-  const deviceId = localStorage.getItem('acp_device_id')
-  if (token && url && deviceId) {
-    acpBound.value = true
-    acpCloudUrl.value = url
-    acpDeviceId.value = deviceId
-  }
-}
-
-async function handleAcpBind() {
-  acpBindError.value = ''
-  if (!acpForm.cloudUrl.trim() || !acpForm.username.trim() || !acpForm.password.trim()) {
-    acpBindError.value = '请填写完整的云端地址、用户名和密码'
-    return
-  }
-  acpBinding.value = true
-  try {
-    const url = acpForm.cloudUrl.trim().replace(/\/$/, '')
-    const resp = await fetch(`${url}/acp/auth/bind`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: acpForm.username.trim(),
-        password: acpForm.password.trim(),
-        device_name: acpForm.deviceName.trim() || '本地设备',
-      }),
-    })
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}))
-      throw new Error(err?.detail?.message || `绑定失败 (${resp.status})`)
-    }
-    const data = await resp.json()
-    localStorage.setItem('acp_token', data.acp_token)
-    localStorage.setItem('acp_refresh_token', data.refresh_token)
-    localStorage.setItem('acp_device_id', data.device_id)
-    localStorage.setItem('acp_cloud_url', url)
-    acpBound.value = true
-    acpCloudUrl.value = url
-    acpDeviceId.value = data.device_id
-    acpForm.password = ''
-  } catch (e: any) {
-    acpBindError.value = e?.message || '绑定失败，请检查地址和密码'
-  } finally {
-    acpBinding.value = false
-  }
-}
-
-function handleAcpUnbind() {
-  localStorage.removeItem('acp_token')
-  localStorage.removeItem('acp_refresh_token')
-  localStorage.removeItem('acp_device_id')
-  localStorage.removeItem('acp_cloud_url')
-  acpBound.value = false
-  acpCloudUrl.value = ''
-  acpDeviceId.value = ''
-  acpForm.cloudUrl = ''
-  acpForm.username = ''
-  acpForm.password = ''
-}
 
 // Provider Key 配置状态（用于显示已配置/未配置标签）
 const providerKeyState = computed(() => {
@@ -1654,7 +1489,6 @@ function applyGuideTarget(step: number) {
 // ==================== 生命周期 ====================
 
 onMounted(async () => {
-  loadAcpState()
   await Promise.all([loadAll(), loadEmbeddingStatus(), loadGatewayConfig()])
 
   // 检查是否有后台下载正在进行（用户离开设置页后再回来的场景）

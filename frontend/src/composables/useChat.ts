@@ -792,19 +792,6 @@ export function useChat() {
         // 忽略解析错误
       }
     }
-
-    // 云端任务进度事件
-    if (delta.type === 'cloud_progress') {
-      try {
-        const progress = typeof delta.content === 'string'
-          ? JSON.parse(delta.content)
-          : delta.content
-        if (!msg.cloudProgress) msg.cloudProgress = []
-        msg.cloudProgress.push({ ...progress, timestamp: Date.now() })
-      } catch {
-        // 忽略解析错误
-      }
-    }
   }
 
   /**

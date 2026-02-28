@@ -55,7 +55,6 @@ export type {
   AttachedFile,
   PlanStep,
   PlanData,
-  CloudProgressItem,
   UIMessage,
   HITLConfirmationType,
   HITLFormQuestion,

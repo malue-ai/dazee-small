@@ -766,42 +766,6 @@ capabilities:
         description: Output audio format (TTS, default wav)
     required: [action]
 
-# ========== 云端协同 ==========
-
-- name: cloud_agent
-  type: TOOL
-  subtype: NATIVE
-  provider: user
-  level: 1
-  implementation:
-    module: tools.cloud_agent
-    class: CloudAgentTool
-  capabilities:
-    - cloud_execution
-    - sandbox
-    - persistent_task
-  priority: 40
-  cost:
-    time: slow
-    money: paid
-  constraints:
-    requires_api: true
-    requires_network: true
-  metadata:
-    description: |
-      将任务委托给云端 Agent 执行，实时推送进度到本地界面。
-      适用于持续运行任务、沙箱代码执行、离线期间仍需运行的长时间任务。
-  input_schema:
-    type: object
-    properties:
-      task:
-        type: string
-        description: "委托给云端的任务描述"
-      context:
-        type: string
-        description: "相关上下文信息（可选）"
-    required: [task]
-
 # ========== 内置代码执行 ==========
 
 - name: code_execution
