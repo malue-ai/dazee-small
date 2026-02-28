@@ -219,8 +219,10 @@ def _fast_cap_message_content(content: Any, cap: int = _MAX_SINGLE_CONTENT_CHARS
     if isinstance(content, str):
         if len(content) <= cap:
             return content
-        head = cap * 2 // 3  # 2/3 给头部
-        tail = cap // 3      # 1/3 给尾部
+        if _is_preserved_content(content):
+            return content
+        head = cap * 2 // 3
+        tail = cap // 3
         return (
             content[:head]
             + f"\n\n... (已截断: 原文 {len(content)} 字符, 保留头 {head} + 尾 {tail}) ...\n\n"
@@ -233,7 +235,9 @@ def _fast_cap_message_content(content: Any, cap: int = _MAX_SINGLE_CONTENT_CHARS
             if isinstance(block, dict):
                 if block.get("type") == "text":
                     text = block.get("text", "")
-                    if len(text) > cap:
+                    if _is_preserved_content(text):
+                        capped.append(block)
+                    elif len(text) > cap:
                         head = cap * 2 // 3
                         tail = cap // 3
                         capped.append({
@@ -330,22 +334,31 @@ _IMMEDIATE_KEEP_HEAD = 500
 _IMMEDIATE_KEEP_TAIL = 200
 
 
+def _is_preserved_content(text: str) -> bool:
+    """Check if content was explicitly preserved and should not be truncated again.
+
+    Returns True for:
+    - Content already compressed by ToolResultCompressor (has COMPRESSED marker)
+    """
+    if text.startswith("[COMPRESSED:"):
+        return True
+    return False
+
+
 def _compress_tool_result_content(content: Any) -> Any:
     """
     压缩单个 tool_result 的 content 字段
 
     策略：
-    - 已被 ToolResultCompressor 即时压缩的内容（带 COMPRESSED 标记）→ 跳过，防止二次截断
-    - 字符串超长 → 保留头 200 + 尾 100 字符 + 截断标记
+    - 已被 ToolResultCompressor 即时压缩的内容（带 COMPRESSED 标记）→ 跳过
+    - 字符串超长 → 保留头 + 尾 + 截断标记
     - list of blocks → 递归压缩每个 text block
-    - 其他 → 不变
+    - 图片/音频 → 替换为占位符
     """
     if isinstance(content, str):
         if len(content) <= _TOOL_RESULT_TRUNCATE_THRESHOLD:
             return content
-        # 防止二次压缩：已被 ToolResultCompressor 压缩的结果包含文件路径引用，
-        # 截断会丢失路径，导致 Agent 无法通过 cat 查看完整内容
-        if content.startswith("[COMPRESSED:"):
+        if _is_preserved_content(content):
             return content
         return (
             content[:_TOOL_RESULT_KEEP_HEAD]
@@ -360,8 +373,7 @@ def _compress_tool_result_content(content: Any) -> Any:
                 block_type = block.get("type", "")
                 if block_type == "text":
                     text = block.get("text", "")
-                    # 防止二次压缩
-                    if text.startswith("[COMPRESSED:"):
+                    if _is_preserved_content(text):
                         compressed.append(block)
                     elif len(text) > _TOOL_RESULT_TRUNCATE_THRESHOLD:
                         compressed.append({
@@ -440,8 +452,11 @@ def compress_fresh_tool_result(content: str) -> str:
     this compresses immediately — preventing large tool outputs from
     bloating context from the start.
 
-    Threshold: 1500 chars (vs 300 for old messages).
-    Keeps more context (head=500 + tail=200) since this is recent/relevant.
+    IMPORTANT: Content that was explicitly preserved by the tool (via
+    _compression_hint="skip") will already have been serialized without
+    the COMPRESSED marker.  We must NOT re-truncate it here — the tool
+    declared that the Agent needs the full content.  The token-budget
+    trimmer (L2) will handle it if context truly overflows later.
 
     Args:
         content: Raw tool result string.
@@ -452,6 +467,8 @@ def compress_fresh_tool_result(content: str) -> str:
     if not isinstance(content, str):
         return content
     if len(content) <= _IMMEDIATE_COMPRESS_THRESHOLD:
+        return content
+    if _is_preserved_content(content):
         return content
 
     omitted = len(content) - _IMMEDIATE_KEEP_HEAD - _IMMEDIATE_KEEP_TAIL

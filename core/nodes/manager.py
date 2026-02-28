@@ -277,6 +277,7 @@ class NodeManager:
         title: str,
         message: str,
         subtitle: Optional[str] = None,
+        category: Optional[str] = None,
         node_id: str = "local",
     ) -> NodeInvokeResponse:
         """
@@ -286,6 +287,7 @@ class NodeManager:
             title: 通知标题
             message: 通知内容
             subtitle: 副标题
+            category: 通知类别（LLM 在调用时声明）
             node_id: 目标节点
         """
         return await self.invoke(
@@ -294,6 +296,7 @@ class NodeManager:
                 "title": title,
                 "message": message,
                 "subtitle": subtitle,
+                "category": category,
             },
             node_id=node_id,
         )

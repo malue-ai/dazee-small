@@ -419,41 +419,44 @@ class ToolMasker:
                 result.append(tool_copy)
             return result
 
+    # Mapping from capabilities.yaml state_category values to AgentState.
+    # Built lazily from the capability registry.
+    _STATE_CATEGORY_MAP: Dict[str, "AgentState"] = {
+        "planning": AgentState.PLANNING,
+        "browsing": AgentState.BROWSING,
+        "coding": AgentState.CODING,
+        "searching": AgentState.SEARCHING,
+        "executing": AgentState.EXECUTING,
+        "validating": AgentState.VALIDATING,
+    }
+
     def infer_state_from_action(self, action: str, tool_name: Optional[str] = None) -> AgentState:
         """
-        Infer agent state from action/tool name (UI hint only).
+        Infer agent state from tool metadata (UI hint only).
 
-        WARNING: This uses keyword/prefix matching for DISPLAY PURPOSES ONLY
-        (frontend status label like "searching...", "coding...").
-        It does NOT influence any agent execution decisions.
-        Do NOT use the return value for routing, tool selection, or any
-        semantic decision — those must be LLM-driven.
+        Uses state_category field from capabilities.yaml to determine UI label.
+        Does NOT influence agent execution decisions.
 
         Args:
-            action: Action description
+            action: Action description (unused, kept for API compatibility)
             tool_name: Tool name
 
         Returns:
             Inferred state (for UI display)
         """
-        action_lower = action.lower()
-
         if tool_name:
-            if tool_name.startswith("plan_"):
-                return AgentState.PLANNING
-            elif tool_name.startswith(("web_", "exa_", "browser_")):
-                return AgentState.BROWSING
-            elif tool_name.startswith(("code_",)):
-                return AgentState.CODING
-
-        if any(kw in action_lower for kw in ["搜索", "查找", "search", "find"]):
-            return AgentState.SEARCHING
-        elif any(kw in action_lower for kw in ["代码", "编程", "code", "script"]):
-            return AgentState.CODING
-        elif any(kw in action_lower for kw in ["计划", "规划", "plan"]):
-            return AgentState.PLANNING
-        elif any(kw in action_lower for kw in ["验证", "检查", "validate", "check"]):
-            return AgentState.VALIDATING
+            try:
+                from core.tool.registry import get_capability_registry
+                registry = get_capability_registry()
+                cap = registry.get(tool_name)
+                if cap:
+                    category = cap.metadata.get("state_category") if cap.metadata else None
+                    if not category:
+                        category = getattr(cap, "state_category", None)
+                    if category and category in self._STATE_CATEGORY_MAP:
+                        return self._STATE_CATEGORY_MAP[category]
+            except Exception:
+                pass
 
         return AgentState.EXECUTING
 
