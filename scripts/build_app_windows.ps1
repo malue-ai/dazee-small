@@ -555,7 +555,21 @@ if (Test-Path $signKeyFile) {
 } elseif ($env:TAURI_SIGNING_PRIVATE_KEY) {
     Info "  Using updater signing key from env"
 } else {
-    Warn "  No updater signing key found, skipping update bundle signing"
+    Warn "  No updater signing key found (dev build)"
+    Info "  Generating temporary signing key..."
+    $tempKeyDir = Join-Path $env:TEMP "tauri-temp-key-$(Get-Random)"
+    New-Item -ItemType Directory -Force -Path $tempKeyDir | Out-Null
+    $tempKeyFile = Join-Path $tempKeyDir "temp.key"
+    $devKeyPwd = "dev-build-temp"
+    & npx @tauri-apps/cli signer generate -p $devKeyPwd -w $tempKeyFile 2>&1 | Out-Null
+    if (Test-Path $tempKeyFile) {
+        $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $tempKeyFile -Raw
+        $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $devKeyPwd
+        Info "  Temporary key generated (updater signature NOT valid for production releases)"
+    } else {
+        Warn "  Temporary key generation failed, build may error"
+    }
+    Remove-Item $tempKeyDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Info "  Running: npm run tauri:build"
