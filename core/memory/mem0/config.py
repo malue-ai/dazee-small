@@ -349,8 +349,12 @@ class Mem0Config:
 
     @property
     def history_db_name(self) -> str:
-        """Instance-scoped history DB filename."""
-        return f"{self.instance_name}_mem0_history.db"
+        """Instance-scoped history DB path (absolute)."""
+        from utils.app_paths import get_instance_store_dir
+
+        return str(
+            get_instance_store_dir(self.instance_name) / "mem0_history.db"
+        )
 
     @classmethod
     def from_env(cls) -> "Mem0Config":
