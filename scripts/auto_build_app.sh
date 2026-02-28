@@ -541,30 +541,52 @@ fi
 # ==================== Tauri Updater 签名密钥 ====================
 
 SIGN_KEY_FILE="$PROJECT_ROOT/keys/xiaodazi.key"
+SIGN_KEY_PUB_FILE="$PROJECT_ROOT/keys/xiaodazi.key.pub"
 SIGN_KEY_PWD_FILE="$PROJECT_ROOT/keys/xiaodazi.key.password"
+TAURI_CONF="$FRONTEND_DIR/src-tauri/tauri.conf.json"
 
-if [ -f "$SIGN_KEY_FILE" ]; then
-  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
-  if [ -f "$SIGN_KEY_PWD_FILE" ]; then
-    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$SIGN_KEY_PWD_FILE")"
-  elif [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
-    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
-  fi
-  ok "已加载 updater 签名密钥"
-elif [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
   ok "使用环境变量中的 updater 签名密钥"
+elif [ -f "$SIGN_KEY_FILE" ] && [ -f "$SIGN_KEY_PWD_FILE" ]; then
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$SIGN_KEY_PWD_FILE")"
+  ok "已加载 updater 签名密钥（含密码文件）"
 else
-  info "未找到签名密钥，自动生成临时密钥对..."
+  info "生成本地构建签名密钥..."
   mkdir -p "$PROJECT_ROOT/keys"
+  rm -f "$SIGN_KEY_FILE" "$SIGN_KEY_PUB_FILE"
   cd "$FRONTEND_DIR"
   npx @tauri-apps/cli signer generate -w "$SIGN_KEY_FILE" -p "" --ci --force 2>/dev/null || true
-  if [ -f "$SIGN_KEY_FILE" ]; then
+
+  if [ -f "$SIGN_KEY_FILE" ] && [ -f "$SIGN_KEY_PUB_FILE" ]; then
     export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
     export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
-    ok "已生成临时签名密钥: $SIGN_KEY_FILE"
+
+    NEW_PUBKEY=$(cat "$SIGN_KEY_PUB_FILE")
+    $PYTHON_CMD -c "
+import json, sys
+with open('$TAURI_CONF', 'r') as f:
+    conf = json.load(f)
+conf.setdefault('plugins', {}).setdefault('updater', {})['pubkey'] = '''$NEW_PUBKEY'''
+with open('$TAURI_CONF', 'w') as f:
+    json.dump(conf, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+"
+    ok "已生成签名密钥并更新 tauri.conf.json pubkey"
   else
-    warn "签名密钥生成失败，尝试禁用 updater 签名..."
-    export TAURI_SIGNING_PRIVATE_KEY=""
+    warn "签名密钥生成失败，禁用 updater 签名..."
+    $PYTHON_CMD -c "
+import json
+with open('$TAURI_CONF', 'r') as f:
+    conf = json.load(f)
+conf['bundle']['createUpdaterArtifacts'] = False
+if 'plugins' in conf and 'updater' in conf['plugins']:
+    del conf['plugins']['updater']
+with open('$TAURI_CONF', 'w') as f:
+    json.dump(conf, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+"
+    warn "已禁用 createUpdaterArtifacts，应用将不支持自动更新"
   fi
 fi
 
