@@ -178,6 +178,21 @@
 </example>
 
 <example>
+<query>在飞书上给陈尘发个消息</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["feishu", "app_automation"]}}</output>
+</example>
+
+<example>
+<query>帮我看看飞书日历今天有什么安排</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["feishu", "app_automation"]}}</output>
+</example>
+
+<example>
+<query>打开 Apple Mail 把最新那封邮件转发给老板</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["productivity", "app_automation"]}}</output>
+</example>
+
+<example>
 <query>5分钟后提醒我喝水</query>
 <output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["productivity"]}}</output>
 </example>
