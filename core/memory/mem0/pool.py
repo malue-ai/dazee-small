@@ -660,9 +660,15 @@ def get_mem0_pool(config: Optional[Mem0Config] = None) -> Mem0MemoryPool:
 
 def reset_mem0_pool() -> None:
     """
-    重置全局缓存池（用于测试或重新初始化）
+    重置全局缓存池（用于配置变更后重新初始化）
+
+    同时清除 _memory_unavailable 标志，使下次访问可以重试创建 Memory 实例。
+    典型场景：用户在设置页面更换 API Key 后触发。
     """
     global _pool_instance
+    if _pool_instance is not None:
+        _pool_instance._memory_unavailable = False
+        _pool_instance._memory = None
     _pool_instance = None
     Mem0MemoryPool._instance = None
 
