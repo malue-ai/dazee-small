@@ -552,15 +552,17 @@ elif [ -f "$SIGN_KEY_FILE" ] && [ -f "$SIGN_KEY_PWD_FILE" ]; then
   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$SIGN_KEY_PWD_FILE")"
   ok "已加载 updater 签名密钥（含密码文件）"
 else
+  LOCAL_BUILD_PWD="xiaodazi-local-build"
   info "生成本地构建签名密钥..."
   mkdir -p "$PROJECT_ROOT/keys"
   rm -f "$SIGN_KEY_FILE" "$SIGN_KEY_PUB_FILE"
   cd "$FRONTEND_DIR"
-  npx @tauri-apps/cli signer generate -w "$SIGN_KEY_FILE" -p "" --ci --force 2>/dev/null || true
+  npx @tauri-apps/cli signer generate -w "$SIGN_KEY_FILE" -p "$LOCAL_BUILD_PWD" --ci --force 2>/dev/null || true
 
   if [ -f "$SIGN_KEY_FILE" ] && [ -f "$SIGN_KEY_PUB_FILE" ]; then
     export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
-    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$LOCAL_BUILD_PWD"
+    printf '%s' "$LOCAL_BUILD_PWD" > "$SIGN_KEY_PWD_FILE"
 
     NEW_PUBKEY=$(cat "$SIGN_KEY_PUB_FILE")
     $PYTHON_CMD -c "
