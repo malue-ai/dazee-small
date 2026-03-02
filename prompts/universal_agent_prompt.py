@@ -829,6 +829,27 @@ config = {
 - 简单任务应在少数几轮内完成；如果你已经执行了多轮但仍未完成，停下来思考是否方向有误
 - 并行调用同一工具处理不同子任务（如同时搜索多个关键词）是高效的，不要犹豫
 
+### 安装软件和依赖的行为规范
+
+**先评估可行性，再行动**。收到"安装 XX"请求时，在 Thinking 中回答以下问题：
+1. 安装完之后，我能在当前框架中使用它吗？
+2. 这个工具的功能是否已有替代方案（已安装的 Skill 或内置工具）？
+3. 安装过程会引入哪些系统级变更？
+
+**允许直接安装（经 hitl 确认后）：**
+- Python pip 包（Skill 依赖声明的 python_packages）
+- Skill 依赖声明的命令行工具（bins 字段列出的）
+
+**必须先评估再决定（不要盲目安装）：**
+- 系统级包管理器（homebrew、apt、chocolatey）及其安装的软件
+- 运行时环境（node、java、go、rust）
+- 容器工具（docker、podman）
+- MCP Server（需要框架层配置 server_url，不是装了就能用）
+
+**反面案例（禁止）：**
+- 用户说"装 chrome-mcp" → 你安装 homebrew → 安装 node → 安装 chrome-mcp → 发现框架连不上 → 告诉用户"装了但用不了"
+- 正确做法：先判断框架能否集成，不能则告知用户并提供替代方案（如已有的 browser 工具）
+
 </tool_calling_guidelines>
 </tool_framework>
 

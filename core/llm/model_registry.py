@@ -2004,7 +2004,7 @@ def _register_preset_models() -> None:
 
     _DEEPSEEK_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.OPENAI,
-        base_url="https://api.deepseek.com/v1",
+        base_url="https://api.deepseek.com",
         api_key_env="DEEPSEEK_API_KEY",
         provider="deepseek",
     )
@@ -2013,11 +2013,11 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="deepseek-chat",
             model_type=ModelType.LLM,
-            display_name="DeepSeek Chat (V3)",
-            description="DeepSeek 对话模型，64K 上下文",
+            display_name="DeepSeek Chat (V3.2)",
+            description="DeepSeek V3.2 非思考模式，128K 上下文",
             capabilities=ModelCapabilities(
-                supports_tools=True, supports_vision=False, supports_thinking=False,
-                max_tokens=8192, max_input_tokens=64000,
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=8192, max_input_tokens=128000,
             ),
             pricing=ModelPricing(
                 input_per_million=0.27, output_per_million=1.10,
@@ -2031,11 +2031,11 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="deepseek-reasoner",
             model_type=ModelType.LLM,
-            display_name="DeepSeek Reasoner (R1)",
-            description="DeepSeek 推理模型，支持 CoT",
+            display_name="DeepSeek Reasoner (V3.2)",
+            description="DeepSeek V3.2 思考模式，128K 上下文，支持 CoT",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=False, supports_thinking=True,
-                max_tokens=64000, max_input_tokens=64000,
+                max_tokens=64000, max_input_tokens=128000,
             ),
             pricing=ModelPricing(
                 input_per_million=0.55, output_per_million=2.19,
@@ -2044,6 +2044,52 @@ def _register_preset_models() -> None:
             **_DEEPSEEK_COMMON,
         )
     )
+
+    # [V4 Ready] DeepSeek V4 上线后取消注释并填入实际参数：
+    #
+    # ModelRegistry.register(
+    #     ModelConfig(
+    #         model_name="deepseek-v4",              # ← 确认实际模型名
+    #         model_type=ModelType.LLM,              # ← 如支持视觉改为 VLM
+    #         display_name="DeepSeek V4",
+    #         description="DeepSeek V4 ???模式，???K 上下文",
+    #         capabilities=ModelCapabilities(
+    #             supports_tools=True,
+    #             supports_vision=False,              # ← 确认是否支持视觉
+    #             supports_thinking=True,
+    #             max_tokens=65536,                   # ← 确认输出上限
+    #             max_input_tokens=128000,            # ← 确认上下文长度
+    #         ),
+    #         pricing=ModelPricing(
+    #             input_per_million=0.0,              # ← 填入实际定价
+    #             output_per_million=0.0,
+    #             cache_read_per_million=0.0,
+    #         ),
+    #         **_DEEPSEEK_COMMON,
+    #     )
+    # )
+    #
+    # ModelRegistry.register(
+    #     ModelConfig(
+    #         model_name="deepseek-v4-lite",          # ← 确认轻量版模型名
+    #         model_type=ModelType.LLM,
+    #         display_name="DeepSeek V4 Lite",
+    #         description="DeepSeek V4 轻量版，???K 上下文",
+    #         capabilities=ModelCapabilities(
+    #             supports_tools=True,
+    #             supports_vision=False,
+    #             supports_thinking=True,
+    #             max_tokens=8192,                    # ← 确认输出上限
+    #             max_input_tokens=128000,            # ← 确认上下文长度
+    #         ),
+    #         pricing=ModelPricing(
+    #             input_per_million=0.0,
+    #             output_per_million=0.0,
+    #             cache_read_per_million=0.0,
+    #         ),
+    #         **_DEEPSEEK_COMMON,
+    #     )
+    # )
 
     # ==================== Kimi (Moonshot) 系列 ====================
 

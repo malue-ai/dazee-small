@@ -9,9 +9,9 @@ DeepSeek LLM 服务实现
 - 思考模式（deepseek-reasoner / thinking 参数）
 - 流式断连重试与降级
 
-模型对应关系：
-- deepseek-reasoner ↔ claude-sonnet-4-5 / qwen3-max（重推理模型）
-- deepseek-chat     ↔ claude-haiku-4-5  / qwen-plus（快速模型）
+模型对应关系（均基于 DeepSeek-V3.2，128K 上下文）：
+- deepseek-reasoner ↔ DeepSeek-V3.2 思考模式（对标 claude-sonnet-4-5 / qwen3-max）
+- deepseek-chat     ↔ DeepSeek-V3.2 非思考模式（对标 claude-haiku-4-5 / qwen-plus）
 
 思考模式 + 工具调用注意事项：
 - 同一问题的工具调用循环内，必须将 reasoning_content 传回 API
@@ -46,11 +46,15 @@ LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", 
 # DeepSeek 常量与模型能力
 # ============================================================
 
-# max_tokens 上限
+# max_tokens 上限（V3.2）
 # deepseek-reasoner: 输出最大 64K（含 CoT）
 # deepseek-chat:     输出最大 8K
 DEEPSEEK_MAX_TOKENS_REASONER = 65536
 DEEPSEEK_MAX_TOKENS_CHAT = 8192
+
+# [V4 Ready] DeepSeek V4 上线后更新以下常量：
+# DEEPSEEK_MAX_TOKENS_V4 = ???          # V4 输出上限（查阅 Release Notes）
+# DEEPSEEK_MAX_TOKENS_V4_LITE = ???     # V4 轻量版输出上限
 
 
 class DeepSeekModelCapability:
@@ -58,17 +62,30 @@ class DeepSeekModelCapability:
 
     REASONER_MODELS = {
         "deepseek-reasoner",
+        # [V4 Ready] 如 V4 使用新模型名，在此添加：
+        # "deepseek-v4-reasoner",
     }
 
     THINKING_CAPABLE_MODELS = {
         "deepseek-chat",
         "deepseek-reasoner",
+        # [V4 Ready] 如 V4 使用新模型名，在此添加：
+        # "deepseek-v4",
+        # "deepseek-v4-reasoner",
     }
 
     TOOL_CALLING_MODELS = {
         "deepseek-chat",
         "deepseek-reasoner",
+        # [V4 Ready] 如 V4 使用新模型名，在此添加：
+        # "deepseek-v4",
+        # "deepseek-v4-reasoner",
     }
+
+    # [V4 Ready] 如 V4 支持视觉，新增：
+    # VISION_CAPABLE_MODELS = {
+    #     "deepseek-v4",
+    # }
 
     @staticmethod
     def is_reasoner(model: str) -> bool:
@@ -88,6 +105,9 @@ class DeepSeekModelCapability:
     @staticmethod
     def get_max_tokens(model: str) -> int:
         """Get max output tokens for the model"""
+        # [V4 Ready] V4 新模型名需在此添加分支：
+        # if "deepseek-v4" in model:
+        #     return DEEPSEEK_MAX_TOKENS_V4
         if DeepSeekModelCapability.is_reasoner(model):
             return DEEPSEEK_MAX_TOKENS_REASONER
         return DEEPSEEK_MAX_TOKENS_CHAT
@@ -366,11 +386,19 @@ class DeepSeekLLMService(BaseLLMService):
         # Only need explicit thinking param for non-reasoner models
         if effective_thinking and not DeepSeekModelCapability.is_reasoner(self.config.model):
             extra["thinking"] = {"type": "enabled"}
+            # [V4 Ready] 如 V4 支持 thinking budget 控制：
+            # thinking_budget = getattr(self.config, "thinking_budget", None)
+            # if thinking_budget:
+            #     extra["thinking"]["budget_tokens"] = thinking_budget
 
         # Structured output
         response_format = kwargs.get("response_format")
         if response_format:
             extra["response_format"] = response_format
+
+        # [V4 Ready] 如 V4 支持 Prompt Cache：
+        # if getattr(self.config, "enable_caching", False):
+        #     extra["cache"] = {"type": "ephemeral"}
 
         return extra
 
@@ -1105,13 +1133,20 @@ def _register_deepseek():
         service_class=DeepSeekLLMService,
         adaptor_class=DeepSeekAdaptor,
         default_model="deepseek-reasoner",
+        # [V4 Ready] V4 上线后更新 default_model（如模型名变更）：
+        # default_model="deepseek-v4-reasoner",
         api_key_env="DEEPSEEK_API_KEY",
         display_name="DeepSeek",
-        description="DeepSeek V3.2 系列模型（深度求索）",
+        description="DeepSeek V3.2 系列模型（深度求索），128K 上下文",
+        # [V4 Ready] 更新描述和 supported_features：
+        # description="DeepSeek V4 系列模型（深度求索），???K 上下文",
         supported_features=[
             "streaming",
             "tool_calling",
             "thinking",
+            # [V4 Ready] 如 V4 支持以下能力，取消注释：
+            # "vision",
+            # "prompt_caching",
         ],
     )
 
