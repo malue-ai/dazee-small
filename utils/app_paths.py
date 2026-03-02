@@ -10,10 +10,10 @@
 
 - user_data_dir: 可写数据（数据库、日志、用户配置）
   - 开发时 = 项目根目录
-  - 打包后 = 平台标准用户数据目录
-    - macOS: ~/Library/Application Support/com.xiaodazi.app/
-    - Windows: %APPDATA%/xiaodazi/
-    - Linux: ~/.local/share/xiaodazi/
+  - 打包后 = 平台标准用户数据目录（与 Tauri identifier 一致）
+    - macOS: ~/Library/Application Support/com.zenflux.agent/
+    - Windows: %APPDATA%/com.zenflux.agent/
+    - Linux: ~/.local/share/com.zenflux.agent/
 """
 
 import os
@@ -21,9 +21,13 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# 应用标识
-APP_ID = "com.xiaodazi.app"
-APP_NAME = "xiaodazi"
+# 应用标识（必须与 tauri.conf.json 的 identifier 保持一致）
+APP_ID = "com.zenflux.agent"
+APP_NAME = "com.zenflux.agent"
+
+# 旧版本路径名（用于数据迁移）
+_LEGACY_APP_IDS = ["com.xiaodazi.app"]
+_LEGACY_APP_NAMES = ["xiaodazi"]
 
 # 命令行参数键（Tauri sidecar 传入）
 _CLI_DATA_DIR_KEY = "--data-dir"
@@ -360,22 +364,107 @@ def _get_cli_arg(key: str) -> Optional[str]:
 
 
 def _get_platform_data_dir() -> Path:
-    """获取平台标准用户数据目录"""
+    """
+    获取平台标准用户数据目录
+
+    路径与 Tauri 的 app.path().app_data_dir() 保持一致：
+    - macOS:   ~/Library/Application Support/com.zenflux.agent/
+    - Windows: %APPDATA%/com.zenflux.agent/
+    - Linux:   ~/.local/share/com.zenflux.agent/
+    """
     if sys.platform == "darwin":
-        # macOS: ~/Library/Application Support/com.xiaodazi.app/
         return Path.home() / "Library" / "Application Support" / APP_ID
     elif sys.platform == "win32":
-        # Windows: %APPDATA%/xiaodazi/
         appdata = os.getenv("APPDATA")
         if appdata:
             return Path(appdata) / APP_NAME
         return Path.home() / "AppData" / "Roaming" / APP_NAME
     else:
-        # Linux/其他: ~/.local/share/xiaodazi/
         xdg_data = os.getenv("XDG_DATA_HOME")
         if xdg_data:
             return Path(xdg_data) / APP_NAME
         return Path.home() / ".local" / "share" / APP_NAME
+
+
+def _get_legacy_data_dirs() -> list[Path]:
+    """获取所有旧版本可能使用的数据目录路径（用于数据迁移）"""
+    legacy_dirs = []
+    if sys.platform == "darwin":
+        for legacy_id in _LEGACY_APP_IDS:
+            legacy_dirs.append(Path.home() / "Library" / "Application Support" / legacy_id)
+    elif sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        for legacy_name in _LEGACY_APP_NAMES:
+            legacy_dirs.append(base / legacy_name)
+    else:
+        xdg_data = os.getenv("XDG_DATA_HOME")
+        base = Path(xdg_data) if xdg_data else Path.home() / ".local" / "share"
+        for legacy_name in _LEGACY_APP_NAMES:
+            legacy_dirs.append(base / legacy_name)
+    return legacy_dirs
+
+
+def migrate_legacy_data() -> bool:
+    """
+    将旧版本数据目录迁移到新路径（仅打包模式）
+
+    如果新数据目录为空但旧数据目录有内容，将旧目录下的文件
+    复制到新目录。旧目录保留不删除，防止误操作丢失数据。
+
+    Returns:
+        True if migration was performed
+    """
+    if not is_frozen():
+        return False
+
+    import shutil
+
+    new_dir = _get_platform_data_dir()
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    # 如果新目录已经有实质性内容，不需要迁移
+    new_has_content = any(
+        p.name not in (".DS_Store", "Thumbs.db", "sidecar-debug.log")
+        for p in new_dir.iterdir()
+    ) if new_dir.exists() else False
+
+    if new_has_content:
+        return False
+
+    for legacy_dir in _get_legacy_data_dirs():
+        if not legacy_dir.exists() or not legacy_dir.is_dir():
+            continue
+
+        legacy_has_content = any(
+            p.name not in (".DS_Store", "Thumbs.db")
+            for p in legacy_dir.iterdir()
+        )
+        if not legacy_has_content:
+            continue
+
+        print(f"📦 发现旧版本数据，正在迁移: {legacy_dir} → {new_dir}")
+        migrated = 0
+        for item in legacy_dir.iterdir():
+            if item.name in (".DS_Store", "Thumbs.db"):
+                continue
+            target = new_dir / item.name
+            if target.exists():
+                continue
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, target)
+                else:
+                    shutil.copy2(item, target)
+                migrated += 1
+            except Exception as e:
+                print(f"  ⚠️ 迁移失败 {item.name}: {e}")
+
+        if migrated > 0:
+            print(f"✅ 已迁移 {migrated} 个文件/目录（旧目录已保留）")
+            return True
+
+    return False
 
 
 def reset_cache() -> None:

@@ -390,9 +390,10 @@ async def lifespan(app: FastAPI):
     # ===== 启动阶段 =====
     print("🚀 xiaodazi API 启动中...")
     
-    # 打包模式：首次启动时将 bundle 内的种子实例复制到用户数据目录
-    from utils.app_paths import ensure_instances_initialized, is_frozen
+    # 打包模式：迁移旧版本数据 + 初始化种子实例
+    from utils.app_paths import ensure_instances_initialized, is_frozen, migrate_legacy_data
     if is_frozen():
+        migrate_legacy_data()
         copied = ensure_instances_initialized()
         if copied:
             from utils.app_paths import get_instances_dir
