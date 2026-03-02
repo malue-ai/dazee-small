@@ -209,13 +209,19 @@ async def init_vector_extension(engine: AsyncEngine) -> bool:
 _engine: Optional[AsyncEngine] = None
 _session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 _vec_available: bool = False
+_db_dir: Optional[str] = None
+_db_name: Optional[str] = None
 
 
 async def get_local_engine() -> AsyncEngine:
     """获取全局 SQLite 引擎（懒初始化）"""
-    global _engine
+    global _engine, _db_dir, _db_name
     if _engine is None:
-        _engine = create_local_engine()
+        if _db_dir is None:
+            _db_dir = _get_default_db_dir()
+        if _db_name is None:
+            _db_name = _get_default_db_name()
+        _engine = create_local_engine(db_dir=_db_dir, db_name=_db_name)
         await init_local_database(_engine)
         global _vec_available
         _vec_available = await init_vector_extension(_engine)
@@ -253,12 +259,14 @@ def is_vec_available() -> bool:
 
 async def close_local_engine():
     """关闭 SQLite 引擎（应用退出时调用）"""
-    global _engine, _session_factory, _vec_available
+    global _engine, _session_factory, _vec_available, _db_dir, _db_name
     if _engine is not None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
         _vec_available = False
+        _db_dir = None
+        _db_name = None
         logger.info("SQLite 引擎已关闭")
 
 
@@ -268,6 +276,10 @@ async def reload_local_engine() -> None:
     
     Use case: 用户在运行时安装了 sqlite-vec 依赖，需要重新检测扩展可用性。
     关闭旧引擎并清理全局状态，下次 get_local_engine() 时会重新初始化。
+
+    注意：保留 _db_dir/_db_name，确保 reload 后引擎仍指向同一个 DB 文件。
+    多实例场景下 AGENT_INSTANCE 可能已切换到其他实例，如果重新从环境变量
+    推导路径，会导致引擎指向错误的 DB，造成对话历史"消失"。
     """
     global _engine, _session_factory, _vec_available
     if _engine is not None:
@@ -276,7 +288,7 @@ async def reload_local_engine() -> None:
     _engine = None
     _session_factory = None
     _vec_available = False
+    # _db_dir 和 _db_name 保持不变，get_local_engine() 会复用它们
     
-    # 立即触发重新初始化
     await get_local_engine()
     logger.info(f"SQLite 引擎已重新加载 (vec_available={_vec_available})")
