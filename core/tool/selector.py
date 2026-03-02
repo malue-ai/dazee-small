@@ -385,23 +385,26 @@ class ToolSelector:
         self,
         schema_tools: Optional[List[str]] = None,
         plan: Optional[Dict[str, Any]] = None,
+        intent_required_tools: Optional[List[str]] = None,
     ) -> Tuple[List[str], str, List[str], Optional[List[str]]]:
         """
-        解析能力需求（Schema + Plan 两级优先级）
+        解析能力需求（Plan + Intent + Schema 三级优先级）
 
-        优先级策略（Filter 模式）：
-        1. Schema 配置：作为 Allowlist (白名单)，定义允许使用的工具范围
-        2. Plan：作为 Demand (需求)，定义当前需要的能力标签
-        3. 最终结果：Demand ∩ Allowlist
+        优先级策略：
+        1. Plan.required_skills：最高优先（Plan 在完整任务上下文中由 LLM 创建）
+        2. Intent.required_tools：LLM 语义推断的动态工具需求
+        3. Schema 配置：作为 Allowlist (白名单)
+        4. 全量 fallback：加载所有注册工具
 
         Args:
             schema_tools: Schema 配置的工具名列表
-            plan: 任务规划结果（包含 required_capabilities 字段）
+            plan: 任务规划结果（包含 required_skills 字段）
+            intent_required_tools: IntentAnalyzer LLM 推断的动态工具名列表
 
         Returns:
             (required_capabilities, selection_source, overridden_sources, allowed_tools) 四元组
             - required_capabilities: 最终选择的能力标签列表
-            - selection_source: 选择来源（schema/plan/default）
+            - selection_source: 选择来源（plan/intent/schema/default）
             - overridden_sources: 被覆盖的来源列表
             - allowed_tools: 允许使用的工具白名单（来自 Schema，工具名列表）
         """
@@ -427,8 +430,8 @@ class ToolSelector:
                 logger.debug(f"Schema 白名单已设置: {len(allowed_tools)} 个工具")
 
         # 2. Plan 推荐
-        if plan and plan.get("required_capabilities"):
-            plan_caps = plan.get("required_capabilities", [])
+        if plan and plan.get("required_skills"):
+            plan_caps = plan.get("required_skills", [])
             logger.debug(f"Plan 推荐能力: {plan_caps}")
 
         # 混合选择逻辑：优先使用 Plan 需求，受白名单限制
@@ -442,24 +445,29 @@ class ToolSelector:
             else:
                 logger.info(f"✅ 使用 Plan 推荐: {required_capabilities}")
 
+        elif intent_required_tools:
+            required_capabilities = self._extract_capability_tags(intent_required_tools)
+            selection_source = "intent"
+            logger.info(
+                f"✅ 使用 Intent 推荐工具: "
+                f"{intent_required_tools} → {required_capabilities}"
+            )
+
         elif allowed_tools:
-            # 如果没有动态需求，但有 Schema 配置，回退到全量 Schema
-            # 需要将工具名转换为能力标签，select() 按能力标签查找工具
             required_capabilities = self._extract_capability_tags(allowed_tools)
             selection_source = "schema"
             logger.info(
-                f"✅ 无动态需求，从 Schema 工具提取能力标签: "
+                f"✅ 从 Schema 工具提取能力标签: "
                 f"{len(allowed_tools)} 个工具 → {required_capabilities}"
             )
 
         else:
-            # 彻底兜底：从核心工具提取能力标签
-            core_tool_names = await self.get_core_tools()
-            required_capabilities = self._extract_capability_tags(core_tool_names)
+            all_tool_names = list(self.registry.capabilities.keys())
+            required_capabilities = self._extract_capability_tags(all_tool_names)
             selection_source = "default"
             logger.info(
-                f"⚠️ 无可用来源，从核心工具提取能力标签: "
-                f"{core_tool_names} → {required_capabilities}"
+                f"全量 fallback: {len(all_tool_names)} 工具 → "
+                f"{len(required_capabilities)} 个能力标签"
             )
 
         return required_capabilities, selection_source, overridden_sources, allowed_tools

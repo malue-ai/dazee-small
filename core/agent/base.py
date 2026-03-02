@@ -707,6 +707,9 @@ class Agent:
             await self.tool_selector.resolve_capabilities(
                 schema_tools=schema_tools,
                 plan=plan,
+                intent_required_tools=(
+                    intent.required_tools if intent else None
+                ),
             )
         )
 
