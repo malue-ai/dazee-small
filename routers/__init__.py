@@ -1,4 +1,5 @@
 from .agents import router as agents_router
+from .background_tasks import router as background_tasks_router
 from .chat import router as chat_router
 from .conversation import router as conversation_router
 from .files import router as files_router
@@ -13,6 +14,7 @@ from .websocket import router as websocket_router
 
 __all__ = [
     "agents_router",
+    "background_tasks_router",
     "chat_router",
     "conversation_router",
     "files_router",

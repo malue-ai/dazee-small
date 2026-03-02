@@ -24,6 +24,8 @@ V10.0 更新：统一 Agent 架构，执行策略通过 Executor 实现
 - PEP 544 – Protocols: Structural subtyping
 """
 
+import uuid
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -34,6 +36,8 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
+
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from core.events.broadcaster import EventBroadcaster
@@ -156,6 +160,102 @@ class AgentProtocol(Protocol):
         ...
 
 
+# ==================== 多智能体协作协议（接口预留） ====================
+
+
+class AgentRole(str, Enum):
+    """智能体角色"""
+
+    COORDINATOR = "coordinator"
+    RESEARCHER = "researcher"
+    ANALYST = "analyst"
+    WRITER = "writer"
+    REVIEWER = "reviewer"
+    EXECUTOR = "executor"
+
+
+class InterAgentMessage(BaseModel):
+    """
+    智能体间消息（跨 Agent 通信载体）
+
+    用于多智能体协作场景：
+    - Coordinator 向 Researcher 分派研究任务
+    - Researcher 向 Analyst 传递数据
+    - Reviewer 向 Writer 返回修改意见
+    """
+
+    message_id: str = Field(default_factory=lambda: f"iam_{uuid.uuid4().hex[:8]}")
+    from_agent: str = Field(..., description="发送方 Agent ID")
+    to_agent: str = Field(..., description="接收方 Agent ID")
+    role: AgentRole = Field(default=AgentRole.EXECUTOR, description="发送方角色")
+    message_type: str = Field(default="task", description="消息类型: task / result / feedback / error")
+    content: str = Field(..., description="消息正文")
+    context: Dict[str, Any] = Field(default_factory=dict, description="附加上下文")
+    reply_to: Optional[str] = Field(None, description="回复的消息 ID")
+    timestamp: Optional[str] = Field(default=None)
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.timestamp:
+            from datetime import datetime
+            self.timestamp = datetime.now().isoformat()
+
+
+@runtime_checkable
+class CollaborationProtocol(Protocol):
+    """
+    多智能体协作协议（接口预留）
+
+    当前单智能体架构下不启用，为未来多智能体协作预留扩展点。
+    实现此协议的 Agent 可以参与多智能体工作流。
+
+    设计原则：
+    - 最小化接口，只定义通信原语
+    - 与 AgentProtocol 解耦，可选实现
+    - 消息驱动，无共享状态
+    """
+
+    @property
+    def agent_id(self) -> str:
+        """Agent 唯一标识"""
+        ...
+
+    @property
+    def role(self) -> AgentRole:
+        """Agent 在协作中的角色"""
+        ...
+
+    async def receive_message(self, message: InterAgentMessage) -> Optional[InterAgentMessage]:
+        """
+        接收来自其他 Agent 的消息并返回响应
+
+        Args:
+            message: 收到的消息
+
+        Returns:
+            响应消息，或 None（无需回复）
+        """
+        ...
+
+    async def delegate_task(
+        self,
+        target_agent_id: str,
+        task_description: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> InterAgentMessage:
+        """
+        向目标 Agent 委派任务
+
+        Args:
+            target_agent_id: 目标 Agent ID
+            task_description: 任务描述
+            context: 任务上下文
+
+        Returns:
+            目标 Agent 的响应消息
+        """
+        ...
+
+
 # ==================== 类型别名 ====================
 
 # Agent 执行结果生成器类型
@@ -191,7 +291,6 @@ def get_agent_type(agent: AgentProtocol) -> str:
     Returns:
         Agent 类名（通常是 "Agent"）或执行策略名称
     """
-    # 优先返回执行策略名称（如果有）
     if hasattr(agent, "schema") and hasattr(agent.schema, "execution_strategy"):
         strategy = agent.schema.execution_strategy
         if strategy:

@@ -193,7 +193,7 @@ plan(action="update", todo_id="1", status="completed", result="已完成xxx")
 
 | 当前状态 | 下一步行为 |
 |---------|-----------|
-| 收到用户Query | Planning → 生成Plan（plan(action="create")） |
+| 收到用户Query | 先判断：流程固定还是需要推理？（见下方 plan vs pipeline） |
 | Plan有下一个Step | Execute → 调用工具 |
 | 工具返回成功 | **🚨 必须调用 plan(action="update")** → 下一Step |
 | 工具首次失败 | Reflection → 分析根因 → 换一种**完全不同的方法**重试 |
@@ -201,6 +201,22 @@ plan(action="update", todo_id="1", status="completed", result="已完成xxx")
 | 需要用户输入 | 直接回复请用户补充信息 |
 | 所有Steps完成 | **🚨 先输出文本总结** → 再调用收尾工具 → end_turn |
 | 质量不达标 | Reflection → 添加新Steps → 重试 |
+
+### plan 与 pipeline 的选择
+
+**不要让用户选。你根据任务性质自行判断：**
+
+| 判断依据 | 用 plan | 用 pipeline |
+|---------|--------|------------|
+| 步骤能提前全部确定吗？ | 不能，需要边做边调整 | 能，先A再B最后C |
+| 每步需要你思考判断吗？ | 是，要分析中间结果 | 不需要，按固定流程走 |
+| 用户想后台执行吗？ | — | "做完告诉我"→ run_background |
+| 用户要恢复之前的任务？ | — | "继续上次的"→ resume |
+
+**示例**：
+- "帮我分析这个市场的前景" → **plan**（需要搜索、判断、整理，每步依赖推理）
+- "先搜 5 家竞品信息，再写对比表格，最后生成 PDF 报告" → **pipeline**（三步固定流程）
+- "帮我做个深度调研，做完发通知" → **pipeline + run_background**（固定流程 + 后台执行）
 
 **⚠️ 反思的核心原则：重复 ≠ 反思**
 
