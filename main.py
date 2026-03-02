@@ -52,6 +52,7 @@ load_config_to_env()
 # ==================== 本地模块 ====================
 from routers import (
     agents_router,
+    background_tasks_router,
     chat_router,
     conversation_router,
     files_router,
@@ -470,6 +471,7 @@ app.include_router(models_router)
 app.include_router(settings_router)
 app.include_router(playbook_router)
 app.include_router(scheduled_tasks_router)
+app.include_router(background_tasks_router)
 
 # 实时通信（WebSocket）
 app.include_router(websocket_router)

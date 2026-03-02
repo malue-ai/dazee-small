@@ -15,6 +15,7 @@ tool_classification:
   serial_only_tools:
     - plan
     - hitl
+    - pipeline
 
   # 简单任务的精简工具集（complexity=simple 时使用，省 token）
   simple_task_tools:
@@ -710,6 +711,100 @@ capabilities:
             type: string
             description: 任务描述（agent_task）
     required: [operation]
+
+- name: pipeline
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  state_category: executing
+  cache_stable: false
+  implementation:
+    module: tools.pipeline_tool
+    class: PipelineTool
+  capabilities:
+    - workflow_automation
+    - pipeline_execution
+  priority: 85
+  cost:
+    time: variable
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      多步骤任务自动执行。当用户的任务可以拆成「先做A，再做B，最后做C」的固定流程时使用。
+
+      适用场景（用户可能这样说）：
+      - "帮我搜一下这几家公司的信息，整理成对比报告"
+      - "先查资料，再写分析，最后生成 PDF"
+      - "跑一遍标准的竞品分析流程"
+      - "做完通知我" / "放后台跑吧"（→ 用 run_background）
+      - "继续上次没做完的"（→ 用 resume）
+
+      不适用（用这些场景用 plan）：
+      - 需要你每步思考和判断的探索性任务
+      - 用户只问一个问题
+      - 步骤不确定、需要根据中间结果动态调整的任务
+
+      选择依据：步骤能提前确定 → pipeline；需要边做边想 → plan。
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [define_and_run, run_background, resume, status]
+        description: "define_and_run: 定义并执行; run_background: 后台执行; resume: 断点恢复; status: 查询状态"
+      pipeline:
+        type: object
+        description: 管道定义（define_and_run / run_background 时必需）
+        properties:
+          name:
+            type: string
+            description: 管道名称
+          steps:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+                skill:
+                  type: string
+                  description: Skill 名称（skill/tool/code 三选一）
+                tool:
+                  type: string
+                  description: Tool 名称
+                code:
+                  type: string
+                  description: Python 代码
+                params:
+                  type: object
+                depends_on:
+                  type: array
+                  items:
+                    type: string
+                approval:
+                  type: boolean
+                  description: 是否需要审批
+                  default: false
+                timeout_seconds:
+                  type: integer
+                  default: 300
+              required: [id]
+            description: 步骤列表
+        required: [name, steps]
+      resume_token:
+        type: string
+        description: 恢复令牌（resume 时必需）
+      task_id:
+        type: string
+        description: 任务 ID（status 时可选）
+      context:
+        type: object
+        description: 初始上下文数据
+    required: [action]
 
 # ========== 动态工具（Level 2，按需加载）==========
 

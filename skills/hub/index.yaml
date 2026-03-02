@@ -1,0 +1,224 @@
+# ============================================================
+# Skill Hub Index — 社区 Skill 索引
+# ============================================================
+#
+# 轻量级 Skill 发现和分发机制。
+# 索引文件托管在 GitHub，skill-finder 从此文件搜索和安装 Skill。
+#
+# 字段说明：
+#   name:        Skill 唯一标识（小写+连字符）
+#   version:     语义版本号
+#   description: 一句话描述（用于搜索匹配）
+#   author:      作者
+#   repo:        GitHub 仓库（owner/repo 格式）
+#   path:        SKILL.md 在仓库中的路径
+#   tags:        标签列表（用于分类搜索）
+#   os:          支持的平台 [common/darwin/win32/linux]
+#   backend_type: local/tool/mcp/api
+#   requires:    依赖声明
+#     bins:      需要的命令行工具
+#     env:       需要的环境变量（API Key 等）
+#     packages:  需要的 Python 包
+#   stars:       推荐指数（1-5）
+#   updated_at:  最后更新时间
+#
+# 新增 Skill 流程：
+#   1. 在你的 GitHub 仓库创建 skills/<skill-name>/SKILL.md
+#   2. 在此文件 skills 列表末尾追加一条记录
+#   3. 提交 PR 到本仓库
+
+hub:
+  name: "ZenFlux Skill Hub"
+  version: "1.0.0"
+  description: "社区 Skill 索引 — 发现、安装、共享"
+  updated_at: "2026-03-02"
+
+skills:
+
+  # ==================== 搜索与信息获取 ====================
+
+  - name: tavily-search
+    version: "1.0.0"
+    description: "Tavily AI 优化搜索引擎，为 AI Agent 设计的搜索 API"
+    author: zenflux
+    repo: zenflux-ai/skill-hub
+    path: skills/tavily-search/SKILL.md
+    tags: [search, web, ai-search]
+    os: [common]
+    backend_type: local
+    requires:
+      env: [TAVILY_API_KEY]
+    stars: 5
+    updated_at: "2026-03-01"
+
+  - name: serper-search
+    version: "1.0.0"
+    description: "Serper Google 搜索 API，高质量搜索结果"
+    author: zenflux
+    repo: zenflux-ai/skill-hub
+    path: skills/serper-search/SKILL.md
+    tags: [search, google, web]
+    os: [common]
+    backend_type: local
+    requires:
+      env: [SERPER_API_KEY]
+    stars: 4
+    updated_at: "2026-02-28"
+
+  # ==================== 数据处理 ====================
+
+  - name: sqlite-query
+    version: "1.0.0"
+    description: "SQLite 数据库查询与管理，支持内存数据库和文件数据库"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/sqlite-query/SKILL.md
+    tags: [database, sql, sqlite, data]
+    os: [common]
+    backend_type: local
+    requires:
+      packages: [sqlite-utils]
+    stars: 4
+    updated_at: "2026-02-20"
+
+  - name: json-transformer
+    version: "1.0.0"
+    description: "JSON 数据解析、转换和过滤，支持 JSONPath 查询"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/json-transformer/SKILL.md
+    tags: [data, json, transform]
+    os: [common]
+    backend_type: local
+    stars: 3
+    updated_at: "2026-02-15"
+
+  # ==================== 通讯与社交 ====================
+
+  - name: telegram-bot
+    version: "1.0.0"
+    description: "Telegram Bot 消息发送与管理，支持富文本、图片、文件"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/telegram-bot/SKILL.md
+    tags: [messaging, telegram, bot, notification]
+    os: [common]
+    backend_type: local
+    requires:
+      env: [TELEGRAM_BOT_TOKEN]
+    stars: 4
+    updated_at: "2026-02-25"
+
+  - name: discord-bot
+    version: "1.0.0"
+    description: "Discord Bot 消息发送与频道管理"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/discord-bot/SKILL.md
+    tags: [messaging, discord, bot]
+    os: [common]
+    backend_type: local
+    requires:
+      env: [DISCORD_BOT_TOKEN]
+    stars: 3
+    updated_at: "2026-02-20"
+
+  - name: slack-webhook
+    version: "1.0.0"
+    description: "Slack Webhook 消息推送，支持 Block Kit 富文本"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/slack-webhook/SKILL.md
+    tags: [messaging, slack, webhook, notification]
+    os: [common]
+    backend_type: local
+    requires:
+      env: [SLACK_WEBHOOK_URL]
+    stars: 3
+    updated_at: "2026-02-18"
+
+  # ==================== 开发工具 ====================
+
+  - name: docker-manager
+    version: "1.0.0"
+    description: "Docker 容器管理：启动、停止、日志查看、镜像构建"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/docker-manager/SKILL.md
+    tags: [devops, docker, container]
+    os: [common]
+    backend_type: local
+    requires:
+      bins: [docker]
+    stars: 4
+    updated_at: "2026-02-22"
+
+  - name: git-helper
+    version: "1.0.0"
+    description: "Git 操作助手：智能提交、分支管理、冲突解决建议"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/git-helper/SKILL.md
+    tags: [dev, git, version-control]
+    os: [common]
+    backend_type: local
+    requires:
+      bins: [git]
+    stars: 4
+    updated_at: "2026-02-20"
+
+  # ==================== 自动化 ====================
+
+  - name: webhook-trigger
+    version: "1.0.0"
+    description: "Webhook 触发器：监听 HTTP 回调并触发 Agent 动作"
+    author: zenflux
+    repo: zenflux-ai/skill-hub
+    path: skills/webhook-trigger/SKILL.md
+    tags: [automation, webhook, trigger]
+    os: [common]
+    backend_type: local
+    stars: 3
+    updated_at: "2026-02-15"
+
+  - name: rss-reader
+    version: "1.0.0"
+    description: "RSS/Atom 订阅源读取与解析，支持全文提取"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/rss-reader/SKILL.md
+    tags: [automation, rss, news, feed]
+    os: [common]
+    backend_type: local
+    requires:
+      packages: [feedparser]
+    stars: 3
+    updated_at: "2026-02-10"
+
+  # ==================== AI / LLM ====================
+
+  - name: prompt-optimizer
+    version: "1.0.0"
+    description: "提示词优化器：分析、改进、A/B 测试提示词效果"
+    author: zenflux
+    repo: zenflux-ai/skill-hub
+    path: skills/prompt-optimizer/SKILL.md
+    tags: [ai, prompt, optimization]
+    os: [common]
+    backend_type: local
+    stars: 4
+    updated_at: "2026-02-28"
+
+  - name: embedding-search
+    version: "1.0.0"
+    description: "向量嵌入搜索：文本转向量 + 余弦相似度检索"
+    author: community
+    repo: zenflux-ai/skill-hub
+    path: skills/embedding-search/SKILL.md
+    tags: [ai, embedding, search, vector]
+    os: [common]
+    backend_type: local
+    requires:
+      packages: [sentence-transformers]
+    stars: 4
+    updated_at: "2026-02-25"

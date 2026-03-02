@@ -45,6 +45,12 @@ const routes = [
     component: () => import('@/views/tasks/ScheduledTasksView.vue'),
     meta: { layout: 'dashboard' }
   },
+  {
+    path: '/background-tasks',
+    name: 'background-tasks',
+    component: () => import('@/views/tasks/BackgroundTasksView.vue'),
+    meta: { layout: 'dashboard' }
+  },
   // ==================== 新建项目 ====================
   {
     path: '/create-project',

@@ -103,7 +103,59 @@ for group_name, group_info in groups.items():
 
 ## 功能 2：在线搜索社区 Skill
 
-### 方式 A：通过 skills.sh 搜索（推荐）
+### 方式 A：通过 Skill Hub 索引搜索（推荐）
+
+从本地 Skill Hub 索引中搜索社区 Skill（离线可用、速度快）：
+
+```python
+import os
+import yaml
+from pathlib import Path
+
+def search_skill_hub(query, tags=None):
+    """从 Skill Hub 索引搜索 Skill"""
+    index_path = Path("skills/hub/index.yaml")
+    if not index_path.exists():
+        print("Skill Hub 索引不存在，尝试方式 B")
+        return []
+
+    index = yaml.safe_load(index_path.read_text(encoding="utf-8"))
+    skills = index.get("skills", [])
+    query_lower = query.lower()
+
+    results = []
+    for s in skills:
+        name = s.get("name", "")
+        desc = s.get("description", "")
+        skill_tags = s.get("tags", [])
+
+        # 名称、描述、标签匹配
+        match = (
+            query_lower in name.lower()
+            or query_lower in desc.lower()
+            or any(query_lower in t.lower() for t in skill_tags)
+        )
+        # 标签过滤
+        if tags:
+            match = match and any(t in skill_tags for t in tags)
+
+        if match:
+            results.append(s)
+
+    # 按推荐指数排序
+    results.sort(key=lambda x: x.get("stars", 0), reverse=True)
+    return results
+
+results = search_skill_hub("搜索关键词")
+for r in results:
+    stars = "⭐" * r.get("stars", 0)
+    print(f"📦 {r['name']} {stars}")
+    print(f"   {r['description']}")
+    print(f"   标签: {', '.join(r.get('tags', []))}")
+    print(f"   来源: {r.get('repo', '')}")
+```
+
+### 方式 B：通过 skills.sh 搜索
 
 使用 `npx skills find` 命令搜索开放 Skill 生态系统：
 
@@ -111,9 +163,9 @@ for group_name, group_info in groups.items():
 npx skills find "搜索关键词"
 ```
 
-如果用户没有安装 Node.js 或 npx 不可用，回退到方式 B。
+如果用户没有安装 Node.js 或 npx 不可用，回退到方式 C。
 
-### 方式 B：通过 GitHub API 搜索
+### 方式 C：通过 GitHub API 搜索
 
 直接搜索知名 Skill 仓库：
 
@@ -139,7 +191,6 @@ def search_github_skills(query, repos=None):
                 for item in data.get("items", []):
                     path = item.get("path", "")
                     html_url = item.get("html_url", "")
-                    # 提取 skill 名称（目录名）
                     parts = path.split("/")
                     if len(parts) >= 2:
                         skill_name = parts[-2]
@@ -160,7 +211,7 @@ for r in results:
     print(f"   {r['url']}")
 ```
 
-### 方式 C：浏览 skills.sh 网站
+### 方式 D：浏览 skills.sh 网站
 
 如果以上方式都不方便，引导用户访问 https://skills.sh/ 在线浏览和搜索。
 
@@ -168,7 +219,57 @@ for r in results:
 
 ## 功能 3：安装社区 Skill
 
-从 GitHub 下载 Skill 并安装到当前实例。
+从 Skill Hub 索引或 GitHub 下载 Skill 并安装到当前实例。
+
+### 步骤 0：从 Hub 索引一键安装（推荐）
+
+如果用户通过 Skill Hub 找到了想要的 Skill，可以直接安装：
+
+```python
+import os
+import yaml
+import urllib.request
+from pathlib import Path
+
+def install_from_hub(skill_name):
+    """从 Skill Hub 索引一键安装"""
+    index_path = Path("skills/hub/index.yaml")
+    if not index_path.exists():
+        print("Skill Hub 索引不存在")
+        return None
+
+    index = yaml.safe_load(index_path.read_text(encoding="utf-8"))
+    skills = index.get("skills", [])
+
+    # 查找 Skill
+    skill_info = next((s for s in skills if s["name"] == skill_name), None)
+    if not skill_info:
+        print(f"Hub 中未找到 Skill: {skill_name}")
+        return None
+
+    repo = skill_info["repo"]
+    skill_path = skill_info["path"]
+
+    # 下载
+    content = download_skill(repo, skill_path)
+    if not content:
+        return None
+
+    # 提示依赖信息
+    requires = skill_info.get("requires", {})
+    if requires:
+        print(f"⚠️ 此 Skill 需要以下依赖:")
+        if requires.get("bins"):
+            print(f"   命令行工具: {', '.join(requires['bins'])}")
+        if requires.get("env"):
+            print(f"   环境变量: {', '.join(requires['env'])}")
+        if requires.get("packages"):
+            print(f"   Python 包: {', '.join(requires['packages'])}")
+
+    return content
+
+content = install_from_hub("要安装的skill名称")
+```
 
 ### 步骤 1：下载 SKILL.md
 
@@ -179,7 +280,6 @@ from pathlib import Path
 
 def download_skill(repo, skill_path):
     """从 GitHub 下载 SKILL.md"""
-    # 构建 raw URL
     raw_url = f"https://raw.githubusercontent.com/{repo}/main/{skill_path}"
     req = urllib.request.Request(raw_url)
     with urllib.request.urlopen(req, timeout=15) as resp:
