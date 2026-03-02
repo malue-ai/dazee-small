@@ -819,9 +819,10 @@ fn main() {
                 .build()?;
 
             let _tray = TrayIconBuilder::new()
-                .icon(tauri::include_image!("./icons/32x32.png"))
+                .icon(tauri::include_image!("./icons/128x128@2x.png"))
                 .icon_as_template(true)
                 .menu(&tray_menu)
+                .show_menu_on_left_click(false)
                 .tooltip("xiaodazi")
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
