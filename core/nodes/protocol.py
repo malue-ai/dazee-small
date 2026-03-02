@@ -21,7 +21,8 @@ class NodeCommand(Enum):
     - system.which: 检查可执行文件是否存在
     - system.notify: 发送系统通知
     - system.execApprovals.get: 获取当前执行审批策略
-    - system.execApprovals.set: 更新执行审批策略
+    - system.execApprovals.set: 更新执行审批策略（全量替换）
+    - system.execApprovals.addRule: 添加单条审批规则（HITL 授权后使用）
     - camera.snap: 摄像头拍照
     - camera.list: 枚举可用摄像头
     - camera.clip: 摄像头录制短视频
@@ -43,6 +44,7 @@ class NodeCommand(Enum):
     SYSTEM_NOTIFY = "system.notify"
     SYSTEM_EXEC_APPROVALS_GET = "system.execApprovals.get"
     SYSTEM_EXEC_APPROVALS_SET = "system.execApprovals.set"
+    SYSTEM_EXEC_APPROVALS_ADD_RULE = "system.execApprovals.addRule"
     CAMERA_SNAP = "camera.snap"
     CAMERA_LIST = "camera.list"
     CAMERA_CLIP = "camera.clip"
@@ -135,6 +137,7 @@ class NodeInvokeResponse:
     ok: bool
     payload: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
     elapsed_ms: Optional[int] = None
 
     @classmethod
@@ -145,9 +148,18 @@ class NodeInvokeResponse:
         return cls(id=request_id, ok=True, payload=payload, elapsed_ms=elapsed_ms)
 
     @classmethod
-    def failure(cls, request_id: str, error: str, elapsed_ms: int = 0) -> "NodeInvokeResponse":
+    def failure(
+        cls,
+        request_id: str,
+        error: str,
+        elapsed_ms: int = 0,
+        error_code: Optional[str] = None,
+    ) -> "NodeInvokeResponse":
         """创建失败响应"""
-        return cls(id=request_id, ok=False, error=error, elapsed_ms=elapsed_ms)
+        return cls(
+            id=request_id, ok=False, error=error,
+            error_code=error_code, elapsed_ms=elapsed_ms,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -158,6 +170,8 @@ class NodeInvokeResponse:
             result["payload"] = self.payload
         if self.error is not None:
             result["error"] = self.error
+        if self.error_code is not None:
+            result["error_code"] = self.error_code
         if self.elapsed_ms is not None:
             result["elapsed_ms"] = self.elapsed_ms
         return result

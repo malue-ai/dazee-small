@@ -37,6 +37,7 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo "")"
 if [[ -z "$SCRIPT_DIR" || "$SCRIPT_DIR" == /dev/fd* || "$SCRIPT_DIR" == /dev ]]; then
   PROJECT_ROOT="$(pwd)"
+  SCRIPT_DIR="$PROJECT_ROOT/scripts"
 else
   PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
@@ -91,19 +92,171 @@ ensure_brew_path() {
   fi
 }
 
+# ==================== 镜像源配置 ====================
+#
+# 当官方源因网络问题安装失败时，自动切换到国内镜像源重试。
+# 镜像源列表：
+#   Homebrew — 清华 TUNA
+#   pip      — 清华 TUNA
+#   npm      — npmmirror（原淘宝源）
+#   Rust     — 中科大 USTC
+#
+
+USING_MIRROR=false
+PIP_MIRROR_ARGS=""
+RUST_INSTALL_URL="https://sh.rustup.rs"
+HOMEBREW_MIRROR_INSTALL_URL="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install/raw/HEAD/install.sh"
+CURL_TIMEOUT="--connect-timeout 10 --max-time 30"
+
+check_network_and_setup_mirrors() {
+  info "检测网络连通性..."
+  if curl --connect-timeout 5 -sI https://github.com >/dev/null 2>&1; then
+    ok "github.com 可达，使用官方源"
+    return 0
+  fi
+  warn "无法连接 github.com（可能未开启 VPN），自动启用全部国内镜像源"
+  setup_brew_mirror
+  setup_pip_mirror
+  setup_npm_mirror
+  setup_rust_mirror
+  echo ""
+}
+
+setup_brew_mirror() {
+  if [ "$USING_MIRROR" = true ] && [ -n "${HOMEBREW_BOTTLE_DOMAIN:-}" ]; then
+    return 0
+  fi
+  warn "切换 Homebrew 到国内镜像源（清华 TUNA）..."
+  export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
+  export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
+  export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
+  export HOMEBREW_BOTTLE_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles"
+  USING_MIRROR=true
+}
+
+setup_pip_mirror() {
+  if [ -n "$PIP_MIRROR_ARGS" ]; then
+    return 0
+  fi
+  warn "切换 pip 到国内镜像源（清华 TUNA）..."
+  PIP_MIRROR_ARGS="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
+  USING_MIRROR=true
+}
+
+setup_npm_mirror() {
+  if [ -n "${npm_config_registry:-}" ]; then
+    return 0
+  fi
+  warn "切换 npm 到国内镜像源（npmmirror）..."
+  export npm_config_registry="https://registry.npmmirror.com"
+  USING_MIRROR=true
+}
+
+setup_rust_mirror() {
+  if [ "$RUST_INSTALL_URL" != "https://sh.rustup.rs" ]; then
+    return 0
+  fi
+  warn "切换 Rust 到国内镜像源（中科大 USTC）..."
+  export RUSTUP_DIST_SERVER="https://mirrors.ustc.edu.cn/rust-static"
+  export RUSTUP_UPDATE_ROOT="https://mirrors.ustc.edu.cn/rust-static/rustup"
+  RUST_INSTALL_URL="https://mirrors.ustc.edu.cn/misc/rustup-install.sh"
+  USING_MIRROR=true
+}
+
+brew_install_or_mirror() {
+  local pkg="$1"
+  local arch_prefix="${2:-}"
+
+  if [ -n "${HOMEBREW_BOTTLE_DOMAIN:-}" ]; then
+    $arch_prefix brew install "$pkg" 2>&1
+    return $?
+  fi
+
+  if $arch_prefix brew install "$pkg" 2>&1; then
+    return 0
+  fi
+
+  warn "brew install $pkg 失败，切换到镜像源重试..."
+  setup_brew_mirror
+  $arch_prefix brew install "$pkg" 2>&1
+}
+
+pip_install_or_mirror() {
+  local pip_cmd="$1"
+  shift
+  local arch_prefix=""
+  if [ "$1" = "--arch-prefix" ]; then
+    shift
+    arch_prefix="$1"
+    shift
+  fi
+
+  if [ -n "$PIP_MIRROR_ARGS" ]; then
+    $arch_prefix $pip_cmd install $PIP_MIRROR_ARGS "$@" 2>&1
+    return $?
+  fi
+
+  if $arch_prefix $pip_cmd install "$@" 2>&1; then
+    return 0
+  fi
+
+  warn "pip install 失败，切换到镜像源重试..."
+  setup_pip_mirror
+  $arch_prefix $pip_cmd install $PIP_MIRROR_ARGS "$@" 2>&1
+}
+
+npm_install_or_mirror() {
+  if [ -n "${npm_config_registry:-}" ]; then
+    npm install 2>&1
+    return $?
+  fi
+
+  if npm install 2>&1; then
+    return 0
+  fi
+
+  warn "npm install 失败，切换到镜像源重试..."
+  setup_npm_mirror
+  npm install 2>&1
+}
+
 # 自动安装 Homebrew（原生架构）
 install_homebrew() {
   if has_cmd brew; then
     return 0
   fi
+
+  if [ -n "${HOMEBREW_BOTTLE_DOMAIN:-}" ]; then
+    info "安装 Homebrew（镜像源）..."
+    /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL "$HOMEBREW_MIRROR_INSTALL_URL")" 2>&1 || true
+    ensure_brew_path
+    if ! has_cmd brew; then
+      fail "Homebrew 安装失败，请手动安装: https://brew.sh"
+    fi
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    ok "Homebrew 安装完成（镜像源）"
+    return 0
+  fi
+
   info "安装 Homebrew..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+  if /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" 2>&1; then
+    ensure_brew_path
+    if has_cmd brew; then
+      export HOMEBREW_NO_AUTO_UPDATE=1
+      ok "Homebrew 安装完成"
+      return 0
+    fi
+  fi
+
+  warn "官方源安装失败，尝试使用国内镜像源..."
+  setup_brew_mirror
+  /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL "$HOMEBREW_MIRROR_INSTALL_URL")" 2>&1 || true
   ensure_brew_path
   if ! has_cmd brew; then
-    fail "Homebrew 安装失败，请手动安装: https://brew.sh"
+    fail "Homebrew 安装失败（官方源和镜像源均失败），请手动安装: https://brew.sh"
   fi
   export HOMEBREW_NO_AUTO_UPDATE=1
-  ok "Homebrew 安装完成"
+  ok "Homebrew 安装完成（镜像源）"
 }
 
 # 确保 Homebrew 可用（需要时自动安装）
@@ -141,6 +294,8 @@ info "Step 0/4: 检测构建环境..."
 echo ""
 info "目标架构: $TARGET_ARCH (本机: $NATIVE_ARCH)"
 echo ""
+
+check_network_and_setup_mirrors
 
 INSTALLED_SOMETHING=false
 
@@ -195,11 +350,8 @@ else
   if [ "$(uname)" = "Darwin" ]; then
     ensure_brew
     info "通过 Homebrew 安装 Python ${PYTHON_VERSION}..."
-    # brew install 可能因 keg-only 警告、已安装未链接等返回非零，
-    # 不能让 set -e 直接杀掉脚本，需手动检查安装结果。
-    brew install "python@${PYTHON_VERSION}" 2>&1 || true
+    brew_install_or_mirror "python@${PYTHON_VERSION}" || true
     ensure_brew_path
-    # brew 安装的 keg-only Python 可能不在 PATH 中，显式添加
     BREW_PYTHON_PREFIX=$(brew --prefix "python@${PYTHON_VERSION}" 2>/dev/null || true)
     if [ -n "$BREW_PYTHON_PREFIX" ] && [ -d "$BREW_PYTHON_PREFIX/bin" ]; then
       export PATH="$BREW_PYTHON_PREFIX/bin:$PATH"
@@ -229,7 +381,7 @@ if has_cmd node; then
     if [ "$(uname)" = "Darwin" ]; then
       ensure_brew
       info "通过 Homebrew 升级 Node.js..."
-      brew install "node@${NODE_MAJOR_VERSION}" 2>&1 || true
+      brew_install_or_mirror "node@${NODE_MAJOR_VERSION}" || true
       brew link --overwrite "node@${NODE_MAJOR_VERSION}" 2>/dev/null || true
       ensure_brew_path
     else
@@ -245,7 +397,7 @@ else
   if [ "$(uname)" = "Darwin" ]; then
     ensure_brew
     info "通过 Homebrew 安装 Node.js ${NODE_MAJOR_VERSION}..."
-    brew install "node@${NODE_MAJOR_VERSION}" 2>&1 || true
+    brew_install_or_mirror "node@${NODE_MAJOR_VERSION}" || true
     brew link --overwrite "node@${NODE_MAJOR_VERSION}" 2>/dev/null || true
     ensure_brew_path
   else
@@ -265,8 +417,17 @@ else
     fail "Rust 未安装（--dry-run 模式不自动安装）"
   fi
   info "通过 rustup 安装 Rust..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  source "$HOME/.cargo/env"
+  curl $CURL_TIMEOUT --proto '=https' --tlsv1.2 -sSf "$RUST_INSTALL_URL" | sh -s -- -y 2>&1 || true
+  [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+  if ! has_cmd rustc; then
+    if [ "$RUST_INSTALL_URL" = "https://sh.rustup.rs" ]; then
+      warn "官方源安装失败，切换到镜像源重试..."
+      setup_rust_mirror
+    fi
+    curl $CURL_TIMEOUT --proto '=https' --tlsv1.2 -sSf "$RUST_INSTALL_URL" | sh -s -- -y
+    [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+    has_cmd rustc || fail "Rust 安装失败，请手动安装: https://rustup.rs"
+  fi
   INSTALLED_SOMETHING=true
   ok "Rust 安装完成 ($(rustc --version | head -1))"
 fi
@@ -305,7 +466,7 @@ info "检查 Python 依赖..."
 
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec; do
     if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
@@ -314,7 +475,7 @@ if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
 
   if [ "$NEEDS_INSTALL" = true ]; then
     info "安装 Python 依赖 (requirements.txt)..."
-    if ! $PYTHON_CMD -m pip install -r "$PROJECT_ROOT/requirements.txt" --quiet; then
+    if ! pip_install_or_mirror "$PYTHON_CMD -m pip" -r "$PROJECT_ROOT/requirements.txt"; then
       fail "Python 依赖安装失败！请检查 Python 版本（当前: $($PYTHON_CMD --version 2>&1)，需要 3.12 ~ 3.13）"
     fi
     INSTALLED_SOMETHING=true
@@ -329,7 +490,7 @@ fi
 if [ "$SKIP_BACKEND" = false ]; then
   if ! $PYTHON_CMD -c "import PyInstaller" 2>/dev/null; then
     info "安装 PyInstaller..."
-    $PYTHON_CMD -m pip install pyinstaller --quiet
+    pip_install_or_mirror "$PYTHON_CMD -m pip" pyinstaller
     INSTALLED_SOMETHING=true
     ok "PyInstaller 安装完成"
   else
@@ -344,7 +505,7 @@ info "检查前端依赖..."
 cd "$FRONTEND_DIR"
 if [ ! -d "node_modules" ]; then
   info "安装前端 npm 依赖..."
-  npm install
+  npm_install_or_mirror
   INSTALLED_SOMETHING=true
   ok "前端依赖安装完成"
 else
@@ -398,7 +559,13 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
       fail "x86_64 Homebrew 未安装（--dry-run 模式不自动安装）"
     fi
     info "安装 x86_64 Homebrew（/usr/local/）..."
-    arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+    if [ -n "${HOMEBREW_BOTTLE_DOMAIN:-}" ]; then
+      arch -x86_64 /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL "$HOMEBREW_MIRROR_INSTALL_URL")" 2>&1 || true
+    elif ! arch -x86_64 /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" 2>&1; then
+      warn "官方源安装失败，尝试使用国内镜像源..."
+      setup_brew_mirror
+      arch -x86_64 /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL "$HOMEBREW_MIRROR_INSTALL_URL")" 2>&1 || true
+    fi
     if [ ! -x "/usr/local/bin/brew" ]; then
       fail "x86_64 Homebrew 安装失败"
     fi
@@ -420,7 +587,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
       fail "x86_64 Python 未安装（--dry-run 模式不自动安装）"
     fi
     info "安装 x86_64 Python ${PYTHON_VERSION}..."
-    arch -x86_64 "$X86_BREW" install "python@${PYTHON_VERSION}" 2>&1 || true
+    brew_install_or_mirror "python@${PYTHON_VERSION}" "arch -x86_64" || true
     arch -x86_64 "$X86_BREW" link --overwrite "python@${PYTHON_VERSION}" 2>/dev/null || true
     # 显式添加 keg-only Python 路径
     X86_BREW_PREFIX=$(arch -x86_64 "$X86_BREW" --prefix "python@${PYTHON_VERSION}" 2>/dev/null || true)
@@ -448,7 +615,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
 
   # 安装 x86_64 依赖
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec; do
     if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
@@ -457,7 +624,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
 
   if [ "$NEEDS_INSTALL" = true ]; then
     info "安装 x86_64 Python 依赖..."
-    if ! arch -x86_64 "$VENV_X86_DIR/bin/pip" install -r "$PROJECT_ROOT/requirements.txt" --quiet; then
+    if ! pip_install_or_mirror "$VENV_X86_DIR/bin/pip" --arch-prefix "arch -x86_64" -r "$PROJECT_ROOT/requirements.txt"; then
       fail "x86_64 Python 依赖安装失败"
     fi
     ok "x86_64 Python 依赖安装完成"
@@ -469,7 +636,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
   if [ "$SKIP_BACKEND" = false ]; then
     if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import PyInstaller" 2>/dev/null; then
       info "安装 x86_64 PyInstaller..."
-      arch -x86_64 "$VENV_X86_DIR/bin/pip" install pyinstaller --quiet
+      pip_install_or_mirror "$VENV_X86_DIR/bin/pip" --arch-prefix "arch -x86_64" pyinstaller
       ok "x86_64 PyInstaller 安装完成"
     else
       ok "x86_64 PyInstaller 已安装"
@@ -487,7 +654,11 @@ fi
 
 echo ""
 if [ "$INSTALLED_SOMETHING" = true ]; then
-  info "环境准备完成（已安装缺失的依赖）"
+  if [ "$USING_MIRROR" = true ]; then
+    info "环境准备完成（已安装缺失的依赖，部分通过国内镜像源）"
+  else
+    info "环境准备完成（已安装缺失的依赖）"
+  fi
 else
   info "环境检测通过（所有依赖已就绪）"
 fi
@@ -535,6 +706,60 @@ if [ "$INSTANCE_CLEANED" -gt 0 ]; then
   info "已清理 $INSTANCE_CLEANED 个测试残留实例"
 else
   ok "instances/ 目录干净，无需清理"
+fi
+
+# ==================== Tauri Updater 签名密钥 ====================
+
+SIGN_KEY_FILE="$PROJECT_ROOT/keys/xiaodazi.key"
+SIGN_KEY_PUB_FILE="$PROJECT_ROOT/keys/xiaodazi.key.pub"
+SIGN_KEY_PWD_FILE="$PROJECT_ROOT/keys/xiaodazi.key.password"
+TAURI_CONF="$FRONTEND_DIR/src-tauri/tauri.conf.json"
+
+if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+  ok "使用环境变量中的 updater 签名密钥"
+elif [ -f "$SIGN_KEY_FILE" ] && [ -f "$SIGN_KEY_PWD_FILE" ]; then
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$SIGN_KEY_PWD_FILE")"
+  ok "已加载 updater 签名密钥（含密码文件）"
+else
+  info "生成本地构建签名密钥..."
+  DEV_KEY_PWD="dev-build"
+  mkdir -p "$PROJECT_ROOT/keys"
+  rm -f "$SIGN_KEY_FILE" "$SIGN_KEY_PUB_FILE" "$SIGN_KEY_PWD_FILE"
+  cd "$FRONTEND_DIR"
+  npx @tauri-apps/cli signer generate -w "$SIGN_KEY_FILE" -p "$DEV_KEY_PWD" --ci --force 2>&1 || true
+
+  if [ -f "$SIGN_KEY_FILE" ] && [ -f "$SIGN_KEY_PUB_FILE" ]; then
+    printf '%s' "$DEV_KEY_PWD" > "$SIGN_KEY_PWD_FILE"
+    export TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGN_KEY_FILE")"
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$DEV_KEY_PWD"
+
+    NEW_PUBKEY=$(cat "$SIGN_KEY_PUB_FILE")
+    $PYTHON_CMD -c "
+import json, sys
+with open('$TAURI_CONF', 'r') as f:
+    conf = json.load(f)
+conf.setdefault('plugins', {}).setdefault('updater', {})['pubkey'] = '''$NEW_PUBKEY'''
+with open('$TAURI_CONF', 'w') as f:
+    json.dump(conf, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+"
+    ok "已生成签名密钥并更新 tauri.conf.json pubkey"
+  else
+    warn "签名密钥生成失败，禁用 updater 签名..."
+    $PYTHON_CMD -c "
+import json
+with open('$TAURI_CONF', 'r') as f:
+    conf = json.load(f)
+conf['bundle']['createUpdaterArtifacts'] = False
+if 'plugins' in conf and 'updater' in conf['plugins']:
+    del conf['plugins']['updater']
+with open('$TAURI_CONF', 'w') as f:
+    json.dump(conf, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+"
+    warn "已禁用 createUpdaterArtifacts，应用将不支持自动更新"
+  fi
 fi
 
 # ==================== 确定构建目标 ====================
@@ -624,7 +849,7 @@ build_for_arch() {
 
   if [ ! -d "node_modules" ]; then
     info "安装前端依赖..."
-    npm install
+    npm_install_or_mirror
   fi
 
   unset CI

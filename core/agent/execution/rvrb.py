@@ -19,7 +19,7 @@ RVRBExecutor - RVR-B 执行策略
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Set
 
 from core.agent.backtrack import (
     BacktrackContext,
@@ -79,6 +79,11 @@ def _extract_tool_hints(tool_results: List[Dict[str, Any]]) -> List[str]:
     return hints
 
 
+async def _call_async(fn: Any) -> Any:
+    """Type-safe wrapper: callable() narrows to (...)->object which isn't Awaitable."""
+    return await fn()
+
+
 @dataclass
 class RVRBState:
     """RVR-B 循环状态（V12: 移除冗余 max_turns，统一由 ExecutorConfig 管理）"""
@@ -97,6 +102,14 @@ class RVRBState:
 
     # 失败路径记忆（记录"工具+参数→失败原因"，引导 LLM 避免重复犯错）
     failed_approaches: List[Dict[str, str]] = field(default_factory=list)
+
+    # 同工具连续失败计数（比精确签名去重更宽泛，捕获参数微调后仍失败的情况）
+    _tool_failure_streak: Dict[str, int] = field(default_factory=dict)
+    # 因连续失败被动态裁剪的工具（从 tools_for_llm 中移除，物理阻止 LLM 调用）
+    pruned_tools: Set[str] = field(default_factory=set)
+
+    # 回溯累计 token 消耗（用于事件上报）
+    total_backtrack_tokens: int = 0
 
     # Plan 相关
     current_plan: Optional[Dict[str, Any]] = None
@@ -153,6 +166,19 @@ class RVRBState:
     def can_backtrack(self) -> bool:
         """是否还可以回溯"""
         return self.backtrack_count < self.max_backtracks
+
+    def record_tool_outcome(self, tool_name: str, success: bool):
+        """记录工具执行结果，维护同工具连续失败计数"""
+        if success:
+            self._tool_failure_streak[tool_name] = 0
+        else:
+            self._tool_failure_streak[tool_name] = (
+                self._tool_failure_streak.get(tool_name, 0) + 1
+            )
+
+    def get_tool_failure_streak(self, tool_name: str) -> int:
+        """获取工具连续失败次数"""
+        return self._tool_failure_streak.get(tool_name, 0)
 
     def to_backtrack_context(
         self, error: ClassifiedError, max_turns: int = 200
@@ -677,6 +703,54 @@ class RVRBExecutor(RVRExecutor):
 
         return "\n".join(parts)
 
+    def _build_progressive_hint(
+        self,
+        tool_name: str,
+        error_msg: str,
+        state: RVRBState,
+    ) -> Optional[str]:
+        """
+        渐进式失败引导（Progressive Hint Escalation）
+
+        根据同一工具连续失败次数生成不同强度的引导，对推理能力弱的模型尤其有效：
+        - Level 1（首次失败）：温和引导，提示分析原因
+        - Level 2（连续2次）：显式约束，列出已试方法，禁止重复
+        - Level 3（连续3次+）：强制转向，工具从可用列表中动态移除
+        """
+        streak = state.get_tool_failure_streak(tool_name)
+        if streak <= 0:
+            return None
+
+        tool_approaches = [
+            fa for fa in state.failed_approaches if fa["tool"] == tool_name
+        ]
+
+        if streak == 1:
+            return (
+                f"[工具失败提醒] {tool_name} 执行失败: {error_msg[:150]}\n"
+                "请分析失败原因，调整参数或换用其他工具。"
+                "不要使用完全相同的参数重试。"
+            )
+
+        if streak == 2:
+            approaches_lines = "\n".join(
+                f"  - {fa['approach'][:80]} → {fa['reason'][:60]}"
+                for fa in tool_approaches[-3:]
+            )
+            return (
+                f"[系统约束] {tool_name} 已连续失败 {streak} 次。\n"
+                f"已尝试过的方法（禁止重复）:\n{approaches_lines}\n"
+                "要求：必须换用完全不同的工具，或使用根本不同的参数。"
+                "如果没有替代方案，直接基于已有信息回答用户。"
+            )
+
+        # streak >= 3: 强制转向（副作用：由调用方负责写入 pruned_tools）
+        return (
+            f"[强制转向] {tool_name} 已连续失败 {streak} 次，已被禁用。\n"
+            f"你无法再使用 {tool_name}。请使用其他工具完成任务，"
+            "或直接告诉用户当前无法完成该操作并说明原因。"
+        )
+
     async def execute(
         self,
         messages: List[Dict[str, Any]],
@@ -773,12 +847,28 @@ class RVRBExecutor(RVRExecutor):
             logger.info(f"{'='*60}")
 
             if cfg.enable_stream:
+                # 动态工具裁剪：连续失败的工具从可用列表中移除
+                effective_tools = tools_for_llm
+                if state.pruned_tools and tools_for_llm:
+                    candidate = [
+                        t for t in tools_for_llm
+                        if t.get("name") not in state.pruned_tools
+                    ]
+                    if candidate:
+                        effective_tools = candidate
+                        logger.info(f"🚫 动态裁剪工具: {state.pruned_tools}")
+                    else:
+                        logger.warning(
+                            f"⚠️ 所有工具均已裁剪，保底保留全部工具: "
+                            f"{state.pruned_tools}"
+                        )
+
                 # 流式处理（V10.1: 使用父类的 _process_stream）
                 async for event in self._process_stream(
                     llm=llm,
                     messages=llm_messages,
                     system_prompt=system_prompt,
-                    tools=tools_for_llm,
+                    tools=effective_tools,
                     ctx=ctx,
                     session_id=session_id,
                     broadcaster=broadcaster,
@@ -825,7 +915,7 @@ class RVRBExecutor(RVRExecutor):
                                         "wait_hitl_confirm_async"
                                     )
                                     if callable(wait_fn):
-                                        user_choice = await wait_fn()
+                                        user_choice = await _call_async(wait_fn)
                                         if user_choice == "approve":
                                             logger.info(
                                                 f"HITL 已批准: {pending_names}"
@@ -919,9 +1009,22 @@ class RVRBExecutor(RVRExecutor):
                         state.record_execution("complete", True, response.content)
                         break
             else:
-                # 非流式处理
+                # 非流式处理 - 动态工具裁剪
+                effective_tools_ns = tools_for_llm
+                if state.pruned_tools and tools_for_llm:
+                    candidate_ns = [
+                        t for t in tools_for_llm
+                        if t.get("name") not in state.pruned_tools
+                    ]
+                    if candidate_ns:
+                        effective_tools_ns = candidate_ns
+                        logger.info(f"🚫 动态裁剪工具(non-stream): {state.pruned_tools}")
+                    else:
+                        logger.warning(
+                            f"⚠️ 所有工具均已裁剪(non-stream)，保底保留全部工具"
+                        )
                 response = await llm.create_message_async(
-                    messages=llm_messages, system=system_prompt, tools=tools_for_llm
+                    messages=llm_messages, system=system_prompt, tools=effective_tools_ns  # type: ignore[arg-type]
                 )
 
                 usage_tracker.accumulate(response)
@@ -967,7 +1070,7 @@ class RVRBExecutor(RVRExecutor):
                                 "wait_hitl_confirm_async"
                             )
                             if callable(wait_fn):
-                                user_choice = await wait_fn()
+                                user_choice = await _call_async(wait_fn)
                                 if user_choice == "approve":
                                     logger.info(f"HITL 已批准（非流式）: {pending_names}")
                                 else:
@@ -1140,7 +1243,7 @@ class RVRBExecutor(RVRExecutor):
                             "wait_backtrack_confirm_async"
                         )
                         if callable(wait_fn):
-                            user_choice = await wait_fn()
+                            user_choice = await _call_async(wait_fn)
                             if user_choice == "rollback":
                                 _state_mgr = (context.extra or {}).get(
                                     "state_manager"
@@ -1166,6 +1269,8 @@ class RVRBExecutor(RVRExecutor):
                             else:
                                 # retry: 重置回溯计数，允许新一轮回溯
                                 state.backtrack_count = 0
+                                state.pruned_tools.clear()
+                                state._tool_failure_streak.clear()
                                 ctx.backtracks_exhausted = False
                                 ctx.backtrack_escalation = None
                                 ctx.consecutive_failures = 0
@@ -1193,7 +1298,7 @@ class RVRBExecutor(RVRExecutor):
                             "wait_intent_clarify_async"
                         )
                         if callable(wait_fn):
-                            clarification = await wait_fn()
+                            clarification = await _call_async(wait_fn)
                             append_user_message(
                                 llm_messages,
                                 [{"type": "text", "text": clarification}],
@@ -1240,7 +1345,7 @@ class RVRBExecutor(RVRExecutor):
                             "wait_cost_confirm_async"
                         )
                         if callable(wait_fn):
-                            user_choice = await wait_fn()
+                            user_choice = await _call_async(wait_fn)
                             if user_choice == "stop":
                                 ctx.stop_reason = "user_stop_cost_limit"
                                 break
@@ -1256,8 +1361,7 @@ class RVRBExecutor(RVRExecutor):
                     # 当 terminator 标记 _cost_warned 且 decision 正常继续时，发送提示
                     if (
                         _current_cost is not None
-                        and hasattr(cfg.terminator, "_cost_warned")
-                        and cfg.terminator._cost_warned
+                        and getattr(cfg.terminator, "_cost_warned", False)
                         and not decision.should_stop
                         and decision.finish_reason != FinishReason.COST_LIMIT
                     ):
@@ -1287,7 +1391,7 @@ class RVRBExecutor(RVRExecutor):
                                     "message": f"任务已执行 {ctx.current_turn} 轮，是否继续？",
                                 },
                             }
-                            await wait_fn()
+                            await _call_async(wait_fn)
                             cfg.terminator.confirm_long_running()
                 except Exception as e:
                     logger.warning(
@@ -1381,7 +1485,7 @@ class RVRBExecutor(RVRExecutor):
         broadcaster,
         usage_tracker,
         context_engineering=None,
-        plan_cache: Dict = None,
+        plan_cache: Optional[Dict] = None,
         plan_todo_tool=None,
         event_manager=None,
         state_manager=None,
@@ -1412,16 +1516,19 @@ class RVRBExecutor(RVRExecutor):
         flow = create_tool_execution_flow()
         content_handler = create_content_handler(broadcaster, ctx.block, session_id=session_id)
         tool_results = []
+        _round_failures = []
 
         for tool_call in client_tools:
             tool_name = tool_call["name"]
             tool_input = tool_call["input"] or {}
             tool_id = tool_call["id"]
 
+            _skip_compress = False
             try:
                 # 使用 ToolExecutionFlow 执行单个工具
                 result_info = await flow.execute_single(tool_call, tool_context)
                 result = result_info.result
+                _skip_compress = isinstance(result, dict) and result.pop("_skip_fresh_compress", False)
                 result_content = result if isinstance(result, str) else stable_json_dumps(result)
                 is_error = result_info.is_error
 
@@ -1452,6 +1559,10 @@ class RVRBExecutor(RVRExecutor):
                 if backtrack_event:
                     yield backtrack_event
 
+            state.record_tool_outcome(tool_name, not is_error)
+            if is_error:
+                _round_failures.append((tool_name, str(result_content)[:150]))
+
             yield await content_handler.emit_block(
                 session_id=session_id,
                 block_type="tool_result",
@@ -1461,7 +1572,8 @@ class RVRBExecutor(RVRExecutor):
             # Immediate compression: prevent large tool outputs from bloating context
             from core.context.compaction import compress_fresh_tool_result
             compressed_content = (
-                compress_fresh_tool_result(result_content)
+                result_content if _skip_compress
+                else compress_fresh_tool_result(result_content)
                 if isinstance(result_content, str) else result_content
             )
             tool_results.append(
@@ -1484,8 +1596,27 @@ class RVRBExecutor(RVRExecutor):
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
 
+        # 渐进式失败引导：工具失败即注入（不等回溯触发），按连续失败次数升级强度
+        if _round_failures:
+            _progressive_hints = []
+            for _tn, _err in _round_failures:
+                _hint = self._build_progressive_hint(_tn, _err, state)
+                if _hint:
+                    _progressive_hints.append(_hint)
+                    # streak >= 3 时由调用方负责写入 pruned_tools（保持 _build_progressive_hint 无副作用）
+                    if state.get_tool_failure_streak(_tn) >= 3:
+                        state.pruned_tools.add(_tn)
+            if _progressive_hints:
+                append_user_message(
+                    llm_messages, "\n\n".join(_progressive_hints)
+                )
+                logger.info(
+                    f"📊 渐进式失败引导: {len(_progressive_hints)} 条"
+                    f" (pruned={state.pruned_tools or 'none'})"
+                )
+
         # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
-        if ctx.detect_repeated_call(threshold=3):
+        if ctx.detect_repeated_call(threshold=4):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"
@@ -1533,7 +1664,7 @@ class RVRBExecutor(RVRExecutor):
         broadcaster,
         usage_tracker,
         context_engineering=None,
-        plan_cache: Dict = None,
+        plan_cache: Optional[Dict] = None,
         plan_todo_tool=None,
         event_manager=None,
         state_manager=None,
@@ -1564,16 +1695,19 @@ class RVRBExecutor(RVRExecutor):
 
         flow = create_tool_execution_flow()
         tool_results = []
+        _round_failures = []
 
         for tool_call in client_tools:
             tool_name = tool_call["name"]
             tool_input = tool_call["input"] or {}
             tool_id = tool_call["id"]
 
+            _skip_compress = False
             try:
                 # 使用 ToolExecutionFlow 执行单个工具
                 result_info = await flow.execute_single(tool_call, tool_context)
                 result = result_info.result
+                _skip_compress = isinstance(result, dict) and result.pop("_skip_fresh_compress", False)
                 result_content = result if isinstance(result, str) else stable_json_dumps(result)
                 is_error = result_info.is_error
 
@@ -1598,10 +1732,15 @@ class RVRBExecutor(RVRExecutor):
                     runtime_ctx=ctx,
                 )
 
+            state.record_tool_outcome(tool_name, not is_error)
+            if is_error:
+                _round_failures.append((tool_name, str(result_content)[:150]))
+
             # Immediate compression (non-stream path, same as stream)
             from core.context.compaction import compress_fresh_tool_result
             compressed_content = (
-                compress_fresh_tool_result(result_content)
+                result_content if _skip_compress
+                else compress_fresh_tool_result(result_content)
                 if isinstance(result_content, str) else result_content
             )
             tool_results.append(
@@ -1621,8 +1760,26 @@ class RVRBExecutor(RVRExecutor):
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
 
+        # 渐进式失败引导（与 stream 版本对齐）
+        if _round_failures:
+            _progressive_hints = []
+            for _tn, _err in _round_failures:
+                _hint = self._build_progressive_hint(_tn, _err, state)
+                if _hint:
+                    _progressive_hints.append(_hint)
+                    if state.get_tool_failure_streak(_tn) >= 3:
+                        state.pruned_tools.add(_tn)
+            if _progressive_hints:
+                append_user_message(
+                    llm_messages, "\n\n".join(_progressive_hints)
+                )
+                logger.info(
+                    f"📊 渐进式失败引导(non-stream): {len(_progressive_hints)} 条"
+                    f" (pruned={state.pruned_tools or 'none'})"
+                )
+
         # 轨迹去重：完全相同的工具调用连续 N 次 → 注入反思提示引导 LLM 换思路
-        if ctx.detect_repeated_call(threshold=3):
+        if ctx.detect_repeated_call(threshold=4):
             _dedup_hint = (
                 "[系统提示] 检测到完全相同的工具调用已连续执行多次，结果不会改变。"
                 "请在 Thinking 中分析原因，尝试不同的参数、换一个工具、或直接基于已有信息回答用户。"

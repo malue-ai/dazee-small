@@ -684,7 +684,8 @@ class InstancePromptCache:
         """
         生成意图识别提示词（分解任务）
 
-        🆕 V6.1: 如果 AgentSchema 已生成，注入能力摘要确保意图分类与 Agent 能力一致
+        V6.1: 注入 AgentSchema 能力摘要
+        V12.2: 注入 SkillGroupRegistry 真实分组名，避免 LLM 自行编造分组名
         """
         try:
             # 获取 LLM Profile
@@ -695,13 +696,15 @@ class InstancePromptCache:
 
             llm_service = create_llm_service(**profile)
 
-            # 🆕 V6.1: 获取 AgentSchema 能力摘要（如果已生成）
             schema_summary = self._build_schema_summary()
 
-            # 构建提示词（传入完整 prompt 用于提取意图定义，模板内部会限制长度）
+            # V12.2: 注入真实分组名约束，防止 LLM 编造不存在的分组名
+            groups_constraint = self._build_groups_constraint()
+            if groups_constraint:
+                schema_summary = f"{schema_summary}\n\n{groups_constraint}" if schema_summary else groups_constraint
+
             prompt_template = await get_intent_prompt_template(raw_prompt, schema_summary)
 
-            # 调用 LLM（使用 Message 对象而非字典）
             response = await llm_service.create_message_async(
                 messages=[Message(role="user", content=prompt_template)],
                 max_tokens=8000,
@@ -714,6 +717,22 @@ class InstancePromptCache:
             from core.prompt.intent_prompt_generator import IntentPromptGenerator
 
             self.intent_prompt = IntentPromptGenerator.get_default()
+
+    def _build_groups_constraint(self) -> str:
+        """Build a constraint string listing the real skill group names from registry."""
+        registry = None
+        if self.runtime_context:
+            registry = self.runtime_context.get("_skill_group_registry")
+        if not registry or not hasattr(registry, "build_groups_description"):
+            return ""
+        groups_desc = registry.build_groups_description()
+        if not groups_desc:
+            return ""
+        return (
+            "## 技能分组（必须使用以下真实分组名，禁止自行编造）\n\n"
+            f"{groups_desc}\n\n"
+            "生成 relevant_skill_groups 时，只能使用上述列表中的分组名。"
+        )
 
     def _build_schema_summary(self) -> str:
         """
@@ -1132,6 +1151,28 @@ class InstancePromptCache:
                     logger.warning(f"⚠️ AgentSchema 生成失败: {e}，使用默认配置")
                     self.agent_schema = DEFAULT_AGENT_SCHEMA
 
+                    # API Key 认证失败时通知前端
+                    error_str = str(e).lower()
+                    if "401" in error_str or "invalid" in error_str and "key" in error_str:
+                        await self._notify_api_key_error(str(e))
+
+    async def _notify_api_key_error(self, error_detail: str):
+        """API Key 认证失败时通过 WebSocket 通知前端"""
+        try:
+            from routers.websocket import get_notification_manager
+            mgr = get_notification_manager()
+            await mgr.broadcast_notification(
+                "api_key_error",
+                {
+                    "level": "error",
+                    "title": "API Key 认证失败",
+                    "message": "LLM API Key 无效或已过期，请在设置中更新。部分功能将受限。",
+                    "detail": error_detail[:200],
+                },
+            )
+        except Exception:
+            pass
+
     def _merge_config_overrides(self, config: Dict[str, Any]):
         """合并 config.yaml 中的覆盖配置"""
         if not self.agent_schema:
@@ -1280,8 +1321,15 @@ class InstancePromptCache:
             f"Complex={len(self.system_prompt_complex)} 字符"
         )
 
-        # 使用默认意图识别提示词
-        self.intent_prompt = get_intent_recognition_prompt()
+        # 使用默认意图识别提示词（从 registry 获取真实分组名）
+        groups_desc = ""
+        if self.runtime_context:
+            registry = self.runtime_context.get("_skill_group_registry")
+            if registry and hasattr(registry, "build_groups_description"):
+                groups_desc = registry.build_groups_description()
+        self.intent_prompt = get_intent_recognition_prompt(
+            skill_groups_description=groups_desc or "(无可用分组)"
+        )
 
         self.is_loaded = True
 
@@ -1426,16 +1474,28 @@ class InstancePromptCache:
 
     def get_intent_prompt(self) -> str:
         """
-        获取意图识别提示词（用户配置 or 默认）
+        获取意图识别提示词
 
-        Returns:
-            意图识别提示词
+        优先级：
+        1. SkillGroupRegistry 可用时，始终使用模板 + 真实分组名（保证 skill groups 永不过期）
+        2. 缓存的 intent_prompt（fallback，可能包含过期分组名）
+        3. 模板 + 空分组（ultimate fallback）
         """
+        if self.runtime_context:
+            registry = self.runtime_context.get("_skill_group_registry")
+            if registry and hasattr(registry, "build_groups_description"):
+                groups_desc = registry.build_groups_description()
+                if groups_desc:
+                    return get_intent_recognition_prompt(
+                        skill_groups_description=groups_desc
+                    )
+
         if self.intent_prompt:
             return self.intent_prompt
 
-        # fallback 到默认
-        return get_intent_recognition_prompt()
+        return get_intent_recognition_prompt(
+            skill_groups_description="(无可用分组)"
+        )
 
     def get_cached_system_blocks(
         self, complexity, user_profile: Optional[str] = None, tools_context: Optional[str] = None

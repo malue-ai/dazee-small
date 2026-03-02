@@ -131,6 +131,7 @@ class KnowledgeSearchTool(BaseTool):
                 "success": True,
                 "results": formatted,
                 "total": len(formatted),
+                "_compression_hint": "search",
             }
 
         except Exception as e:

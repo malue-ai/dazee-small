@@ -96,6 +96,9 @@ skill_groups:
   screen_memory:
     description: "屏幕记忆回溯、历史操作查询、应用使用统计、会议录音回顾"
     skills: [screenpipe]
+  skill_management:
+    description: "Skill 管理：创建新 Skill、搜索发现 Skill、安装社区 Skill、浏览已安装 Skill"
+    skills: [skill-creator, skill-finder]
   _always:
     description: "始终注入（基础能力）"
     skills: [local-search, app-recommender, weather]
@@ -204,6 +207,10 @@ skills:
       - { name: calorie-counter,         backend_type: local, skill_source: instance, description: "卡路里追踪：饮食记录、营养目标、周报" }
       - { name: workout-logger,          backend_type: local, skill_source: instance, description: "健身记录：运动日志、进步追踪、PR 记录" }
       - { name: zettelkasten,            backend_type: local, skill_source: instance, description: "卡片笔记法：原子笔记、双向链接、知识网络" }
+
+      # --- Skill 管理 ---
+      - { name: skill-creator,           backend_type: local, skill_source: instance, description: "创建新 Skill：引导编写 SKILL.md，自动注册到实例" }
+      - { name: skill-finder,            backend_type: local, skill_source: instance, description: "搜索发现 Skill：本地浏览和在线搜索社区 Skill、安装到当前实例" }
 
       # --- 系统 ---
       - { name: system-info,             backend_type: local, skill_source: instance, description: "系统信息诊断：CPU/内存/磁盘/进程" }
