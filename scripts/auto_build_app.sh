@@ -322,6 +322,16 @@ find_python() {
   fi
   for cmd in python3.12 python3.13 python3 python; do
     if has_cmd "$cmd"; then
+      # macOS ships a /usr/bin/python3 stub that triggers an Xcode CLT install
+      # dialog when executed. Skip it to avoid the unwanted popup — Homebrew
+      # will install a real Python later if needed.
+      if [ "$(uname)" = "Darwin" ]; then
+        local cmd_path
+        cmd_path=$(command -v "$cmd" 2>/dev/null)
+        if [ "$cmd_path" = "/usr/bin/$cmd" ] && ! xcode-select -p &>/dev/null; then
+          continue
+        fi
+      fi
       if is_python_compatible "$cmd"; then
         echo "$cmd"
         return 0
@@ -336,7 +346,16 @@ PYTHON_CMD=$(find_python || true)
 if [ -n "$PYTHON_CMD" ]; then
   ok "Python 已安装 ($($PYTHON_CMD --version 2>&1))"
 else
+  # On macOS without Xcode CLT, /usr/bin/python3 is a stub that triggers
+  # an install dialog — avoid calling it, just report "not installed".
+  _has_real_python=false
   if has_cmd python3; then
+    _py_path=$(command -v python3 2>/dev/null)
+    if [ "$(uname)" != "Darwin" ] || [ "$_py_path" != "/usr/bin/python3" ] || xcode-select -p &>/dev/null; then
+      _has_real_python=true
+    fi
+  fi
+  if [ "$_has_real_python" = true ]; then
     CURRENT_VER=$(python3 --version 2>&1)
     need "Python 3.12 ~ 3.13（当前 $CURRENT_VER 不兼容）"
   else
