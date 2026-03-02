@@ -56,6 +56,14 @@ _INTENT_TOOL = {
                 "items": {"type": "string"},
                 "maxItems": 6,
             },
+            "required_tools": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["browser", "audio_processing", "code_execution"],
+                },
+                "description": "需要的动态工具（Level 2），空数组表示仅需核心工具",
+            },
         },
         "required": [
             "complexity",
@@ -64,6 +72,7 @@ _INTENT_TOOL = {
             "wants_to_stop",
             "wants_rollback",
             "relevant_skill_groups",
+            "required_tools",
         ],
     },
 }
@@ -457,11 +466,17 @@ class IntentAnalyzer:
             relevant_skill_groups = []
         relevant_skill_groups = [str(g) for g in relevant_skill_groups if g]
 
+        required_tools = parsed.get("required_tools", [])
+        if not isinstance(required_tools, list):
+            required_tools = []
+        required_tools = [str(t) for t in required_tools if t]
+
         logger.debug(
             f"解析成功: complexity={complexity.value}, "
             f"skip_memory={skip_memory}, is_follow_up={is_follow_up}, "
             f"wants_to_stop={wants_to_stop}, "
-            f"relevant_skill_groups={relevant_skill_groups}"
+            f"relevant_skill_groups={relevant_skill_groups}, "
+            f"required_tools={required_tools}"
         )
 
         return IntentResult(
@@ -471,6 +486,7 @@ class IntentAnalyzer:
             wants_to_stop=wants_to_stop,
             wants_rollback=wants_rollback,
             relevant_skill_groups=relevant_skill_groups,
+            required_tools=required_tools,
         )
 
     def _parse_llm_response(self, content: str) -> IntentResult:

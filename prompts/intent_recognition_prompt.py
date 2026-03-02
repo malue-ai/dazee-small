@@ -34,7 +34,8 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
   "is_follow_up": true|false,
   "wants_to_stop": true|false,
   "wants_rollback": true|false,
-  "relevant_skill_groups": ["group1", "group2"]
+  "relevant_skill_groups": ["group1", "group2"],
+  "required_tools": []
 }}
 ```
 
@@ -125,183 +126,225 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 ---
 
+## required_tools（需要的动态工具）
+
+根据用户请求判断是否需要以下动态工具（可多选，通常为空）：
+
+- **browser**: 需要打开网页、浏览器自动化、网页操作
+  - 例: "帮我在浏览器里打开某个网站并填写表单"
+- **audio_processing**: 需要语音转文字、文字转语音、音频处理
+  - 例: "把这段录音转成文字"、"用语音读出来"
+- **code_execution**: 需要在安全沙箱中执行代码
+  - 例: "运行这段 Python 代码"、"帮我算一下这组数据"
+
+**大多数请求不需要动态工具**，填 []。
+核心工具（文件操作、搜索、截图、命令执行等）始终可用，不需要在此列出。
+
+---
+
 ## Few-Shot 示例
 
 <!-- 单动作 → 单分组 -->
 
 <example>
 <query>今天上海天气怎么样？</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我写一篇关于咖啡文化的文章</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我整理下载文件夹，按类型分类</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>把这段话翻译成英文</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["translation"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["translation"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>把第二段改短一点</query>
-<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>算了不做了</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": true, "wants_rollback": false, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": true, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我恢复一下刚才删的文件</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": true, "relevant_skill_groups": ["file_operation"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": true, "relevant_skill_groups": ["file_operation"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>OK 感谢</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>Python 是什么？</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>截个图给我看看桌面</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>5分钟后提醒我喝水</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["productivity"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["productivity"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我头脑风暴一下，公众号怎么涨粉</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["creative"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["creative"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我画一个项目开发流程图</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["diagram"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["diagram"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>电脑越来越慢了，帮我看看什么占了空间</query>
-<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["system_maintenance"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["system_maintenance"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我生成一张赛博朋克风格的头像</query>
-<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["image_gen"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["image_gen"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>刚才屏幕上看到一个报价，帮我找回来</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["screen_memory"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["screen_memory"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>记录今天午餐吃了什么，算下卡路里</query>
-<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["health"]}}</output>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["health"], "required_tools": []}}</output>
 </example>
 
 <example>
 <query>帮我规划国庆去成都的行程</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["lifestyle"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["lifestyle"], "required_tools": []}}</output>
+</example>
+
+<!-- 动态工具示例 -->
+
+<example>
+<query>帮我在浏览器里登录公司内网，点击考勤页面</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"], "required_tools": ["browser"]}}</output>
+<note>浏览器自动化 → required_tools: browser</note>
+</example>
+
+<example>
+<query>把这段会议录音转成文字摘要</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media", "writing"], "required_tools": ["audio_processing"]}}</output>
+<note>语音转文字 → required_tools: audio_processing</note>
+</example>
+
+<example>
+<query>用语音把这段文字读出来</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media"], "required_tools": ["audio_processing"]}}</output>
+<note>TTS → required_tools: audio_processing</note>
+</example>
+
+<example>
+<query>运行这段 Python 代码看看输出什么</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["code"], "required_tools": ["code_execution"]}}</output>
+<note>执行代码 → required_tools: code_execution</note>
 </example>
 
 <!-- 多动作 → 必须多选 ⚠️ -->
 
 <example>
 <query>分析这个 Excel 数据，找出销售趋势，写一段总结</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "writing"], "required_tools": []}}</output>
 <note>分析数据 → data_analysis ＋ 写总结 → writing</note>
 </example>
 
 <example>
 <query>帮我搜一下最近的 AI Agent 论文，写个综述</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "writing"], "required_tools": []}}</output>
 <note>搜论文 → research ＋ 写综述 → writing</note>
 </example>
 
 <example>
 <query>把这张图片上的英文 OCR 出来翻译成中文</query>
-<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation", "translation"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation", "translation"], "required_tools": []}}</output>
 <note>OCR 提取文字 → file_operation ＋ 翻译 → translation</note>
 </example>
 
 <example>
 <query>帮我把这篇文章去掉 AI 味，然后生成一份 PDF 报告</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing", "file_operation"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing", "file_operation"], "required_tools": []}}</output>
 <note>去 AI 味 → writing ＋ 生成 PDF → file_operation</note>
 </example>
 
 <example>
 <query>调研一下竞品的最新动态，写一份对比分析报告</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "writing"], "required_tools": []}}</output>
 <note>调研竞品 → research ＋ 写报告 → writing</note>
 </example>
 
 <example>
 <query>整理这些发票，按月份归档到对应文件夹</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "file_operation"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "file_operation"], "required_tools": []}}</output>
 <note>整理发票数据 → data_analysis ＋ 归档到文件夹 → file_operation</note>
 </example>
 
 <example>
 <query>读一下这个 PDF 合同，提取关键条款，整理成 Word 文档</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "file_operation", "writing"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "file_operation", "writing"], "required_tools": []}}</output>
 <note>读 PDF → research ＋ 整理内容 → writing ＋ 输出 Word → file_operation</note>
 </example>
 
 <example>
 <query>帮我分析这份会议记录，提取行动项，发邮件给参会人</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["meeting", "productivity"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["meeting", "productivity"], "required_tools": []}}</output>
 <note>分析会议 → meeting ＋ 发邮件 → productivity</note>
 </example>
 
 <example>
 <query>帮我把这个视频转成文字，翻译成英文，写一篇博客发布</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media", "translation", "writing", "content_creation"]}}</output>
-<note>视频转文字 → media ＋ 翻译 → translation ＋ 写博客 → writing ＋ 内容发布 → content_creation</note>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media", "translation", "writing", "content_creation"], "required_tools": ["audio_processing"]}}</output>
+<note>视频转文字 → media + audio_processing ＋ 翻译 → translation ＋ 写博客 → writing ＋ 内容发布 → content_creation</note>
 </example>
 
 <example>
 <query>帮我优化简历，翻译成英文投这个外企岗位</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["career", "translation"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["career", "translation"], "required_tools": []}}</output>
 <note>优化简历 → career ＋ 翻译英文 → translation</note>
 </example>
 
 <example>
 <query>在飞书上找到上周会议妙记，提取行动项发给参会人</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["feishu", "meeting"]}}</output>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["feishu", "meeting"], "required_tools": []}}</output>
 <note>飞书会议妙记 → feishu ＋ 提取行动项 → meeting</note>
 </example>
 
 <example>
 <query>帮我看看这个 GitHub Issue 什么问题，写个修复方案</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["code", "writing"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["code", "writing"], "required_tools": []}}</output>
 <note>查看 Issue → code ＋ 写方案 → writing</note>
 </example>
 
 <example>
 <query>帮我加密桌面上这些合同文件</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["security", "file_operation"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["security", "file_operation"], "required_tools": []}}</output>
 <note>加密 → security ＋ 操作文件 → file_operation</note>
 </example>
 
 <example>
 <query>出 20 道 Python 基础测验题</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["learning"]}}</output>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["learning"], "required_tools": []}}</output>
 </example>
 
 ---
@@ -315,6 +358,7 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 - **relevant_skill_groups 经常需要多选**（上面示例中近半数是多选）。多选是为了保证召回率：漏选一个分组 = 该能力完全不可用，而多选仅多加载少量提示词，代价极低
 - 拆分用户请求中的每个动作，分别匹配分组
 - **不确定某个分组是否需要时 → 选上**（多选无害，漏选致命）
+- **required_tools 大多数情况为空 []**。只有明确需要浏览器自动化、语音处理、代码沙箱执行时才填
 
 现在分析用户的请求，只输出 JSON："""
 

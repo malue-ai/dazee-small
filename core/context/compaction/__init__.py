@@ -647,6 +647,61 @@ def _compress_old_tool_results(
     return result
 
 
+def _ensure_tool_pairs_in_trimmed(kept_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """将裁剪后孤立的 tool_use 就地转为文本摘要。
+
+    裁剪中间消息时，可能只保留了含 tool_use 的 assistant 消息而丢弃了
+    含 tool_result 的 user 消息。此函数在 ensure_tool_pairs（直接丢弃）
+    之前运行，将孤立 tool_use 转为可读摘要，保留上下文信息。
+    """
+    kept_result_ids: set = set()
+    for msg in kept_messages:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                kept_result_ids.add(block.get("tool_use_id"))
+
+    converted = 0
+    for msg in kept_messages:
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        new_content = []
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and block.get("id") not in kept_result_ids
+            ):
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+                summary = f"[之前调用了 {tool_name}"
+                if isinstance(tool_input, dict) and tool_input:
+                    params = [
+                        f"{k}={str(v)[:40]}"
+                        for k, v in list(tool_input.items())[:3]
+                    ]
+                    if params:
+                        summary += f"({', '.join(params)})"
+                summary += "，结果未记录]"
+                new_content.append({"type": "text", "text": summary})
+                converted += 1
+                continue
+            new_content.append(block)
+        msg["content"] = new_content
+
+    if converted:
+        logger.info(f"🔗 tool_use 成对检查: {converted} 个孤立 tool_use 转为文本摘要")
+
+    return kept_messages
+
+
 def trim_by_token_budget(
     messages: List[Dict[str, Any]],
     token_budget: int,
@@ -785,7 +840,10 @@ def trim_by_token_budget(
     # 7. 组合结果
     result = first_part + middle_part + last_part
 
-    # 8. 🛡️ 裁剪后确保 tool_use/tool_result 配对（裁剪可能破坏边界处的配对）
+    # 8. 将孤立的 tool_use 就地转为文本摘要（裁剪中间消息后 tool_use/tool_result 可能不配对）
+    result = _ensure_tool_pairs_in_trimmed(result)
+
+    # 9. 🛡️ 最终确保 tool_use/tool_result 配对（兜底，处理边界情况）
     from core.llm.adaptor import ClaudeAdaptor
 
     result = ClaudeAdaptor.ensure_tool_pairs(result)

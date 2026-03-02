@@ -54,6 +54,11 @@ class IntentResult:
     # ["group1", ...] = 指定分组 + _always 组
     relevant_skill_groups: Optional[List[str]] = None
 
+    # V12.1: LLM 语义推断的动态工具需求（Level 2 工具）
+    # None/[] = 仅需核心工具（Level 1）
+    # ["browser", ...] = 需要指定的动态工具
+    required_tools: Optional[List[str]] = None
+
     @property
     def needs_plan(self) -> bool:
         """是否需要规划（从 complexity 推断）"""
@@ -69,6 +74,7 @@ class IntentResult:
             "wants_rollback": self.wants_rollback,
             "confidence": self.confidence,
             "relevant_skill_groups": self.relevant_skill_groups or [],
+            "required_tools": self.required_tools or [],
             # 推断字段
             "needs_plan": self.needs_plan,
         }
