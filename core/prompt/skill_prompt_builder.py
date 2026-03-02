@@ -157,6 +157,24 @@ class SkillPromptBuilder:
 **用户提到的 Skill 不在 `<available_skills>` 中时：**
 不要说"找不到"或编造替代方案。尝试用 nodes 工具读取 `{skills_path}/{{skill-name}}/SKILL.md`（将 skill-name 替换为用户提到的名称）。如果文件存在，按其中的指引执行；如果文件不存在，用 hitl 工具告知用户该 Skill 未安装，询问是否需要用其他方式完成任务。
 
+**用户请求安装第三方工具或 MCP Server 时：**
+先评估能力边界，再行动。按以下顺序判断：
+1. `<available_skills>` 中是否已有能满足需求的 Skill → 有则直接使用
+2. `{skills_path}/` 下是否有未注册但存在的 Skill 目录 → 有则读取并执行
+3. 用户的真实需求能否用已有工具实现（如用 browser 工具操控网页，而非安装 chrome-mcp）→ 能则说明替代方案
+4. 以上都不行 → 告知用户当前没有该能力，引导用 skill-creator 创建或用 skill-finder 搜索社区 Skill
+
+MCP 类请求（用户提到"MCP"或某个 MCP Server）：
+- 本框架支持 `backend_type: mcp` 的 Skill，但需要预配置 `server_url`
+- 不要尝试直接安装 MCP Server 的 npm 包然后期望能连上——框架不会自动连接任意 MCP Server
+- 正确做法：引导用户提供 MCP Server 的 URL，然后用 skill-creator 创建一个 `backend_type: mcp` 的 Skill
+
+**禁止行为：**
+- 不要为了"可能有用"而安装系统级软件（homebrew、node、java、docker 等），这超出了 Skill 依赖范围
+- 不要在未确认最终能使用的情况下安装一连串前置依赖
+- 安装非 pip 包的系统级依赖前，必须用 hitl 工具征求用户同意并说明理由
+- 不要安装完才告诉用户"装了但用不了"——应在安装前判断
+
 **重要：**
 - 不要在选择前读取多个 Skills
 - 高级用法参考完整 SKILL.md（Read `location` 路径）
@@ -182,6 +200,24 @@ Do NOT jump to alternatives immediately. First use hitl tool to inform user what
 
 **User mentions a Skill not in `<available_skills>`:**
 Do NOT say "not found" or make up alternatives. Try reading `{skills_path}/{{skill-name}}/SKILL.md` via nodes tool (replace skill-name with what user mentioned). If the file exists, follow its instructions; if not, use hitl to inform user the Skill is not installed and ask if they want to use an alternative approach.
+
+**When user requests installing a third-party tool or MCP Server:**
+Assess capability boundaries before acting. Follow this order:
+1. Does `<available_skills>` already have a Skill that meets the need? → Use it directly
+2. Is there an unregistered Skill directory under `{skills_path}/`? → Read and execute it
+3. Can the user's real need be met with existing tools (e.g. browser tool for web control instead of chrome-mcp)? → Explain the alternative
+4. None of the above → Tell the user this capability isn't available yet, guide them to use skill-creator or skill-finder
+
+MCP requests (user mentions "MCP" or a specific MCP Server):
+- This framework supports `backend_type: mcp` Skills, but requires a pre-configured `server_url`
+- Do NOT install MCP Server npm packages expecting them to "just work" — the framework won't auto-connect to arbitrary MCP Servers
+- Correct approach: ask user for the MCP Server URL, then use skill-creator to create a `backend_type: mcp` Skill
+
+**Prohibited actions:**
+- Do NOT install system-level software (homebrew, node, java, docker, etc.) speculatively — this is beyond Skill dependency scope
+- Do NOT install a chain of prerequisites without confirming the end result will actually work
+- Before installing any non-pip system-level dependency, MUST use hitl tool to get user consent with clear justification
+- Do NOT install first then tell user "installed but can't use" — assess feasibility BEFORE installation
 
 **Constraints:**
 - Never read more than one skill up front

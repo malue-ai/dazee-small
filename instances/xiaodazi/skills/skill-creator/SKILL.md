@@ -175,6 +175,70 @@ metadata:
 # api_config: { auth_type: "bearer", auth_key_field: "MY_API_KEY" }
 ```
 
+### 创建 MCP 类 Skill
+
+当用户想接入一个 MCP Server（如 Screenpipe、Home Assistant、Google Workspace 等），使用 `backend_type: mcp`。
+
+**前提**：用户需要提供 MCP Server 的连接信息。如果用户只说"装一个 chrome-mcp"但不知道 server_url，先解释 MCP 的工作原理，引导用户提供连接信息。
+
+**frontmatter 模板**：
+
+```yaml
+---
+name: my-mcp-skill
+description: 描述这个 MCP Skill 做什么、连接哪个 MCP Server。
+metadata:
+  xiaodazi:
+    dependency_level: external  # 或 cloud_api（如果需要 API Key）
+    os: [common]
+    backend_type: mcp
+    user_facing: true
+    api_key_env: MY_MCP_API_KEY  # 可选，如果 MCP Server 需要认证
+---
+```
+
+**skills.yaml 注册模板**：
+
+```yaml
+- name: my-mcp-skill
+  backend_type: mcp
+  skill_source: instance
+  server_url: "http://localhost:3030/mcp"  # 或远程 URL
+  server_name: "my-server"                 # MCP Server 标识
+  auth_type: "bearer"                      # 可选：bearer / api_key / none
+  auth_env: "MY_MCP_API_KEY"               # 可选：存放认证信息的环境变量名
+  description: "一句话描述"
+```
+
+**SKILL.md 正文结构**（与 local 类 Skill 不同，重点描述 MCP 工具的用法）：
+
+```markdown
+# Skill 名称
+
+一句话描述。
+
+## 使用场景
+- 用户说「...」
+
+## 前置条件
+1. 安装并启动 MCP Server：[安装链接]
+2. MCP Server 运行在 `http://localhost:xxxx`
+3. [如需认证] 在环境变量中设置 API Key
+
+## 执行方式
+
+### 通过 MCP 工具调用
+[列出 MCP Server 提供的工具名称和参数]
+
+### 直接 API 调用（备选）
+[如果 MCP Server 也提供 HTTP API，列出备选方式]
+
+## 输出规范
+- ...
+```
+
+**已有 MCP Skill 参考**：可以读取 `screenpipe`、`deep-doc-reader`、`google-workspace`、`home-assistant` 的 SKILL.md 作为参考。
+
 ### 保存文件
 
 确定好内容后，用 `nodes` 工具执行 Python 代码保存文件：

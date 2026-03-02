@@ -20,6 +20,7 @@ metadata:
 - 用户说「安装一个 XX Skill」「从社区找 Skill」
 - 用户想扩展 Agent 的能力，问「能不能做 XX」而当前没有对应 Skill
 - 用户提到 skills.sh 或 Agent Skills 生态
+- 用户要求安装 MCP Server 或 MCP 工具（如 chrome-mcp、filesystem-mcp 等）
 
 ---
 
@@ -289,9 +290,45 @@ print(f"   当前对话即可使用（Agent 会按路径读取 SKILL.md）")
 
 ---
 
+---
+
+## 功能 4：处理 MCP 相关请求
+
+当用户要求安装 MCP 工具（如 "chrome-mcp"、"filesystem-mcp" 等），按以下流程处理：
+
+### 判断流程
+
+```
+用户说「安装 XX-mcp」或「用 MCP 连接 XX」
+    │
+    ├── 1. 先检查已安装的 Skill 是否已有该能力
+    │      （如用户要 chrome-mcp → 检查是否有 browser 工具可替代）
+    │      → 有替代方案 → 告知用户并演示
+    │
+    ├── 2. 检查 skill_registry.yaml 中是否有同名 MCP Skill
+    │      → 有 → 直接使用
+    │
+    ├── 3. 搜索社区是否有对应 Skill
+    │      → 有 → 下载安装（走功能 3 的流程）
+    │
+    └── 4. 都没有 → 引导用户用 skill-creator 创建 MCP Skill
+           需要用户提供：
+           - MCP Server 的 URL（本地或远程）
+           - 认证方式（如需要）
+           - MCP Server 提供的工具列表
+```
+
+### 关键原则
+
+- **不要盲目安装 npm 包**。MCP Server 需要框架通过 `backend_type: mcp` 和 `server_url` 进行连接配置，不是装了 npm 包就能用
+- **不要安装系统级依赖**（homebrew、node 等）来"凑"一个 MCP Server。这超出了 skill-finder 的职责
+- **先评估替代方案**。很多 MCP 工具的功能可以用已有的 Skill 或工具实现（如 browser 工具代替 chrome-mcp，nodes 工具代替 filesystem-mcp）
+- 如果确认需要创建 MCP Skill，引导用户使用 `skill-creator`，它有完整的 MCP Skill 创建模板
+
 ## 输出规范
 
 - 列出 Skill 时用表格或清单格式，包含名称、状态、简介
 - 安装完成后告知用户文件路径，并建议试用话术
 - 如果搜索无结果，建议用户使用 `skill-creator` 自己创建
 - 安装社区 Skill 前，先用 hitl 工具请求用户确认（展示 Skill 内容摘要）
+- MCP 相关请求：先说明框架的 MCP 工作方式，再引导下一步

@@ -61,19 +61,26 @@ provider_templates:
 
   deepseek:
     agent_model: "deepseek-reasoner"            # 主 Agent：思考模式（V3.2），对标 Sonnet/Qwen3-max
+    # [V4 Ready] V4 上线后切换主 Agent：
+    # agent_model: "deepseek-v4-reasoner"       # ← 确认实际模型名
     agent_llm:
       max_tokens: 32768                         # reasoner 默认 32K，最大 64K（含 CoT）
+      # [V4 Ready] 根据 V4 输出上限调整：
+      # max_tokens: 65536                       # ← 确认 V4 输出上限
       enable_thinking: true
       thinking_budget: 10000                    # API 忽略此参数，保留以兼容框架
       enable_caching: false                     # DeepSeek 不支持 prompt cache
-      # temperature: reasoner 模式下被忽略
+      # [V4 Ready] 如 V4 支持 prompt cache：
+      # enable_caching: true
     heavy:
       provider: "deepseek"
       model: "deepseek-reasoner"
+      # [V4 Ready] model: "deepseek-v4-reasoner"
       api_key_env: "DEEPSEEK_API_KEY"
     light:
       provider: "deepseek"
       model: "deepseek-chat"
+      # [V4 Ready] model: "deepseek-v4"
       api_key_env: "DEEPSEEK_API_KEY"
 
   glm:
