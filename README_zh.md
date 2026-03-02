@@ -149,6 +149,53 @@ llm:
 
 尽管有 200+ 技能，**默认加载零个**。每次请求只激活匹配用户意图的技能组（通常 200+ 中的 0–15 个）。一句"你好"消耗 0 技能 token；一个复杂研究任务消耗约 1,200。
 
+### 命令执行安全策略 — AI 能做什么，不能做什么，一目了然
+
+小搭子可以直接在你的电脑上执行命令（文件操作、网络诊断、脚本运行等），但**所有命令都经过内置安全策略引擎审批**。规则从上到下匹配，第一个命中规则生效；未匹配任何规则的命令默认**允许**执行。
+
+<details>
+<summary><strong>✅ 允许执行的命令</strong></summary>
+
+| 命令模式 | 说明 | Shell 限制 |
+|----------|------|------------|
+| `echo *` | 回显输出 | 全部 |
+| `Get-*` | PowerShell 只读查询 cmdlet | powershell / pwsh |
+| `dir` / `dir *` | 目录列表 | 全部 |
+| `hostname` | 主机名查询 | 全部 |
+| `whoami` | 当前用户 | 全部 |
+| `systeminfo` | 系统信息 | 全部 |
+| `ipconfig` / `ipconfig *` | 网络配置 | 全部 |
+| `ping *` | 网络连通性测试 | 全部 |
+| `type *` | 读取文件内容 | cmd |
+| `cat *` | 读取文件内容 | 全部 |
+| `tasklist*` | 进程列表 | 全部 |
+| `netstat*` | 网络连接状态 | 全部 |
+| `python *` / `python3 *` | Python 脚本执行 | 全部 |
+| `pip *` / `pip3 *` | Python 包管理 | 全部 |
+| `git *` | Git 版本控制 | 全部 |
+| `node *` / `npm *` | Node.js 运行与包管理 | 全部 |
+
+</details>
+
+<details>
+<summary><strong>🚫 明确封锁的危险命令</strong></summary>
+
+| 命令模式 | 封锁原因 |
+|----------|----------|
+| `Remove-Item *` / `rm *` / `del *` | 防止误删文件 |
+| `Format-*` | 防止磁盘格式化 |
+| `Stop-Computer*` / `shutdown*` | 防止意外关机 |
+| `Restart-Computer*` | 防止意外重启 |
+| `*Invoke-WebRequest*` | 防止下载执行未知程序 |
+| `*Start-Process*` | 防止绕过安全策略启动进程 |
+| `*reg *` | 防止修改注册表 |
+| `net user*` / `net localgroup*` | 防止账号与权限篡改 |
+| `schtasks *` | 防止创建计划任务 |
+
+</details>
+
+> **可定制：** 策略规则存储在本地 `exec-policy.json` 文件中，支持通过远程管理命令（`system.execApprovals.get/set`）或直接编辑 JSON 文件来增删规则。你可以根据自己的使用场景自由调整白名单和黑名单。
+
 ### 本地优先 — 你的数据留在你的电脑
 
 | 存储 | 技术 | 用途 |

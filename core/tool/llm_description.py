@@ -330,69 +330,6 @@ class ToolDescriptionEnhancer:
 
         return "\n".join(parts)
 
-    def suggest_tools(
-        self, query: str, task_type: str = None, available_tools: List[str] = None
-    ) -> List[tuple[str, float, str]]:
-        """
-        Pre-filter: keyword-based tool suggestion (fast, < 1ms).
-
-        WARNING: This is a coarse pre-filter using keyword overlap, NOT
-        semantic inference. Per LLM-First principle, callers MUST NOT
-        use the output as final tool selection. Use this only as a
-        candidate shortlist for subsequent LLM-based selection.
-
-        Args:
-            query: User query
-            task_type: Task type
-            available_tools: Available tools to consider
-
-        Returns:
-            [(tool_name, score, match_reason), ...]
-        """
-        suggestions = []
-        query_lower = query.lower()
-
-        tools_to_check = available_tools or list(self._descriptions.keys())
-
-        for tool_name in tools_to_check:
-            desc = self._descriptions.get(tool_name)
-            if not desc:
-                continue
-
-            score = 0.0
-            reasons = []
-
-            # 检查 use_when
-            for condition in desc.use_when:
-                if any(kw.lower() in query_lower for kw in condition.split()):
-                    score += 0.3
-                    reasons.append(f"匹配使用场景: {condition}")
-                    break
-
-            # 检查 not_use_when（负分）
-            for condition in desc.not_use_when:
-                if any(kw.lower() in query_lower for kw in condition.split()):
-                    score -= 0.5
-                    reasons.append(f"不适用: {condition}")
-                    break
-
-            # 关键词匹配
-            if desc.description:
-                desc_words = desc.description.lower().split()
-                query_words = set(query_lower.split())
-                overlap = len(set(desc_words) & query_words)
-                if overlap > 0:
-                    score += min(overlap * 0.1, 0.3)
-                    reasons.append(f"描述关键词匹配: {overlap}")
-
-            if score > 0:
-                suggestions.append(
-                    (tool_name, score, "; ".join(reasons) if reasons else "基础匹配")
-                )
-
-        suggestions.sort(key=lambda x: x[1], reverse=True)
-        return suggestions
-
     def get_composition_hints(self, primary_tool: str) -> List[Dict[str, Any]]:
         """
         获取工具组合建议

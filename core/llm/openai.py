@@ -742,6 +742,21 @@ def _register_openai():
         ],
     )
 
+    LLMRegistry.register(
+        name="kimi",
+        service_class=OpenAILLMService,
+        adaptor_class=OpenAIAdaptor,
+        default_model="kimi-k2.5",
+        api_key_env="MOONSHOT_API_KEY",
+        display_name="Kimi (Moonshot)",
+        description="Moonshot AI Kimi 系列模型（OpenAI 兼容）",
+        supported_features=[
+            "streaming",
+            "tool_calling",
+            "thinking",
+        ],
+    )
+
 
 # 模块加载时注册
 _register_openai()

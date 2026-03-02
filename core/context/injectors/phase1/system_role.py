@@ -133,6 +133,13 @@ class SystemRoleInjector(BaseInjector):
 
         return role_prompt
 
+    _DESKTOP_SKILL_GROUPS = {
+        "app_automation",
+        "feishu",
+        "productivity",
+        "screen_memory",
+    }
+
     @staticmethod
     def _needs_desktop_protocol(context: InjectionContext, complexity: str) -> bool:
         """
@@ -140,16 +147,17 @@ class SystemRoleInjector(BaseInjector):
 
         注入条件（满足任一）：
         1. complexity == complex（原有逻辑，兼容）
-        2. intent.relevant_skill_groups 包含 app_automation
+        2. intent.relevant_skill_groups 与 _DESKTOP_SKILL_GROUPS 有交集
+           （飞书/邮件/日历等本地 app 操作都需要 peekaboo）
         """
-        # 条件 1: complex 任务始终注入
         if complexity == "complex":
             return True
 
-        # 条件 2: 意图识别出 app_automation 技能组
         if context.intent:
-            skill_groups = getattr(context.intent, "relevant_skill_groups", None)
-            if skill_groups and "app_automation" in skill_groups:
+            skill_groups = set(
+                getattr(context.intent, "relevant_skill_groups", None) or []
+            )
+            if skill_groups & SystemRoleInjector._DESKTOP_SKILL_GROUPS:
                 return True
 
         return False

@@ -521,13 +521,16 @@ class WindowsLocalNode(LocalNodeBase):
                 "stderr": (
                     f"[EXEC-POLICY] 命令被策略拒绝: {eval_result.reason or '无匹配规则，默认 deny'}\n"
                     f"命令: {full_cmd}\n"
-                    "可通过 system.execApprovals.set 更新策略，或联系管理员。"
+                    "用户可通过 HITL 授权后自动添加 allow 规则。"
                 ),
                 "exit_code": 1,
                 "timed_out": False,
                 "_hint": (
-                    "⚠️ 命令被 Exec 审批策略拒绝！你可以调用 hitl 工具询问用户，"
-                    "或通过 nodes（command=system.execApprovals.set）更新策略后重试。"
+                    "⚠️ 命令被 Exec 审批策略拒绝！请调用 hitl 工具询问用户是否允许执行。\n"
+                    "如果用户同意，先调用 nodes 工具添加 allow 规则：\n"
+                    f'  command: "system.execApprovals.addRule"\n'
+                    f'  params: {{"pattern": "{full_cmd}", "action": "allow"}}\n'
+                    "添加规则后再重新执行原命令即可。"
                 ),
             }
 
@@ -1044,6 +1047,21 @@ class WindowsLocalNode(LocalNodeBase):
             "defaultAction": default_action or self._exec_policy.default_action.value,
         }
 
+    async def exec_approvals_add_rule(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """添加单条规则（HITL 审批后使用），自动处理插入位置和去重"""
+        pattern = params.get("pattern")
+        if not pattern:
+            return {"success": False, "error": "缺少 pattern 参数"}
+        rule_data = {
+            "pattern": pattern,
+            "action": params.get("action", "allow"),
+            "shells": params.get("shells"),
+            "description": params.get("description", f"HITL 用户授权: {pattern}"),
+            "enabled": True,
+        }
+        result = self._exec_policy.add_rule(rule_data)
+        return {"success": True, **result}
+
     # ── Canvas ────────────────────────────────────────────────────────────────
 
     async def canvas_present(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1229,6 +1247,9 @@ class WindowsLocalNode(LocalNodeBase):
 
         elif command == "system.execApprovals.set":
             return await self.exec_approvals_set(params)
+
+        elif command == "system.execApprovals.addRule":
+            return await self.exec_approvals_add_rule(params)
 
         else:
             return await super()._handle_platform_command(command, params)

@@ -77,11 +77,13 @@ async def write_settings(body: Dict[str, Any]) -> Dict[str, Any]:
 
     # API Key 变更后的处理
     if "api_keys" in body:
-        # 清除 Mem0 config 缓存，下次初始化时重新检测 embedding provider
         try:
             from core.memory.mem0.config import set_mem0_config
+            from core.memory.mem0.pool import reset_mem0_pool
+
             set_mem0_config(None)
-            logger.info("🔄 Mem0 embedding 配置缓存已清除，将随 API Key 自动重新检测")
+            reset_mem0_pool()
+            logger.info("🔄 Mem0 配置和缓存池已重置，将随 API Key 自动重新检测")
         except Exception:
             pass
 

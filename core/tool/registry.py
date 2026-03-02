@@ -153,9 +153,11 @@ class CapabilityRegistry:
         if "implementation" in data:
             metadata["implementation"] = data["implementation"]
 
-        # 保存 compaction 配置到 metadata
         if "compaction" in data:
             metadata["compaction"] = data["compaction"]
+
+        if "state_category" in data:
+            metadata["state_category"] = data["state_category"]
 
         return Capability(
             name=data["name"],
