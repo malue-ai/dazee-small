@@ -16,7 +16,7 @@ fn debug_log(msg: &str) {
     eprintln!("{}", msg);
     if let Ok(data_dir) = std::env::var("HOME") {
         let log_path = format!(
-            "{}/Library/Application Support/com.xiaodazi.app/sidecar-debug.log",
+            "{}/Library/Application Support/com.zenflux.agent/sidecar-debug.log",
             data_dir
         );
         if let Ok(mut f) = std::fs::OpenOptions::new()
