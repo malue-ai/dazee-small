@@ -141,10 +141,12 @@ class SkillPromptBuilder:
 
 扫描 `<available_skills>` 的 `<description>` 条目，选择最匹配的 Skill。
 
+**关键约束：** `<available_skills>` 中的 Skill 名称（如 ddg-search、brave-search）不是工具，不能直接调用。必须通过 `nodes` 或 `api_calling` 工具执行 Skill 中的代码。
+
 **执行方式：**
 - 如果 Skill 有 `<quickstart>`：直接按 quickstart 代码用 `nodes` 工具执行
-- 如果没有 `<quickstart>`：先 Read `location` 路径的 SKILL.md，再按其代码示例用 `nodes` 执行
-- Skills 只能通过 `nodes` 工具执行（Python 或 Shell），不是 api_calling
+- 如果没有 `<quickstart>`：先 Read `location` 路径的 SKILL.md，再按其代码示例用 `nodes` 或 `api_calling` 执行
+- 不要把 Skill 名当作工具名调用——Skill 名不在可调用工具列表中，直接调用会报错"工具未找到"
 
 **需安装的 Skill（description 含 [需安装: ...]）：**
 1. 先用 hitl 工具请求用户确认安装（说明安装什么、为什么需要）
@@ -170,6 +172,7 @@ MCP 类请求（用户提到"MCP"或某个 MCP Server）：
 - 正确做法：引导用户提供 MCP Server 的 URL，然后用 skill-creator 创建一个 `backend_type: mcp` 的 Skill
 
 **禁止行为：**
+- 不要把 Skill 名（如 ddg-search）当作工具名调用，这会报错"工具未找到"。Skill 中的代码必须通过 `nodes` 或 `api_calling` 执行
 - 不要为了"可能有用"而安装系统级软件（homebrew、node、java、docker 等），这超出了 Skill 依赖范围
 - 不要在未确认最终能使用的情况下安装一连串前置依赖
 - 安装非 pip 包的系统级依赖前，必须用 hitl 工具征求用户同意并说明理由
@@ -185,10 +188,12 @@ MCP 类请求（用户提到"MCP"或某个 MCP Server）：
 
 Scan `<available_skills>` `<description>` entries, choose the best match.
 
+**Critical constraint:** Skill names in `<available_skills>` (e.g. ddg-search, brave-search) are NOT callable tools. You must execute Skill code via `nodes` or `api_calling` tools.
+
 **Execution:**
 - If Skill has `<quickstart>`: execute directly via `nodes` tool following the quickstart code
-- If no `<quickstart>`: Read the SKILL.md at `location` path first, then follow its code via `nodes`
-- Skills MUST be executed via `nodes` tool (Python or Shell), NOT api_calling
+- If no `<quickstart>`: Read the SKILL.md at `location` path first, then follow its code via `nodes` or `api_calling`
+- Do NOT call a Skill name as a tool — Skill names are not in the callable tool list and will return "tool not found"
 
 **Skills requiring setup (description contains [needs setup: ...]):**
 1. Use hitl tool to ask user to confirm installation (explain what and why)
@@ -214,6 +219,7 @@ MCP requests (user mentions "MCP" or a specific MCP Server):
 - Correct approach: ask user for the MCP Server URL, then use skill-creator to create a `backend_type: mcp` Skill
 
 **Prohibited actions:**
+- Do NOT call Skill names (e.g. ddg-search, brave-search) as tool names — this will fail with "tool not found". Skill code must be executed via `nodes` or `api_calling`
 - Do NOT install system-level software (homebrew, node, java, docker, etc.) speculatively — this is beyond Skill dependency scope
 - Do NOT install a chain of prerequisites without confirming the end result will actually work
 - Before installing any non-pip system-level dependency, MUST use hitl tool to get user consent with clear justification
