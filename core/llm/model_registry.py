@@ -1951,7 +1951,7 @@ def _register_preset_models() -> None:
     _GEMINI_COMMON: Dict[str, Any] = dict(
         adapter=AdapterType.GEMINI,
         base_url="https://generativelanguage.googleapis.com/v1beta",
-        api_key_env="GOOGLE_API_KEY",
+        api_key_env="GEMINI_API_KEY",
         provider="gemini",
     )
 
