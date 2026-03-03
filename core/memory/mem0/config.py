@@ -169,7 +169,7 @@ class EmbedderConfig:
                 self.model = "text-embedding-3-small"
             self.dims = 1536
         elif self.provider == "google":
-            self.api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            self.api_key = os.getenv("GEMINI_API_KEY")
             if not self.model:
                 self.model = "text-embedding-004"
             self.dims = 768
@@ -258,7 +258,7 @@ class LLMConfig:
             if not self.base_url:
                 self.base_url = _resolve_base_url("OPENAI_API_KEY")
         elif self.provider in ("google", "gemini"):
-            self.api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            self.api_key = os.getenv("GEMINI_API_KEY")
         elif self.provider == "ollama":
             self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
