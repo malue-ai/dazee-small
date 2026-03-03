@@ -8,16 +8,18 @@ LLM 服务统一注册中心
 # 在各 Provider 文件末尾注册
 from core.llm.registry import LLMRegistry
 
+from core.llm.defaults import get_default_model
+
 LLMRegistry.register(
     name="claude",
     service_class=ClaudeLLMService,
     adaptor_class=ClaudeAdaptor,
-    default_model="claude-sonnet-4-5-20250929",
+    default_model=get_default_model("claude"),
     api_key_env="ANTHROPIC_API_KEY"
 )
 
 # 创建服务时
-llm = LLMRegistry.create_service("claude", model="claude-sonnet-4-5")
+llm = LLMRegistry.create_service("claude")
 adaptor = LLMRegistry.get_adaptor("claude")
 ```
 """

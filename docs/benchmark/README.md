@@ -26,6 +26,7 @@
 | **F. 开发者体验** | 4 | Skill 扩展 / 多模型 / 实例隔离 / 上下文工程 | **Phase 2** |
 | **G. 垂直场景** | 5 | 写稿 / 表格 / 研究 / 办公 / 隐私 | **Phase 2** |
 | **H. 产品健壮性** | 4 | 降级 / 大文件 / 多语言 / 中断恢复 | **Phase 2** |
+| **J. 云端协同** | 4 | SSE 链路 / 工具委托 / 异常降级 / 深度调研 | **Phase 0.5** |
 | **P. Playbook 学习** | 5 | 策略提取 / 确认 / 匹配注入 / 拒绝 / 删除清理 | **Phase 2** |
 
 详见 [test_cases.md](test_cases.md)
@@ -79,6 +80,9 @@ docs/benchmark/
     │   ├── large_doc_100kb.txt        #   100KB 文本
     │   ├── large_data_500kb.csv       #   500KB CSV (~12000 行)
     │   └── expected_result.json       #   处理策略验证
+    ├── cloud_test/                    # J1-J4: 云端协同
+    │   ├── queries.yaml               #   J1-J4 查询定义 + 场景说明
+    │   └── expected_result.json       #   事件验证 + 调研质量规则
     └── playbook_test/                 # P1-P5: Playbook 在线学习
         ├── product_feedback.xlsx      #   150 行用户反馈 (5 类问题)
         ├── customer_survey.xlsx       #   200 行客户满意度 (6 类服务)
@@ -101,6 +105,17 @@ python scripts/run_e2e_auto.py --case A1
 
 # B9/B10 回滚验证（无需 LLM，秒级）
 python scripts/verify_rollback_e2e.py
+
+# ── J 维度: 云端协同（打向 your-cloud-agent.example.com，需网络） ──
+
+# 全量 J1-J4
+python -m pytest tests/test_cloud_agent_e2e.py -v
+
+# 仅深度调研场景（J4 核心价值验证）
+python -m pytest tests/test_cloud_agent_e2e.py -v -k "J4"
+
+# 仅快速连通性（J1-J3，跳过慢测试）
+python -m pytest tests/test_cloud_agent_e2e.py -v -k "not slow"
 
 # ── Phase 2: 开源场景（新增 6 用例） ──
 
@@ -206,6 +221,16 @@ Agent 执行任务 → Code Grader (PASS/FAIL) + LLM Judge (诊断报告)
 | **Expected** | 第 4 轮引用 Q1 收入精确 = ¥120 万，token 不膨胀 |
 | **Grader 铁律** | Q1 收入引用错误 → ≤ 2 分；出现幻觉数据 → 扣 2 分 |
 
+### J4 — 云端深度调研（核心价值场景）
+
+| 项 | 内容 |
+|----|------|
+| **Query** | 搜索 FastAPI 最新动态 → 对比 Django → 结构化表格（3 轮） |
+| **Data** | 无文件（云端联网搜索） |
+| **Value** | 本地没有 web search 工具，委托云端做本地做不了的事 |
+| **Expected** | 轮次1 包含真实 FastAPI 信息 + 轮次2 跨轮对比分析 + 轮次3 结构化表格 |
+| **Grader 铁律** | 轮次1 结果与主题无关 → <= 2 分（委托无价值） |
+
 ### H1 — LLM 服务降级
 
 | 项 | 内容 |
@@ -292,6 +317,7 @@ cd docs/benchmark/data && python generate_benchmark_data.py
 | `evaluation/config/judge_prompts.yaml` | LLM-as-Judge 评估提示词（含 Phase2 专用 graders） |
 | `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` | Phase1 用例定义（6 个） |
 | `evaluation/suites/xiaodazi/e2e/phase2_scenarios.yaml` | **Phase2 用例定义（6 个 — 新增）** |
+| `evaluation/suites/xiaodazi/e2e/cloud_collaboration.yaml` | **云端协同用例定义（J1-J4）** |
 | `scripts/run_e2e_auto.py` | E2E 运行器（Phase 0 + 服务管理 + 报告） |
 | `scripts/verify_rollback_e2e.py` | B9/B10 回滚验证（6 个子场景） |
 | `instances/xiaodazi/config/llm_profiles.yaml` | Provider 模板（含 claude/qwen/deepseek/glm） |

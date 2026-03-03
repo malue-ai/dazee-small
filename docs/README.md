@@ -190,7 +190,7 @@ api_keys:
   # DASHSCOPE_API_KEY: sk-xxx  # 可选（千问）
 
 llm:
-  COT_AGENT_MODEL: claude-sonnet-4-5-20250514  # 默认模型
+  COT_AGENT_MODEL: claude-sonnet-4-6  # 默认模型
   QOS_LEVEL: PRO  # 服务等级
 
 app:

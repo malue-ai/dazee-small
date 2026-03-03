@@ -79,7 +79,7 @@ class ClaudeLLMService(BaseLLMService):
     ```python
     config = LLMConfig(
         provider=LLMProvider.CLAUDE,
-        model="claude-sonnet-4-5-20250929",
+        model="claude-sonnet-4-6",
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         enable_thinking=True
     )
@@ -1912,7 +1912,7 @@ class ClaudeLLMService(BaseLLMService):
 
 
 def create_claude_service(
-    model: str = "claude-sonnet-4-5-20250929",
+    model: str | None = None,
     api_key: Optional[str] = None,
     enable_thinking: bool = True,
     enable_caching: bool = False,
@@ -1931,6 +1931,10 @@ def create_claude_service(
     Returns:
         ClaudeLLMService 实例
     """
+    if model is None:
+        from .defaults import get_default_model
+        model = get_default_model("claude")
+
     if api_key is None:
         api_key = os.getenv("ANTHROPIC_API_KEY")
 
@@ -1953,13 +1957,14 @@ def create_claude_service(
 
 def _register_claude():
     """延迟注册 Claude Provider（避免循环导入）"""
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="claude",
         service_class=ClaudeLLMService,
         adaptor_class=ClaudeAdaptor,
-        default_model="claude-sonnet-4-5-20250929",
+        default_model=get_default_model("claude"),
         api_key_env="ANTHROPIC_API_KEY",
         display_name="Claude",
         description="Anthropic Claude 系列模型",

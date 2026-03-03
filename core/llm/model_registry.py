@@ -1287,10 +1287,10 @@ def _register_preset_models() -> None:
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="claude-sonnet-4-5-20250929",
+            model_name="claude-sonnet-4-6",
             model_type=ModelType.VLM,
-            display_name="Claude Sonnet 4.5",
-            description="Anthropic 最强智能体与编码模型",
+            display_name="Claude Sonnet 4.6",
+            description="Anthropic 速度与智能最佳平衡",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=True, supports_thinking=True,
                 max_tokens=64000, max_input_tokens=200000,
