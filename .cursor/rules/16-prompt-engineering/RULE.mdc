@@ -1,0 +1,533 @@
+---
+description: "系统提示词编写规范：基于 Anthropic Claude、OpenAI、Google Gemini 官方最佳实践"
+alwaysApply: true
+---
+
+# 系统提示词编写规范
+
+## 核心原则
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                    🎯 Prompt-Driven 核心原则                                 │
+│                                                                              │
+│   提示词的唯一目的：驱动模型产生正确的输出行为                               │
+│   不是文档、不是注释、不是给开发者解释                                       │
+│                                                                              │
+│   问自己：这句话能帮助模型做出更好的判断吗？                                 │
+│   如果答案是"否"，删掉它。                                                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 一、提示词结构（参考 Anthropic & OpenAI）
+
+### 标准结构模板
+
+```markdown
+# Identity（身份定义）
+[一句话说明模型扮演的角色和专业领域]
+
+# Goal（目标）
+[明确说明成功的标准是什么]
+
+# Instructions（指令）
+[具体的行为规则和约束]
+
+# Output Format（输出格式）
+[明确的输出结构定义]
+
+# Examples（示例）
+[Few-shot 示例驱动行为]
+
+# Context（上下文）
+[动态注入的相关信息，放在最后]
+```
+
+### 结构说明
+
+| 部分 | 作用 | 是否必须 |
+|------|------|----------|
+| Identity | 设定角色视角，影响语气和专业度 | ✅ 推荐 |
+| Goal | 定义成功标准，模型知道什么是"正确" | ✅ 必须 |
+| Instructions | 具体规则和约束 | ✅ 必须 |
+| Output Format | 输出结构约束 | ✅ 必须 |
+| Examples | Few-shot 示例 | ✅ 强烈推荐 |
+| Context | 动态上下文 | 可选 |
+
+---
+
+## 二、Be Clear and Direct（清晰直接）
+
+> **Anthropic**: "Claude responds well to clear, direct instructions. State exactly what you want without ambiguity."
+> **OpenAI**: "Be specific and detailed about desired context, outcome, length, format, and style."
+
+### ✅ 正确：使用动作动词，明确具体
+
+```markdown
+# ✅ 正确：清晰直接
+分析用户查询，输出 JSON 格式的意图分类结果。
+
+必须包含以下字段：
+- task_type: 任务类型
+- complexity: 复杂度等级
+- needs_plan: 是否需要规划
+```
+
+### ❌ 错误：模糊、间接
+
+```markdown
+# ❌ 错误：模糊
+请帮忙看看用户想要什么，可以的话给出一些分析...
+
+# ❌ 错误：过度礼貌
+如果您方便的话，可否考虑分析一下用户意图？
+```
+
+---
+
+## 三、Use Examples (Few-Shot Prompting)
+
+> **Anthropic**: "One good example beats multiple descriptive adjectives."
+> **OpenAI**: "Show examples in the output format rather than just describing it."
+
+### ✅ 正确：示例驱动判断
+
+```markdown
+# Examples
+
+<example>
+<query>帮我查一下上海天气</query>
+<output>
+{
+  "task_type": "information_query",
+  "complexity": "simple",
+  "needs_plan": false,
+  "reasoning": "单步查询，直接返回结果"
+}
+</output>
+</example>
+
+<example>
+<query>分析这三家竞品的功能差异，写一份对比报告</query>
+<output>
+{
+  "task_type": "data_analysis",
+  "complexity": "complex",
+  "needs_plan": true,
+  "reasoning": "需要多步骤：收集信息 → 对比分析 → 撰写报告"
+}
+</output>
+</example>
+```
+
+### Few-Shot 示例原则
+
+| 原则 | 说明 |
+|------|------|
+| 覆盖边界 | 简单、中等、复杂场景都要有示例 |
+| 多样性 | 不同任务类型、不同输入形式 |
+| 展示推理 | 在示例中展示判断逻辑 |
+| 格式一致 | 所有示例使用相同的输出格式 |
+
+---
+
+## 四、Use XML Tags（使用标签分隔）
+
+> **Anthropic**: "Use clear section markers to help Claude follow structure more reliably."
+> **OpenAI**: "Use separators like ### or XML tags to distinguish instructions from context."
+
+### ✅ 正确：结构化标签
+
+```markdown
+<instructions>
+分析用户输入，判断任务类型和复杂度。
+</instructions>
+
+<output_format>
+{
+  "task_type": "string",
+  "complexity": "simple|medium|complex"
+}
+</output_format>
+
+<examples>
+  <example>
+    <input>今天天气怎么样？</input>
+    <output>{"task_type": "query", "complexity": "simple"}</output>
+  </example>
+</examples>
+
+<context>
+用户对话历史：{history}
+当前查询：{query}
+</context>
+```
+
+### 常用标签
+
+| 标签 | 用途 |
+|------|------|
+| `<instructions>` | 核心指令 |
+| `<output_format>` | 输出格式定义 |
+| `<examples>` | Few-shot 示例 |
+| `<context>` | 动态上下文 |
+| `<constraints>` | 约束条件 |
+| `<input>` / `<output>` | 示例的输入输出 |
+
+---
+
+## 五、Structured Output（结构化输出）
+
+> **OpenAI**: "Generate JSON data with Structured Outputs to ensure conformance to a JSON schema."
+> **Anthropic**: "Force structure in outputs with JSON, bullets, or structured schema."
+
+### ✅ 正确：明确的 JSON Schema
+
+```markdown
+### Output Format (JSON)
+
+```json
+{
+  "task_type": "information_query|content_generation|data_analysis|code_task|other",
+  "complexity": "simple|medium|complex",
+  "needs_plan": true|false,
+  "execution_strategy": "rvr|rvr-b"
+}
+```
+
+**字段说明**：
+- task_type: 必填，任务分类
+- complexity: 必填，复杂度等级
+- needs_plan: 必填，是否需要规划
+- execution_strategy: 必填，执行策略
+
+**ALL FIELDS ARE REQUIRED** — 不要省略任何字段。
+```
+
+### 输出格式原则
+
+| 原则 | 说明 |
+|------|------|
+| 枚举选项 | 用 `|` 分隔所有可选值 |
+| 类型标注 | 明确 string/number/boolean |
+| 必填标记 | 明确哪些字段必须输出 |
+| 默认值 | 不确定时使用什么值 |
+
+---
+
+## 六、判断标准 + 示例（核心技巧）
+
+> **核心**：每个选项都需要判断标准 + 具体示例
+
+### ✅ 正确：判断标准清晰
+
+```markdown
+**complexity**:
+- **simple**: 单步骤，可直接回答
+  - 例: "今天天气？", "Python 是什么？", "1+1=?"
+  
+- **medium**: 2-4 步骤，需要一定组织
+  - 例: "搜索并总结", "写个函数", "分析这份数据"
+  
+- **complex**: 5+ 步骤，需要完整规划
+  - 例: "调研竞品并写报告", "重构整个模块", "设计系统架构"
+```
+
+### ❌ 错误：只有抽象描述，无具体示例
+
+```markdown
+# ❌ 错误：抽象描述
+**complexity**:
+- simple: 简单任务
+- medium: 中等复杂度任务
+- complex: 复杂任务
+```
+
+---
+
+## 七、边界条件处理
+
+### ✅ 必须明确不确定情况的处理
+
+```markdown
+**处理不确定情况**：
+- 如果无法判断任务类型 → 选择 "other"
+- 如果复杂度难以判断 → 选择 "medium"（保守默认）
+- 可选字段不确定时 → 填 null
+- 所有字段必须输出，不要省略
+```
+
+---
+
+## 八、禁止模式
+
+### ❌ 禁止：解释性文字
+
+```markdown
+# ❌ 错误：这是给人看的解释，模型不需要知道
+⚠️ 区分 `max_steps` 与 `max_turns`:
+- `max_steps` = 规划步骤数（Plan 里有几个 TODO）
+- `max_turns` = Agent 执行轮数（LLM 调用次数）
+
+# ❌ 错误：内部实现细节
+这个字段会影响 AgentFactory 的配置生成逻辑...
+
+# ❌ 错误：技术背景
+RVR-B 是 React-Validate-Reflect-Backtrack 的缩写...
+```
+
+### ❌ 禁止：参数映射表
+
+```markdown
+# ❌ 错误：这是代码应该知道的，不是模型应该知道的
+| 值 | max_steps | 内部配置 |
+|----|-----------|----------|
+| none | 5 | plan_manager.max_steps=5 |
+```
+
+### ❌ 禁止：冗余重复
+
+```markdown
+# ❌ 错误：重复说同一件事
+**suggested_planning_depth** (可选):
+影响 `plan_manager.max_steps`（规划的最大步骤数）
+这个字段用于配置规划的深度...
+规划深度决定了...
+```
+
+---
+
+## 九、提示词质量检查清单
+
+### 必要性检查
+
+- [ ] 每一句话是否帮助模型做出更好的判断？
+- [ ] 是否存在解释性文字？（删除）
+- [ ] 是否存在内部实现细节？（删除）
+- [ ] 是否存在冗余重复？（精简）
+
+### 结构检查
+
+- [ ] 是否有明确的 Identity/Goal？
+- [ ] 是否有清晰的 Instructions？
+- [ ] 是否有明确的 Output Format？
+- [ ] 是否有 Few-shot Examples？
+
+### 清晰度检查
+
+- [ ] 输出格式是否明确？
+- [ ] 枚举选项是否互斥？
+- [ ] 默认值是否明确？
+- [ ] 边界条件是否处理？
+
+### 示例覆盖度检查
+
+- [ ] 简单场景有示例？
+- [ ] 复杂场景有示例？
+- [ ] 边界情况有示例？
+- [ ] 多样性是否足够？
+
+---
+
+## 十、模型特定技巧
+
+### Claude (Anthropic)
+
+| 技巧 | 说明 |
+|------|------|
+| XML 标签 | Claude 对 XML 标签响应良好 |
+| 预填充响应 | 可以预填充 `{` 引导 JSON 输出 |
+| 角色扮演 | 系统提示词中设定专业角色 |
+| 思考链 | 复杂任务可要求先思考再输出 |
+
+### GPT (OpenAI)
+
+| 技巧 | 说明 |
+|------|------|
+| Markdown 结构 | GPT 对 Markdown 标题响应良好 |
+| developer/user 角色 | 使用消息角色区分指令和输入 |
+| 结构化输出 | 可使用 JSON Schema 强制格式 |
+| 推理模型 | o1/o3 需要高层指导，不需要过细指令 |
+
+### Gemini (Google)
+
+| 技巧 | 说明 |
+|------|------|
+| 自然语言 | 使用完整句子，像对话一样 |
+| 迭代优化 | 通过多轮对话逐步改进 |
+| 四要素 | Persona + Task + Context + Format |
+
+---
+
+## 十一、完整示例对比
+
+### ❌ 修改前（给人解释）
+
+```markdown
+### V7.8 LLM 语义建议（用于运行时参数优化）
+
+这些字段帮助框架更精准地配置 Agent 运行时参数：
+
+**suggested_planning_depth** (可选):
+影响 `plan_manager.max_steps`（规划的最大步骤数）
+
+| 值 | max_steps | 适用场景 |
+|----|-----------|----------|
+| none | 5 | 直接回答，不需要规划 |
+| minimal | 5 | 简单规划，粗粒度步骤 |
+| full | 20 | 完整规划 + 质量验证 + 支持重规划 |
+
+⚠️ 区分 `max_steps` 与 `max_turns`:
+- `max_steps` = 规划步骤数（Plan 里有几个 TODO）
+- `max_turns` = Agent 执行轮数（LLM 调用次数，固定 30 轮安全上限）
+```
+
+### ✅ 修改后（驱动模型）
+
+```markdown
+### 语义建议字段
+
+**suggested_planning_depth**:
+- **none**: 任务可直接回答，无需分步骤
+  - 例: "今天天气？", "Python 是什么？"
+- **minimal**: 任务需要 2-3 个简单步骤
+  - 例: "搜索并总结", "写个函数"
+- **full**: 任务需要完整规划（5+ 步骤，多工具协作）
+  - 例: "调研竞品并写分析报告", "重构整个模块"
+- **null**: 不确定时填 null
+```
+
+**改进点**：
+1. 删除参数映射表（代码关心，模型不关心）
+2. 删除内部实现解释（给人看的）
+3. 每个选项有判断标准 + 具体示例
+4. 模型看到输入后能直接匹配输出
+
+---
+
+## 十二、提示词泛化（强制）
+
+提示词必须**面向所有场景**，不得绑定具体应用、公司或业务。
+
+### ✅ 泛化原则
+
+| 维度 | 禁止 | 正确 |
+|---|---|---|
+| 应用名 | `--app "Feishu"` | `--app "<目标应用>"` |
+| 文件路径 | `~/liuyi/招聘/` | `~/path/to/dir` |
+| 业务术语 | `"列出候选人姓名"` | `"描述当前页面内容"` |
+| URL | `https://feishu.cn/xxx` | `https://example.com` |
+
+### 检查清单
+
+- [ ] 示例中是否出现了真实应用名？（替换为占位符）
+- [ ] 示例中是否出现了真实文件路径？（替换为通用路径）
+- [ ] 示例中是否出现了业务特定术语？（替换为通用描述）
+- [ ] 示例是否能覆盖不同场景，而非仅适用于一种？
+
+---
+
+## 十三、Few-Shot 以点带面（强制）
+
+Few-Shot 示例的目的是**教会模型推理模式**，不是穷举所有场景。
+
+### 核心原则：用最少的示例覆盖最多的模式
+
+```
+❌ 错误思路：每个场景写一个示例（50 个示例 → 臃肿、低效）
+✅ 正确思路：选 3-5 个有代表性的示例，覆盖所有推理路径
+```
+
+### 示例选择策略
+
+**1. 覆盖判断边界，不堆量**
+
+```markdown
+# ❌ 错误：同质化示例（全是简单查询）
+- "今天天气？" → simple
+- "北京天气？" → simple
+- "上海天气？" → simple
+
+# ✅ 正确：每个示例覆盖一个不同的判断边界
+- "今天天气？" → simple（单步查询）
+- "对比三家竞品写报告" → complex（多步 + 多工具）
+- "这个系统怎么用？" → simple（虽含"系统"但只是询问）
+```
+
+**2. 包含反直觉的边界案例**
+
+模型最容易犯错的地方才值得写示例：
+
+```markdown
+# 示例 A（正面 - 直觉正确）
+用户: "构造CRM系统"
+输出: complex
+推理: "构造"是 build 动作，完整系统需要多步规划
+
+# 示例 B（反面 - 直觉可能错误）
+用户: "系统怎么用？"
+输出: simple
+推理: 虽然提到"系统"，但只是询问用法
+
+# 示例 C（否定语义 - 常见陷阱）
+用户: "不要做PPT，直接告诉我要点"
+输出: simple
+推理: 用户明确拒绝 PPT，只需要文字总结
+```
+
+**3. 展示推理过程，不只展示结果**
+
+```markdown
+# ❌ 仅展示结果（模型不知道 why）
+用户: "帮我做个简单的报告" → medium
+
+# ✅ 展示推理链（模型学会 how to think）
+用户: "帮我做个简单的报告"
+推理: "简单"限定了范围，虽涉及报告但不需要深度规划
+输出: medium
+```
+
+### Few-Shot 示例数量指南
+
+| 判断维度 | 建议示例数 | 选择策略 |
+|---|---|---|
+| 二分类（是/否） | 2-3 | 正例 + 反例 + 边界 |
+| 多分类（3-5 类） | 3-5 | 每类一个 + 边界案例 |
+| 开放生成 | 2-3 | 短 + 长 + 格式不同 |
+| 工具选择 | 3-4 | 单工具 + 多工具 + 不需要工具 |
+
+### 禁止模式
+
+```markdown
+# ❌ 示例过于具体，绑定业务场景
+用户: "打开飞书的招聘页面"
+输出: 使用 peekaboo 打开飞书...
+
+# ✅ 示例泛化，展示通用模式
+用户: "打开某应用的特定页面"
+输出: 先用 peekaboo see 观察 UI，再根据元素 ID 点击导航
+```
+
+---
+
+## 十四、实践建议
+
+1. **写完后大声读一遍**：如果听起来像技术文档，重写
+2. **删除一半内容**：大多数提示词都太啰嗦
+3. **加倍示例**：一个好示例胜过十句描述
+4. **测试边界情况**：用真实输入验证提示词效果
+5. **迭代优化**：根据实际输出调整提示词
+6. **检查泛化**：示例中不出现真实公司名/应用名/路径
+7. **以点带面**：3-5 个精选示例 > 50 个同质化示例
+
+---
+
+## 参考资源
+
+- [Anthropic Claude Prompt Engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview)
+- [OpenAI Prompt Engineering Guide](https://platform.openai.com/docs/guides/prompt-engineering)
+- [Google Gemini Prompt Design](https://ai.google.dev/gemini-api/docs/prompting-strategies)

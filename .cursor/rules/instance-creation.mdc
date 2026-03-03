@@ -1,0 +1,60 @@
+---
+description: 创建新 Agent 实例的规范和检查清单，确保实例配置完整可加载
+globs: instances/**/*
+alwaysApply: false
+---
+
+# Agent 实例创建规范
+
+## 目录结构（必须）
+
+```
+instances/<instance-name>/
+├── config.yaml              # 实例配置（必须含 agent.provider + agent.model）
+├── prompt.md                # 人格提示词
+├── config/
+│   ├── llm_profiles.yaml    # LLM 路由（从 _template 或 xiaodazi 复制）
+│   ├── skills.yaml          # Skills 清单与分组
+│   └── memory.yaml          # 记忆配置
+├── prompt_results/
+│   └── README.md            # 占位（框架启动时自动生成缓存）
+└── skills/
+    ├── skill_registry.yaml  # Skills 注册表
+    └── <skill-name>/
+        └── SKILL.md         # Skill 定义
+```
+
+## config.yaml 必填字段
+
+```yaml
+instance:
+  name: "实例显示名"
+  description: "一句话描述"
+  version: "1.0.0"
+agent:
+  provider: qwen          # 必填：qwen / claude / deepseek / glm / minimax
+  model: qwen3-max        # 必填：与 provider 匹配的模型名
+```
+
+**关键**：缺少 `agent.provider` 和 `agent.model` 会导致实例在 App 前端不可见（加载失败但不报错）。
+
+## 部署到 App 的路径
+
+- 开发模式：直接使用 `instances/` 目录
+- 打包模式（macOS）：`~/Library/Application Support/com.zenflux.agent/instances/`
+- Tauri 通过 `--data-dir` 参数传入，identifier 为 `com.zenflux.agent`（非 `com.xiaodazi.app`）
+
+## Skill 注册两步走
+
+1. `skills/<skill-name>/SKILL.md` — 定义 Skill（含 YAML frontmatter：name + description）
+2. `skills/skill_registry.yaml` — 注册启用
+3. `config/skills.yaml` — 声明分组和加载方式
+
+## 创建检查清单
+
+- [ ] `config.yaml` 包含 `agent.provider` 和 `agent.model`
+- [ ] `prompt.md` 存在且内容 >= 50 字符
+- [ ] `config/llm_profiles.yaml` 已从模板复制
+- [ ] `config/skills.yaml` 中声明的 Skill 在 `skills/` 目录下都有对应目录和 `SKILL.md`
+- [ ] `skills/skill_registry.yaml` 中注册了所有需要启用的 Skill
+- [ ] 每个 `SKILL.md` 的 frontmatter 包含 `name`（小写+连字符）和 `description`

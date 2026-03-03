@@ -1,0 +1,46 @@
+---
+description: "API 三层架构规范"
+globs:
+  - "routers/**/*.py"
+  - "grpc/**/*.py"
+  - "services/**/*.py"
+  - "models/**/*.py"
+alwaysApply: false
+---
+
+# API 三层架构
+
+## 架构原则
+
+```
+routers/     → HTTP 入口（协议转换）
+grpc/        → gRPC 入口（协议转换）
+    ↓
+services/    → 业务逻辑（只写一次！）
+    ↓
+models/      → 数据模型（Pydantic）
+```
+
+## 核心原则
+- **业务逻辑只写一次**：Service 层实现业务逻辑，被 HTTP 和 gRPC 复用
+- Router 和 gRPC Servicer 只做协议转换
+- 使用 Pydantic 模型进行数据验证
+
+## 标准模式
+- `models/` 定义 Pydantic 请求/响应模型
+- `services/` 实现核心业务逻辑
+- `routers/` 提供 HTTP API（调用 Service）
+- `grpc/` 提供 gRPC API（调用同一个 Service）
+
+## FastAPI 指南
+- 使用函数式组件和 Pydantic 模型
+- 路由定义带清晰的返回类型注解
+- 用中间件处理日志、错误监控
+- HTTPException 用于预期错误
+- 依赖注入管理状态和共享资源
+
+## 禁止事项
+- ❌ 业务逻辑写在 Router 或 gRPC Servicer
+- ❌ HTTP 和 gRPC 各写一套业务逻辑
+- ❌ 用 Dict 代替 Pydantic Model
+- ❌ Service 层处理协议细节（HTTP/gRPC）

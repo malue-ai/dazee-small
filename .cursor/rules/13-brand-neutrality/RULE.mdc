@@ -1,0 +1,148 @@
+---
+description: "品牌中立规范：代码和文档中不出现第三方产品名称和开发者名称"
+alwaysApply: true
+---
+
+# 品牌中立规范
+
+## 核心原则
+
+ZenFlux Agent 是独立的智能体框架产品，代码和文档中**不得出现第三方产品名称或开发者名称**，保持品牌独立性和专业性。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  代码注释/docstring 只描述「做了什么」和「为什么这样做」                          │
+│  不描述「参考了谁」或「借鉴了哪个产品」                                          │
+│                                                                             │
+│  ❌ "借鉴 LobeHub FinishReason"                                             │
+│  ❌ "参考 LangChain 的 Agent 实现"                                           │
+│  ❌ "类似 Notion 的块编辑器设计"                                               │
+│                                                                             │
+│  ✅ "统一终止原因为枚举，便于前端展示和数据分析"                                  │
+│  ✅ "基于多轮循环的 Agent 执行框架"                                             │
+│  ✅ "块编辑器设计，支持拖拽排序"                                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 一、禁止出现的名称类型
+
+### 1. 竞品智能体框架（直接竞品）
+
+- ❌ LangChain、LangGraph、LangSmith
+- ❌ AutoGPT、AgentGPT
+- ❌ CrewAI、AutoGen
+- ❌ Genspark、Manus
+- ❌ Dify、Flowise、n8n
+- ❌ Semantic Kernel
+
+### 2. 其他第三方产品
+
+- ❌ LobeHub、LobeChat
+- ❌ Cursor、Windsurf、Copilot（IDE 助手类）
+- ❌ Replit Agent、v0、Bolt（代码生成类）
+- ❌ Perplexity、You.com（搜索类）
+- ❌ Notion、Obsidian、Roam（在注释中作为设计参考时）
+
+### 3. 禁止模式："借鉴/参考 XXX"
+
+```python
+# ❌ 严禁：在注释、docstring 中标注设计来源
+"""借鉴 LobeHub FinishReason"""
+"""参考 LangChain 的 Agent 实现"""
+"""类似 Genspark 的 MoA 架构"""
+# V12: 新增 FinishReason（借鉴 LobeHub）
+
+# ✅ 正确：只描述功能本身
+"""统一终止原因枚举，便于前端展示和数据分析"""
+"""基于多轮循环的 Agent 执行框架"""
+# V12: 新增 FinishReason 枚举，统一终止原因
+```
+
+---
+
+## 二、允许使用的名称
+
+### 基础大模型厂商和模型名（底层能力提供方，非竞品）
+
+- ✅ Anthropic、Claude（claude-sonnet-4、claude-opus-4 等）
+- ✅ OpenAI、GPT（gpt-4o、gpt-4-turbo 等）
+- ✅ Google、Gemini
+- ✅ 阿里、通义千问、Qwen
+- ✅ 字节、豆包、Doubao
+- ✅ 智谱、GLM、ChatGLM
+- ✅ DeepSeek、Mistral、Llama 等
+
+```python
+# ✅ 正确：使用模型名称
+from anthropic import Anthropic
+
+self.claude_client = Anthropic()
+primary_model = "claude-sonnet-4-20250514"
+```
+
+### 依赖声明文件
+
+`requirements.txt`、`pyproject.toml` 中引用第三方库名是必要的。
+
+### 技术分析文档
+
+`docs/architecture/` 下的技术分析报告可以引用第三方产品作为对比分析来源，但不可在实现代码注释中出现。
+
+---
+
+## 三、替代命名规范
+
+| 避免使用 | 替代为 |
+|---------|--------|
+| `langchain_tools` | `tool_adapter`、`capability_bridge` |
+| `langchain_agent` | `base_agent`、`agent_core` |
+| `genspark_backtrack` | `backtrack_manager`、`recovery_handler` |
+| `crewai_workflow` | `workflow_engine`、`task_orchestrator` |
+| `lobehub_finish_reason` | `finish_reason`、`termination_reason` |
+
+**大模型相关命名可以正常使用**：
+- ✅ `claude_client`、`openai_service`、`qwen_adapter`
+- ✅ `anthropic_error`、`openai_rate_limit`
+
+---
+
+## 四、代码示例
+
+### ✅ 正确
+
+```python
+class FinishReason(str, Enum):
+    """统一终止原因枚举，便于前端展示和数据分析。"""
+    COMPLETED = "completed"
+    USER_STOP = "user_stop"
+```
+
+### ❌ 错误
+
+```python
+class FinishReason(str, Enum):
+    """终止原因枚举（借鉴 LobeHub FinishReason）"""  # ❌ 提及第三方产品
+    COMPLETED = "completed"
+```
+
+---
+
+## 五、检查清单
+
+开发时自检：
+- [ ] 变量名/类名中是否包含第三方产品名？
+- [ ] 注释/docstring 中是否出现「借鉴/参考/类似 + 产品名」？
+- [ ] 版本更新说明中是否标注了第三方产品作为设计来源？
+- [ ] 文档中是否有不必要的第三方引用？
+
+## 六、代码审查要点
+
+PR 审查时检查：
+1. 搜索第三方关键词：`langchain`、`crewai`、`autogen`、`genspark`、`dify`、`lobehub`、`lobe`、`notion`（注释中）等
+2. 搜索来源标注模式：`借鉴`、`参考`、`inspired by`、`based on`、`similar to`（后跟产品名）
+3. 大模型名称（anthropic、openai、claude、gpt）可以正常出现
+4. 确认注释和文档中只描述功能，不标注设计来源
