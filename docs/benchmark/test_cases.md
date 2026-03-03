@@ -63,6 +63,10 @@
 | **I2** | **RVR-B 回溯** | **单轮** | **TOOL_REPLACE — 扫描件 PDF 工具切换** | **1** | **扫描页无文字 → 工具替换/标注 → 完成** |
 | **I3** | **RVR-B 回溯** | **单轮** | **PLAN_REPLAN — 多步骤连锁失败** | **1** | **图表渲染失败 → 策略升级 → 重新规划** |
 | **I4** | **RVR-B 回溯** | **单轮** | **回溯升级链 — 3 层递进失败** | **1** | **PARAM→TOOL→PLAN 升级 + 死循环防护** |
+| **J1** | **云端协同** | **单轮** | **CloudClient SSE 全链路** | **1** | **健康检查 + SSE 流完整 + 事件格式 + 文本提取** |
+| **J2** | **云端协同** | **单轮** | **CloudAgentTool 端到端委托** | **1** | **工具调用 → CloudClient → SSE → 进度事件 → 结果返回** |
+| **J3** | **云端协同** | **单轮** | **云端异常降级与超时** | **1** | **网络不可达 → 友好错误 + 超时保护 + 无崩溃** |
+| **J4** | **云端协同** | **多轮** | **云端深度调研 — 搜索→分析→结构化** | **3** | **云端工具调用 + 跨轮上下文 + 结构化输出 + 委托价值** |
 
 ---
 
@@ -1688,7 +1692,7 @@ instances/xiaodazi/skills/markdown-toc/
       → 复制 instances/_template/ → instances/code-reviewer/
       → 修改 config.yaml：
         - instance.name: "code-reviewer"
-        - agent.model: "claude-sonnet-4-5-20250929"
+        - agent.model: "claude-sonnet-4-6"
         - skill_groups 添加 code 组
       → 编写 prompt.md："你是一个资深代码审查专家..."
       → 设置 AGENT_INSTANCE=code-reviewer
@@ -2786,6 +2790,189 @@ Playbook 在线学习（小搭子）：
 
 ---
 
+## 维度 J：云端协同 E2E 验证
+
+> **测试目标**：验证 Phase 0.5 云端直调链路的真实端到端可用性 — 从 CloudClient HTTP 调用到 CloudAgentTool 事件桥接再到异常降级。不模拟、不 Mock，全部打向真实远端 `https://agent.dazee.ai`。
+>
+> **自动化脚本**：`scripts/test_cloud_e2e.py`（连通性） + `tests/test_cloud_agent_e2e.py`（工具级 + 异常场景）
+
+### J1. CloudClient SSE 全链路（单轮）
+
+**测试目标**：验证 `services/cloud_client.py` 的 `CloudClient` 能否完成从连接到 SSE 解析的全链路。
+
+**验证流程**：
+
+```
+1. health_check() → 云端 /health 返回 200
+2. chat_stream("简单回复两个字：收到") → SSE 事件流
+3. 逐事件解析 → 验证事件序列完整性
+4. 提取最终文本 → 验证非空
+```
+
+**SSE 事件序列验证**：
+
+```
+期望收到的事件类型（按序）：
+  session_start → conversation_start → message_start
+  → content_start(thinking) → content_delta* → content_stop
+  → content_start(text) → content_delta* → content_stop
+  → message_stop
+
+必须满足：
+  - session_start 包含 session_id（非空字符串）
+  - content_delta 的 delta 字段为字符串
+  - message_stop 为最后一个事件
+  - 至少 6 种事件类型
+```
+
+**量化指标**：
+
+| 指标 | 预期 |
+|------|------|
+| 健康检查响应 | < 2s |
+| SSE 首字节延迟 | < 5s |
+| 事件类型完整度 | >= 6 种（session_start/conversation_start/message_start/content_start/content_delta/content_stop/message_stop） |
+| 文本提取 | 非空，包含中文字符 |
+| 全流程耗时 | < 30s |
+
+**技术验证点**：
+- [ ] `CloudClient.__init__` 默认 URL 为 `https://agent.dazee.ai`
+- [ ] `health_check()` 在云端可达时返回 `True`
+- [ ] `chat_stream()` 正确解析 `data: {...}` 行，跳过空行和非 data 行
+- [ ] SSE 事件 JSON 解析无异常（`json.loads` 成功率 100%）
+- [ ] `message_stop` 事件后迭代正确终止
+- [ ] 事件包含递增 `seq` 字段
+
+---
+
+### J2. CloudAgentTool 端到端委托（单轮）
+
+**测试目标**：验证 `tools/cloud_agent.py` 的 `CloudAgentTool.execute()` 完整链路 — 从参数校验到 CloudClient 调用到事件桥接到结果返回。
+
+**验证流程**：
+
+```
+1. 构造 ToolContext（含 session_id、user_id）
+2. CloudAgentTool().execute({"task": "回复两个字：收到"}, context)
+3. 验证返回值：{"success": True, "result": "..."}
+4. 验证 result 包含实际文本内容
+```
+
+**预期对比**：
+
+| 阶段 | 验证点 |
+|------|--------|
+| 参数校验 | 空 task → `{"success": False, "error": "task 参数不能为空"}` |
+| 健康检查 | 云端可达 → 继续；不可达 → `{"success": False, "error": "...不可达..."}` |
+| SSE 消费 | thinking block → 跳过（不累积到结果）；text block → 累积到 final_text |
+| 结果返回 | `{"success": True, "result": "收到"}` |
+
+**量化指标**：
+
+| 指标 | 预期 |
+|------|------|
+| 空参数拒绝 | 立即返回 error，< 10ms |
+| 正常任务完成 | < 30s |
+| result 长度 | >= 1 字符 |
+| success 字段 | True |
+
+**技术验证点**：
+- [ ] `execute()` 在无 ToolContext 时不崩溃（`context=None` 安全）
+- [ ] thinking 类型的 content_delta 不混入 final_text
+- [ ] tool_use 类型的 content_start 不影响文本累积
+- [ ] `message_stop` 后循环正确退出
+- [ ] 返回字典包含 `success` 和 `result` 字段
+
+---
+
+### J3. 云端异常降级与超时（单轮）
+
+**测试目标**：验证云端不可达、URL 错误、响应超时等异常场景下，CloudClient 和 CloudAgentTool 不崩溃，返回友好错误信息。
+
+**异常场景矩阵**：
+
+| 场景 | 模拟方式 | 预期行为 |
+|------|---------|---------|
+| 云端不可达 | URL 指向 `http://localhost:19999`（无服务） | `CloudClientError`，消息含"无法连接" |
+| URL 错误 | URL 指向 `https://httpbin.org/status/500` | `CloudClientError`，消息含状态码 |
+| 健康检查失败 | URL 指向不可达地址 | `health_check()` 返回 `False`，不抛异常 |
+| 工具级降级 | CloudAgentTool + 不可达 URL | `{"success": False, "error": "...不可达..."}` |
+
+**量化指标**：
+
+| 指标 | 预期 |
+|------|------|
+| 异常响应时间 | < 15s（connect timeout 10s + 缓冲） |
+| 进程稳定性 | 无未捕获异常 |
+| 错误信息可读性 | 包含具体原因（非 traceback） |
+| 资源泄漏 | httpx 连接正确关闭 |
+
+**技术验证点**：
+- [ ] `CloudClientError` 在连接失败时抛出（非 `httpx.ConnectError` 裸抛）
+- [ ] `health_check()` 对任何异常返回 `False`（不抛异常）
+- [ ] `CloudAgentTool.execute()` 捕获所有 `CloudClientError` 并返回 `{"success": False}`
+- [ ] `close()` 正确释放 httpx 连接（无 ResourceWarning）
+
+**E2E 自动化测试脚本**：`tests/test_cloud_agent_e2e.py`
+
+---
+
+### J4. 云端深度调研 — 搜索→分析→结构化（3 轮）
+
+**测试目标**：验证云端协同的**真实业务价值** — 本地 Agent 做不了深度网络搜索（没有 web search / exa 工具），委托云端 Agent 完成搜索→分析→结构化输出的多轮调研任务。这不是"我叫小明你记住没"的连通性测试，而是验证"为什么需要云端"。
+
+**场景价值**：
+
+```
+本地能做的：                           云端能做的（本地做不了）：
+  - 分析本地文件                         - 联网搜索多个信息源
+  - 操作桌面应用                         - 深度网页爬取
+  - 本地知识检索                         - 实时信息获取
+  - 生成文档                             - 沙箱执行代码
+
+→ 用户说"帮我调研 FastAPI 最新动态"
+→ 本地 Agent 判断需要网络搜索 → 委托云端
+→ 云端调用 search/exa 工具获取真实信息 → 返回结果
+→ 这就是云端协同的价值：扩展本地 Agent 的能力边界
+```
+
+**验证流程**：
+
+```
+轮次1: "搜索 FastAPI 最新版本号和主要特性，给 3 个要点"
+       → 云端调用搜索工具（exa/tavily/web_search）
+       → 返回包含真实信息的调研结果（非 LLM 编造）
+       → 提取 conversation_id
+
+轮次2: "根据刚才查到的信息，FastAPI 和 Django 相比有什么优势？对比 3 点"
+       → 同一 conversation_id 追问
+       → 验证：基于轮次1 的搜索结果做深度分析（上下文延续）
+
+轮次3: "把调研和对比整理成表格，包含框架名、适用场景、性能特点"
+       → 验证：将多轮信息整合为结构化输出
+```
+
+**量化指标**：
+
+| 指标 | 预期 |
+|------|------|
+| 轮次 1 结果长度 | >= 50 字（有实质内容） |
+| 轮次 1 主题相关性 | 包含 "FastAPI" 相关信息 |
+| 云端工具调用 | 调用搜索类工具（exa/tavily/search）|
+| 轮次 2 跨轮上下文 | 基于轮次 1 结果做对比分析 |
+| 轮次 3 结构化输出 | 包含表格格式（| 分隔符）|
+| 3 轮总耗时 | < 120s |
+
+**技术验证点**：
+- [ ] 云端 Agent 是否调用了搜索工具（SSE 中有 `content_start {type: "tool_use"}` 事件）
+- [ ] 轮次 1 结果是否包含真实可查证的信息（非纯 LLM 知识编造）
+- [ ] `conversation_id` 跨轮正确传递
+- [ ] 轮次 2 的对比分析是否引用了轮次 1 的搜索结果
+- [ ] 轮次 3 的结构化输出是否整合了轮次 1-2 的全部信息
+- [ ] 云端异常时是否优雅降级（不崩溃）
+
+---
+
 ## 测试结果汇总模板
 
 ### 总体对比
@@ -2801,6 +2988,7 @@ Playbook 在线学习（小搭子）：
 | G. 垂直场景 | 5 | | | |
 | H. 产品健壮性 | 4 | | | |
 | I. RVR-B 回溯 | 4 | | | |
+| J. 云端协同 | 4 | | | |
 | P. Playbook 学习 | 5 | | | |
 
 ### Token 消耗实测

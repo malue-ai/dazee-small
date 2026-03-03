@@ -112,17 +112,21 @@ class PlanTool(BaseTool):
         if not context.conversation_id:
             return {"success": False, "error": "缺少 conversation_id，无法存储计划"}
 
-        if action == "create":
+        if action in ("create", "rewrite"):
             return await self._create(params, context)
         elif action == "update":
             return await self._update(params, context)
-        elif action == "rewrite":
-            return await self._rewrite(params, context)
         else:
             return {"success": False, "error": f"未知操作: {action}"}
 
     async def _create(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
-        """创建新计划"""
+        """
+        创建计划（语义 upsert）
+
+        行为由上游 is_follow_up 信号决定：
+        - 追问(is_follow_up=true) + 已有 plan → 拒绝，引导用 update
+        - 新任务(is_follow_up=false) → 无论是否有旧 plan，直接创建/覆盖
+        """
         name = params.get("name")
         todos = params.get("todos", [])
         overview = params.get("overview")
@@ -134,21 +138,31 @@ class PlanTool(BaseTool):
         if not todos:
             return {"success": False, "error": "缺少 todos"}
 
-        # 检查是否已有计划
         existing = await self._load(context.conversation_id)
-        if existing:
-            return {"success": False, "error": "计划已存在，如需替换请使用 rewrite"}
+        is_follow_up = context.get("is_follow_up", False)
 
+        if existing and is_follow_up:
+            return {
+                "success": False,
+                "error": "当前是追问，已有计划仍在执行中，请用 update 更新步骤状态",
+                "current_plan_name": existing.get("name"),
+            }
+
+        now = datetime.now().isoformat()
         plan = self._build_plan(name, todos, overview, plan_doc, required_skills)
-        plan["created_at"] = datetime.now().isoformat()
+        plan["created_at"] = existing.get("created_at") if existing else now
+        if existing:
+            plan["updated_at"] = now
 
         await self._save(plan, context.conversation_id)
+
+        action_word = "重写" if existing else "创建"
         logger.info(
-            f"✅ 计划已创建: {name}, 共 {len(plan['todos'])} 个步骤"
+            f"计划已{action_word}: {name}, 共 {len(plan['todos'])} 个步骤"
             + (f", required_skills={required_skills}" if required_skills else "")
         )
 
-        return {"success": True, "plan": plan}
+        return {"success": True, "plan": plan, "replaced_old": bool(existing)}
 
     async def _update(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
         """更新步骤状态"""
@@ -227,30 +241,6 @@ class PlanTool(BaseTool):
             )
 
         return response
-
-    async def _rewrite(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
-        """重写整个计划"""
-        name = params.get("name")
-        todos = params.get("todos", [])
-        overview = params.get("overview")
-        plan_doc = params.get("plan")
-        required_skills = params.get("required_skills")
-
-        if not name:
-            return {"success": False, "error": "缺少 name"}
-        if not todos:
-            return {"success": False, "error": "缺少 todos"}
-
-        existing = await self._load(context.conversation_id)
-
-        plan = self._build_plan(name, todos, overview, plan_doc, required_skills)
-        plan["created_at"] = existing.get("created_at") if existing else datetime.now().isoformat()
-        plan["updated_at"] = datetime.now().isoformat()
-
-        await self._save(plan, context.conversation_id)
-        logger.info(f"✅ 计划已重写: {name}, 共 {len(plan['todos'])} 个步骤")
-
-        return {"success": True, "plan": plan}
 
     def _build_plan(
         self,

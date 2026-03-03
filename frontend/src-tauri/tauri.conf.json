@@ -35,7 +35,7 @@
       "endpoints": [
         "https://github.com/malue-ai/dazee-small/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwMUJENDA0NjU2Q0FGQTQKUldTa3IyeGxCTlFia0xkbldXUG4za2NzWnpmZ2tGWmxWbEJmNmdxeGFvSHFIUGJ6ZVNuQ3E1MzgK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ5ODM5Q0ZEMTA1OURCN0EKUldSNjIxa1EvWnlEU1N2TkRTUXQwUkNqcER4Q1lLckVrMGpGRWg1T25qUHpHWGNMeXNlMG16bWIK"
     }
   },
   "bundle": {

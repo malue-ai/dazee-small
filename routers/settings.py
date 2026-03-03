@@ -68,7 +68,7 @@ async def write_settings(body: Dict[str, Any]) -> Dict[str, Any]:
         "ANTHROPIC_API_KEY": "sk-ant-api03-..."
       },
       "llm": {
-        "COT_AGENT_MODEL": "claude-sonnet-4-5-20250514"
+        "COT_AGENT_MODEL": "claude-sonnet-4-6 (or any model ID)"
       }
     }
     ```

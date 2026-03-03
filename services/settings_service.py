@@ -73,7 +73,7 @@ SETTINGS_SCHEMA = {
     },
     "llm": {
         "COT_AGENT_MODEL": {"label": "默认模型", "required": False, "secret": False,
-                            "default": "claude-sonnet-4-5-20250514"},
+                            "default": ""},
         "QOS_LEVEL": {"label": "服务等级", "required": False, "secret": False,
                       "default": "PRO"},
     },

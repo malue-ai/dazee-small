@@ -11,7 +11,7 @@ quickstart: |
   # Windows 截屏: 用 pyautogui.screenshot() 或 PowerShell
   img_b64 = base64.b64encode(open("/tmp/screen.png","rb").read()).decode()
   resp = client.beta.messages.create(
-      model="claude-sonnet-4-5-20250514",
+      model="claude-sonnet-4-6",
       max_tokens=1024,
       tools=[{"type":"computer_20250124","name":"computer",
               "display_width_px":1920,"display_height_px":1080}],
@@ -148,7 +148,7 @@ def computer_use_loop(task: str, max_iterations: int = 10):
 
         # 3. 调用 Claude Computer Use API
         response = client.beta.messages.create(
-            model="claude-sonnet-4-5-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             tools=[{
                 "type": "computer_20250124",
