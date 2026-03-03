@@ -62,67 +62,48 @@ class LocalWorkspace:
 
         Args:
             instance_id: 实例 ID（如 "dazee_agent"）
-            db_dir: SQLite 数据库目录
-            db_name: 数据库文件名
+            db_dir: deprecated, ignored (uses shared global engine)
+            db_name: deprecated, ignored (uses shared global engine)
             skills_dir: Skills 目录路径
         """
         self.instance_id = instance_id
-        self._db_dir = db_dir
-        self._db_name = db_name
         self._skills_dir = Path(skills_dir) if skills_dir else None
 
-        self._engine = None
         self._session_factory = None
         self._vec_available = False
         self._running = False
 
     async def start(self):
         """
-        启动 Workspace（初始化 SQLite 引擎、建表、加载扩展）
+        启动 Workspace（复用全局共享 SQLite 引擎）
         """
         if self._running:
             logger.warning("Workspace 已在运行")
             return
 
         from infra.local_store.engine import (
-            create_local_engine,
-            create_local_session_factory,
-            init_local_database,
-            init_vector_extension,
+            get_local_engine,
+            get_local_session_factory,
+            is_vec_available,
         )
 
         logger.info(f"启动 LocalWorkspace: instance={self.instance_id}")
 
-        # 创建引擎
-        self._engine = create_local_engine(
-            db_dir=self._db_dir,
-            db_name=self._db_name or f"{self.instance_id}.db",
-        )
-
-        # 建表 + FTS5
-        await init_local_database(self._engine)
-
-        # 可选：加载 sqlite-vec
-        self._vec_available = await init_vector_extension(self._engine)
-
-        # 创建会话工厂
-        self._session_factory = create_local_session_factory(self._engine)
+        await get_local_engine()
+        self._session_factory = await get_local_session_factory()
+        self._vec_available = is_vec_available()
 
         self._running = True
         logger.info(
-            f"LocalWorkspace 已启动: vec={'可用' if self._vec_available else '不可用'}"
+            f"LocalWorkspace 已启动 (共享引擎): vec={'可用' if self._vec_available else '不可用'}"
         )
 
     async def shutdown(self):
-        """关闭 Workspace"""
+        """关闭 Workspace（不关闭共享引擎，只清理本地状态）"""
         if not self._running:
             return
 
-        if self._engine:
-            await self._engine.dispose()
-            self._engine = None
-            self._session_factory = None
-
+        self._session_factory = None
         self._running = False
         logger.info("LocalWorkspace 已关闭")
 

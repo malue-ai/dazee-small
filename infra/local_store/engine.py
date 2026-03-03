@@ -25,37 +25,36 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from logger import get_logger
-from utils.app_paths import get_instance_db_dir
+from utils.app_paths import get_shared_db_dir
 
 logger = get_logger("local_store.engine")
 
+SHARED_DB_NAME = "zenflux.db"
+
 
 def _get_default_db_dir() -> str:
-    """Resolve DB directory lazily (reads AGENT_INSTANCE at call time)."""
+    """Return the shared database directory (instance-independent)."""
     env_override = os.getenv("LOCAL_STORE_DIR")
     if env_override:
         return env_override
-    instance = os.getenv("AGENT_INSTANCE", "default")
-    return str(get_instance_db_dir(instance))
+    return str(get_shared_db_dir())
 
 
 def _get_default_db_name() -> str:
-    """Resolve DB name lazily (instance-aware)."""
+    """Return the shared database filename."""
     env_override = os.getenv("LOCAL_STORE_DB")
     if env_override:
         return env_override
-    # 默认使用 {instance_id}.db（与 LocalWorkspace 保持一致）
-    instance = os.getenv("AGENT_INSTANCE", "default")
-    return f"{instance}.db"
+    return SHARED_DB_NAME
 
 
 def _resolve_db_path(db_dir: Optional[str] = None, db_name: Optional[str] = None) -> Path:
     """
-    Resolve database file path (instance-aware via lazy env read).
+    Resolve database file path.
 
     Args:
-        db_dir: Database directory (default: auto-resolved from AGENT_INSTANCE)
-        db_name: Database filename (default: instance.db or zenflux.db)
+        db_dir: Database directory (default: shared dir data/db/)
+        db_name: Database filename (default: zenflux.db)
 
     Returns:
         Full database file path
@@ -209,19 +208,13 @@ async def init_vector_extension(engine: AsyncEngine) -> bool:
 _engine: Optional[AsyncEngine] = None
 _session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 _vec_available: bool = False
-_db_dir: Optional[str] = None
-_db_name: Optional[str] = None
 
 
 async def get_local_engine() -> AsyncEngine:
-    """获取全局 SQLite 引擎（懒初始化）"""
-    global _engine, _db_dir, _db_name
+    """获取全局 SQLite 引擎（懒初始化，使用共享 DB 路径）"""
+    global _engine
     if _engine is None:
-        if _db_dir is None:
-            _db_dir = _get_default_db_dir()
-        if _db_name is None:
-            _db_name = _get_default_db_name()
-        _engine = create_local_engine(db_dir=_db_dir, db_name=_db_name)
+        _engine = create_local_engine()
         await init_local_database(_engine)
         global _vec_available
         _vec_available = await init_vector_extension(_engine)
@@ -259,14 +252,12 @@ def is_vec_available() -> bool:
 
 async def close_local_engine():
     """关闭 SQLite 引擎（应用退出时调用）"""
-    global _engine, _session_factory, _vec_available, _db_dir, _db_name
+    global _engine, _session_factory, _vec_available
     if _engine is not None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
         _vec_available = False
-        _db_dir = None
-        _db_name = None
         logger.info("SQLite 引擎已关闭")
 
 
@@ -277,9 +268,8 @@ async def reload_local_engine() -> None:
     Use case: 用户在运行时安装了 sqlite-vec 依赖，需要重新检测扩展可用性。
     关闭旧引擎并清理全局状态，下次 get_local_engine() 时会重新初始化。
 
-    注意：保留 _db_dir/_db_name，确保 reload 后引擎仍指向同一个 DB 文件。
-    多实例场景下 AGENT_INSTANCE 可能已切换到其他实例，如果重新从环境变量
-    推导路径，会导致引擎指向错误的 DB，造成对话历史"消失"。
+    DB 路径为固定的共享路径 (data/db/zenflux.db)，不依赖 AGENT_INSTANCE，
+    因此 reload 不会导致路径漂移。
     """
     global _engine, _session_factory, _vec_available
     if _engine is not None:
@@ -288,7 +278,6 @@ async def reload_local_engine() -> None:
     _engine = None
     _session_factory = None
     _vec_available = False
-    # _db_dir 和 _db_name 保持不变，get_local_engine() 会复用它们
     
     await get_local_engine()
     logger.info(f"SQLite 引擎已重新加载 (vec_available={_vec_available})")
