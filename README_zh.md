@@ -83,7 +83,7 @@ api_keys:
   ANTHROPIC_API_KEY: sk-ant-api03-your-key-here   # 推荐
   # OPENAI_API_KEY: sk-xxx
   # DASHSCOPE_API_KEY: sk-xxx                      # 千问
-  # GOOGLE_API_KEY: xxx                            # Gemini（免费：1500 次/天）
+  # GEMINI_API_KEY: xxx                             # Gemini（免费：1500 次/天）
 ```
 
 启动后端：

@@ -500,6 +500,16 @@ SUPPORTED_PROVIDERS = {
         "adapter": "openai",
         "validate_method": "openai",
     },
+    "gemini": {
+        "display_name": "Gemini (Google)",
+        "icon": "💎",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "api_key_env": "GEMINI_API_KEY",
+        "api_key_url": "https://aistudio.google.com/apikey",
+        "description": "Google Gemini 系列，支持多模态和超长上下文",
+        "adapter": "gemini",
+        "validate_method": "openai",
+    },
 }
 
 
