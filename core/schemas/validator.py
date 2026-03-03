@@ -535,9 +535,13 @@ class AgentSchema(BaseModel):
     @classmethod
     def validate_model(cls, v):
         """验证模型名称"""
-        valid_prefixes = ["claude-", "gpt-", "gemini-", "qwen"]
+        valid_prefixes = [
+            "claude-", "gpt-", "gemini-", "qwen",
+            "deepseek-", "glm-", "MiniMax-", "minimax-", "kimi-",
+            "o1", "o3", "o4-",
+        ]
         if not any(v.startswith(p) for p in valid_prefixes):
-            logger.warning("未知模型，可能不受支持", extra={"model": v})
+            logger.warning(f"未知模型 '{v}'，可能不受支持", extra={"model": v})
         return v
 
     # ============================================================

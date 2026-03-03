@@ -16,7 +16,7 @@
 - GLM-5:     744B MoE 旗舰（激活 40B），200K 上下文，128K 输出，Coding/Agent SOTA
 - GLM-4.7:   上一代旗舰模型
 - GLM-4.6:   旗舰模型
-- GLM-4.5:   355B MoE 旗舰，对标 claude-sonnet-4-5
+- GLM-4.5:   355B MoE 旗舰，对标 claude-sonnet-4-6
 - GLM-4.5-Air: 106B MoE 轻量旗舰
 - GLM-4.5-X:  高性能加速版
 - GLM-4.5-AirX: 轻量加速版
@@ -1032,7 +1032,7 @@ class GLMLLMService(BaseLLMService):
 
 
 def create_glm_service(
-    model: str = "glm-5",
+    model: str | None = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     enable_thinking: bool = True,
@@ -1042,7 +1042,7 @@ def create_glm_service(
     Create a GLM service (convenience function).
 
     Args:
-        model: Model name (glm-5, glm-4.5, glm-4.5-air, glm-4.5-flash, etc.)
+        model: Model name (defaults from defaults.py)
         api_key: API key (defaults to ZHIPUAI_API_KEY env var)
         base_url: Custom API endpoint
         enable_thinking: Enable thinking mode
@@ -1050,26 +1050,11 @@ def create_glm_service(
 
     Returns:
         GLMLLMService instance
-
-    Examples:
-        # GLM-5: latest flagship model (200K context, 128K output)
-        llm = create_glm_service(
-            model="glm-5",
-            enable_thinking=True
-        )
-
-        # GLM-4.5-Flash: free fast model
-        llm = create_glm_service(
-            model="glm-4.5-flash",
-            enable_thinking=False
-        )
-
-        # International endpoint
-        llm = create_glm_service(
-            model="glm-5",
-            base_url="https://api.z.ai/api/paas/v4"
-        )
     """
+    if model is None:
+        from .defaults import get_default_model
+        model = get_default_model("glm")
+
     if api_key is None:
         api_key = os.getenv("ZHIPUAI_API_KEY")
 
@@ -1097,13 +1082,14 @@ def create_glm_service(
 
 def _register_glm():
     """Register GLM provider (lazy, avoids circular imports)."""
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="glm",
         service_class=GLMLLMService,
         adaptor_class=OpenAIAdaptor,
-        default_model="glm-5",
+        default_model=get_default_model("glm"),
         api_key_env="ZHIPUAI_API_KEY",
         display_name="GLM",
         description="智谱 GLM 系列模型",

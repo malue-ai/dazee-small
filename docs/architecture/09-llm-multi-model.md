@@ -148,8 +148,8 @@ providers:
     intent: { model: qwen-turbo, ... }
 
   claude:
-    agent: { model: claude-sonnet-4-20250514, ... }
-    heavy: { model: claude-sonnet-4-20250514, ... }
+    agent: { model: claude-sonnet-4-6, ... }
+    heavy: { model: claude-sonnet-4-6, ... }
     light: { model: claude-haiku-4-5-20251001, ... }
     intent: { model: claude-haiku-4-5-20251001, ... }
 

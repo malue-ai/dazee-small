@@ -724,13 +724,14 @@ class OpenAILLMService(BaseLLMService):
 
 def _register_openai():
     """延迟注册 OpenAI Provider（避免循环导入）"""
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="openai",
         service_class=OpenAILLMService,
         adaptor_class=OpenAIAdaptor,
-        default_model="gpt-4o",
+        default_model=get_default_model("openai"),
         api_key_env="OPENAI_API_KEY",
         display_name="OpenAI",
         description="OpenAI GPT 系列模型",
@@ -746,7 +747,7 @@ def _register_openai():
         name="kimi",
         service_class=OpenAILLMService,
         adaptor_class=OpenAIAdaptor,
-        default_model="kimi-k2.5",
+        default_model=get_default_model("kimi"),
         api_key_env="MOONSHOT_API_KEY",
         display_name="Kimi (Moonshot)",
         description="Moonshot AI Kimi 系列模型（OpenAI 兼容）",

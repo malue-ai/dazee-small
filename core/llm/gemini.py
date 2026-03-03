@@ -81,14 +81,15 @@ class GeminiLLMService(BaseLLMService):
 def _register_gemini():
     """延迟注册 Gemini Provider（避免循环导入）"""
     from .adaptor import GeminiAdaptor
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="gemini",
         service_class=GeminiLLMService,
         adaptor_class=GeminiAdaptor,
-        default_model="gemini-pro",
-        api_key_env="GOOGLE_API_KEY",
+        default_model=get_default_model("gemini"),
+        api_key_env="GEMINI_API_KEY",
         display_name="Gemini",
         description="Google Gemini 系列模型（待实现）",
         supported_features=[
