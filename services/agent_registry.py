@@ -321,7 +321,8 @@ class AgentRegistry:
 
     # ==================== 获取 Agent ====================
 
-    async def get_agent(self, agent_id: str, event_manager=None, conversation_service=None):
+    async def get_agent(self, agent_id: str, event_manager=None, conversation_service=None,
+                        **extra):
         """
         获取 Agent 实例（按需加载 + 原型复用）
 
@@ -334,6 +335,7 @@ class AgentRegistry:
             agent_id: Agent ID（instances/ 目录名）
             event_manager: 事件管理器
             conversation_service: 会话服务
+            **extra: 透传到 ToolContext.extra（如 files=files_metadata）
 
         Returns:
             就绪的 Agent 实例
@@ -367,7 +369,8 @@ class AgentRegistry:
 
             # 浅克隆并重置会话状态
             agent = prototype.clone_for_session(
-                event_manager=event_manager, conversation_service=conversation_service
+                event_manager=event_manager, conversation_service=conversation_service,
+                **extra,
             )
 
             logger.debug(f"🚀 Agent '{agent_id}' 从原型克隆完成（快速路径）")

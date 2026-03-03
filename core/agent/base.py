@@ -345,6 +345,13 @@ class Agent:
         self._current_conversation_id = conversation_id
         self._current_user_id = user_id
         self._current_session_id = session_id
+        self._current_intent = intent
+
+        # 将 is_follow_up 信号注入 ToolContext.extra（Plan Tool 等工具可读取）
+        if self._tool_executor:
+            self._tool_executor.update_context(
+                is_follow_up=intent.is_follow_up if intent else False,
+            )
 
         # 从 session_context 获取 tracer（由 Service 层创建）
         self._tracer = session_context.get("tracer")
@@ -783,10 +790,12 @@ class Agent:
         conversation_id = self._current_conversation_id or None
 
         if session_id or user_id or conversation_id:
+            intent = getattr(self, "_current_intent", None)
             self._tool_executor.update_context(
                 session_id=session_id,
                 user_id=user_id,
                 conversation_id=conversation_id,
+                is_follow_up=intent.is_follow_up if intent else False,
             )
 
         if tool_name in CONTEXT_INJECTION_TOOLS:
@@ -817,12 +826,14 @@ class Agent:
     # ==================== 克隆 ====================
 
     def clone_for_session(
-        self, event_manager, workspace_dir: str = None, conversation_service=None
+        self, event_manager, workspace_dir: str = None, conversation_service=None,
+        **extra,
     ) -> "Agent":
         """
         从原型克隆实例
 
         复用重量级组件，重置会话级状态。
+        **extra 透传到 ToolContext.extra（如 files=files_metadata）。
         """
         from core.events.broadcaster import EventBroadcaster
         from core.tool import create_tool_context, create_tool_executor
@@ -835,6 +846,7 @@ class Agent:
             event_manager=event_manager,
             workspace_dir=workspace_dir or getattr(self, "workspace_dir", None),
             apis_config=getattr(self, "apis_config", []),
+            **extra,
         )
         tool_executor = create_tool_executor(
             registry=getattr(self, "capability_registry", None),

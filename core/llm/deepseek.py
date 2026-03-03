@@ -10,7 +10,7 @@ DeepSeek LLM 服务实现
 - 流式断连重试与降级
 
 模型对应关系（均基于 DeepSeek-V3.2，128K 上下文）：
-- deepseek-reasoner ↔ DeepSeek-V3.2 思考模式（对标 claude-sonnet-4-5 / qwen3-max）
+- deepseek-reasoner ↔ DeepSeek-V3.2 思考模式（对标 claude-sonnet-4-6 / qwen3-max）
 - deepseek-chat     ↔ DeepSeek-V3.2 非思考模式（对标 claude-haiku-4-5 / qwen-plus）
 
 思考模式 + 工具调用注意事项：
@@ -1082,7 +1082,7 @@ class DeepSeekLLMService(BaseLLMService):
 
 
 def create_deepseek_service(
-    model: str = "deepseek-reasoner",
+    model: str | None = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     enable_thinking: bool = True,
@@ -1092,7 +1092,7 @@ def create_deepseek_service(
     Create a DeepSeek service (convenience function).
 
     Args:
-        model: Model name (deepseek-reasoner or deepseek-chat)
+        model: Model name (defaults from defaults.py)
         api_key: API key (defaults to DEEPSEEK_API_KEY env var)
         base_url: Custom API endpoint
         enable_thinking: Enable thinking mode
@@ -1101,6 +1101,10 @@ def create_deepseek_service(
     Returns:
         DeepSeekLLMService instance
     """
+    if model is None:
+        from .defaults import get_default_model
+        model = get_default_model("deepseek")
+
     if api_key is None:
         api_key = os.getenv("DEEPSEEK_API_KEY")
 
@@ -1126,15 +1130,14 @@ def create_deepseek_service(
 
 def _register_deepseek():
     """Register DeepSeek provider (lazy, avoids circular imports)."""
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="deepseek",
         service_class=DeepSeekLLMService,
         adaptor_class=DeepSeekAdaptor,
-        default_model="deepseek-reasoner",
-        # [V4 Ready] V4 上线后更新 default_model（如模型名变更）：
-        # default_model="deepseek-v4-reasoner",
+        default_model=get_default_model("deepseek"),
         api_key_env="DEEPSEEK_API_KEY",
         display_name="DeepSeek",
         description="DeepSeek V3.2 系列模型（深度求索），128K 上下文",
