@@ -237,11 +237,12 @@ def create_llm_service(
             env_keys = {
                 LLMProvider.CLAUDE: "ANTHROPIC_API_KEY",
                 LLMProvider.OPENAI: "OPENAI_API_KEY",
-                LLMProvider.GEMINI: "GOOGLE_API_KEY",
+                LLMProvider.GEMINI: "GEMINI_API_KEY",
                 LLMProvider.QWEN: "DASHSCOPE_API_KEY",
                 LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
                 LLMProvider.GLM: "ZHIPUAI_API_KEY",
                 LLMProvider.MINIMAX: "MINIMAX_API_KEY",
+                LLMProvider.KIMI: "MOONSHOT_API_KEY",
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 

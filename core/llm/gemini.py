@@ -89,7 +89,7 @@ def _register_gemini():
         service_class=GeminiLLMService,
         adaptor_class=GeminiAdaptor,
         default_model=get_default_model("gemini"),
-        api_key_env="GOOGLE_API_KEY",
+        api_key_env="GEMINI_API_KEY",
         display_name="Gemini",
         description="Google Gemini 系列模型（待实现）",
         supported_features=[
