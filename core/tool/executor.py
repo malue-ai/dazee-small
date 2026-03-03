@@ -276,6 +276,15 @@ class ToolExecutor:
         # 2. 检查工具是否在 Registry 中
         cap = self.registry.get(tool_name)
         if not cap or cap.type != CapabilityType.TOOL:
+            if cap and cap.type == CapabilityType.SKILL:
+                return {
+                    "success": False,
+                    "error": (
+                        f"{tool_name} 是 Skill，不是可直接调用的工具。"
+                        f"请通过 nodes 工具执行该 Skill 的代码，"
+                        f"或用 api_calling 工具调用其 API。"
+                    ),
+                }
             return {"success": False, "error": f"工具 {tool_name} 未找到"}
 
         # 3. 系统工具：直接返回 tool_input
