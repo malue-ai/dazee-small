@@ -1,0 +1,111 @@
+---
+alwaysApply: true
+---
+
+# 架构清理规范
+
+## 核心原则
+
+### 0. 禁止向后兼容代码（强制）
+
+**代码未上线，不存在向后兼容问题。** 以下做法严格禁止：
+
+- ❌ 保留旧代码路径作为 fallback（如 `else: 用旧路径`）
+- ❌ 标记 `# Legacy`、`# Deprecated` 但不删除
+- ❌ 新旧两套逻辑并存（如同时支持全局路径和实例隔离路径）
+- ❌ `try: 新方式 except: 旧方式` 兼容层
+
+**正确做法**：直接删除旧代码，只保留新实现。旧路径仅在一次性迁移脚本中出现。
+
+### 1. 及时清理冗余代码
+
+发现以下情况必须立即清理：
+- 重复文件（如重构后遗留的旧版本）
+- 被创建但从未调用的对象
+- 已迁移到其他模块的功能
+- 旧的默认值/fallback 路径（如 `~/.xiaodazi` 硬编码）
+
+### 2. 意图识别架构（V9.0）
+
+**单一职责**：意图识别由路由层统一处理
+
+```
+正确架构：
+ChatService
+  → AgentRouter.route()
+    → core/routing/intent_analyzer.IntentAnalyzer  ← 唯一位置
+  → SimpleAgent.chat(intent=intent)  ← intent 从路由层传入
+
+错误做法：
+❌ SimpleAgent 内部再做意图分析
+❌ 多个位置存在 IntentAnalyzer 副本
+```
+
+**文件位置**：
+- `core/routing/intent_analyzer.py` - 唯一的 IntentAnalyzer 实现
+- `core/routing/__init__.py` - 导出 IntentAnalyzer
+
+### 3. 意图识别上下文过滤（V9.0）
+
+**时延约束**：意图识别总时延 < 200ms
+
+**过滤规则**（`_filter_for_intent` 方法）：
+- 只保留最近 5 条 `role=user` 消息
+- 最后 1 条 `role=assistant` 截断为 100 字符
+- 直接丢弃 tool_use/tool_result
+- 过滤逻辑 O(n)，< 0.1ms
+
+**禁止**：
+- ❌ 上下文压缩（需要 LLM 调用）
+- ❌ 复杂文本处理（正则、摘要生成）
+- ❌ 任何网络调用
+
+### 4. 意图状态转换
+
+**追问场景**（`is_follow_up=true`）：
+- 复用 `plan_cache`
+- 继承上轮 `task_type`
+
+**新意图场景**（`is_follow_up=false`）：
+- 重置 `plan_cache`
+- 清空 `tool_calls` 历史
+
+### 5. 实例存储隔离（强制）
+
+**所有运行时数据必须按实例隔离**，通过 `AGENT_INSTANCE` 环境变量驱动。
+
+**路径规范**：
+
+| 数据类型 | 路径函数 | 示例路径 |
+|---------|---------|---------|
+| 数据库 | `get_instance_db_dir(name)` | `data/instances/xiaodazi/db/instance.db` |
+| 记忆文件 | `get_instance_memory_dir(name)` | `data/instances/xiaodazi/memory/MEMORY.md` |
+| 向量/索引 | `get_instance_store_dir(name)` | `data/instances/xiaodazi/store/mem0_vectors.db` |
+| 文件上传 | `get_instance_storage_dir(name)` | `data/instances/xiaodazi/storage/` |
+| Playbook | `get_instance_playbooks_dir(name)` | `data/instances/xiaodazi/playbooks/` |
+| 快照 | `get_instance_snapshots_dir(name)` | `data/instances/xiaodazi/snapshots/` |
+| 嵌入模型 | `get_shared_models_dir()` | `data/shared/models/`（共享，不隔离） |
+
+**禁止**：
+
+- ❌ 使用全局路径存储实例数据（如 `data/local_store/zenflux.db`）
+- ❌ 硬编码 `~/.xiaodazi/` 作为默认路径
+- ❌ 新增存储组件不感知实例名
+- ❌ `db_path` 或 `base_dir` 参数有不带实例名的默认值
+
+**自动化**：
+
+- `instance_loader.py` 的 `create_agent_from_instance()` 在加载实例时自动设置 `os.environ["AGENT_INSTANCE"]`
+- `main.py` 在只有一个实例时自动检测，用户无需手动设置环境变量
+- 新增存储组件必须通过 `os.environ["AGENT_INSTANCE"]` 获取实例名
+
+## 清理检查清单
+
+当发现可能的冗余代码时，执行以下检查：
+
+1. **grep 调用点**：确认代码是否被实际调用
+2. **分析架构**：确认功能是否已迁移到其他模块
+3. **直接删除**：不保留向后兼容层（代码未上线）
+4. **更新引用**：修复所有导入路径
+5. **更新 __all__**：从导出列表中移除
+6. **检查存储路径**：确认路径包含实例名，无全局路径残留
