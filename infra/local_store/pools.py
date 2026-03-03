@@ -101,6 +101,7 @@ class LocalAgentPool:
         agent_id: str,
         event_manager: Any = None,
         conversation_service: Any = None,
+        **extra,
     ) -> Any:
         """
         获取 Agent 实例（委托 AgentRegistry.get_agent）
@@ -109,6 +110,7 @@ class LocalAgentPool:
             agent_id: Agent ID
             event_manager: 事件管理器
             conversation_service: 会话服务
+            **extra: 透传到 ToolContext.extra（如 files=files_metadata）
 
         Returns:
             就绪的 Agent 实例
@@ -118,6 +120,7 @@ class LocalAgentPool:
             agent_id=agent_id,
             event_manager=event_manager,
             conversation_service=conversation_service,
+            **extra,
         )
         logger.debug("Agent 已获取", extra={"agent_id": agent_id})
         return agent

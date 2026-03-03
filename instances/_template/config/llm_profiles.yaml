@@ -11,7 +11,7 @@
 #   │ 角色     │ qwen             │ claude           │ deepseek         │ glm              │ minimax                  │
 #   ├──────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────────────┤
 #   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
-#   │ heavy    │ qwen3-max        │ claude-sonnet-4-5│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
+#   │ heavy    │ qwen3-max        │ claude-sonnet-4-6│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │
 #   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.5-highspeed   │
 #   └──────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────────────┘
 #
@@ -42,7 +42,7 @@ provider_templates:
       region: "singapore"
 
   claude:
-    agent_model: "claude-sonnet-4-5-20250929"  # 默认主 Agent（可改为 claude-opus-4-6）
+    agent_model: "claude-sonnet-4-6"  # 默认主 Agent（可改为 claude-opus-4-6）
     agent_llm:
       max_tokens: 128000
       enable_thinking: true
@@ -51,11 +51,11 @@ provider_templates:
       # temperature: thinking 开启时由框架自动设置（Claude 强制 1.0）
     heavy:
       provider: "claude"
-      model: "claude-sonnet-4-5-20250929"
+      model: "claude-sonnet-4-6"
       api_key_env: "ANTHROPIC_API_KEY"
     light:
       provider: "claude"
-      model: "claude-haiku-4-5-20251001"
+      model: "claude-haiku-4-5"
       api_key_env: "ANTHROPIC_API_KEY"
 
   deepseek:
