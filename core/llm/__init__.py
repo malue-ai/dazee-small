@@ -31,7 +31,7 @@ llm = ModelRegistry.create_service("gpt-4o")
 embedder = ModelRegistry.create_service("bge-m3")
 
 # 方式 2：通过 LLMRegistry 创建
-llm = LLMRegistry.create_service("claude", model="claude-sonnet-4-5")
+llm = LLMRegistry.create_service("claude")
 
 # 方式 3：使用工厂函数
 llm = create_llm_service(provider=LLMProvider.CLAUDE)
@@ -207,22 +207,17 @@ def create_llm_service(
 
     Example:
     ```python
-    llm = create_llm_service(provider="claude", model="claude-sonnet-4-5")
+    llm = create_llm_service(provider="claude")
     ```
     """
     # 字符串转枚举
     if isinstance(provider, str):
         provider = LLMProvider(provider)
 
-    # 默认模型
+    from .defaults import DEFAULT_MODELS as _DEFAULTS
     default_models = {
-        LLMProvider.CLAUDE: "claude-sonnet-4-5-20250929",
-        LLMProvider.OPENAI: "gpt-4o",
-        LLMProvider.GEMINI: "gemini-pro",
-        LLMProvider.QWEN: "qwen3-max",
-        LLMProvider.DEEPSEEK: "deepseek-reasoner",
-        LLMProvider.GLM: "glm-5",
-        LLMProvider.MINIMAX: "MiniMax-M2.5",
+        LLMProvider(k): v for k, v in _DEFAULTS.items()
+        if k in {p.value for p in LLMProvider}
     }
 
     if model is None:
@@ -242,11 +237,12 @@ def create_llm_service(
             env_keys = {
                 LLMProvider.CLAUDE: "ANTHROPIC_API_KEY",
                 LLMProvider.OPENAI: "OPENAI_API_KEY",
-                LLMProvider.GEMINI: "GOOGLE_API_KEY",
+                LLMProvider.GEMINI: "GEMINI_API_KEY",
                 LLMProvider.QWEN: "DASHSCOPE_API_KEY",
                 LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
                 LLMProvider.GLM: "ZHIPUAI_API_KEY",
                 LLMProvider.MINIMAX: "MINIMAX_API_KEY",
+                LLMProvider.KIMI: "MOONSHOT_API_KEY",
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 

@@ -84,7 +84,7 @@ api_keys:
   ANTHROPIC_API_KEY: sk-ant-api03-your-key-here   # Recommended
   # OPENAI_API_KEY: sk-xxx
   # DASHSCOPE_API_KEY: sk-xxx                      # Qwen
-  # GOOGLE_API_KEY: xxx                            # Gemini (free: 1500 req/day)
+  # GEMINI_API_KEY: xxx                             # Gemini (free: 1500 req/day)
 ```
 
 Start the backend:

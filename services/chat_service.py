@@ -1003,10 +1003,14 @@ class ChatService:
         session_pool_updated = False
 
         try:
+            acquire_extra = {}
+            if files_metadata:
+                acquire_extra["files"] = files_metadata
             agent = await self.agent_pool.acquire(
                 agent_id=pool_key,
                 event_manager=self.session_service.events,
                 conversation_service=self.conversation_service,
+                **acquire_extra,
             )
             agent_acquired = True
             tool_count = 0

@@ -49,7 +49,7 @@
 
 ### 2.2 Phase 1 — Agent 真实交互
 
-#### Claude Provider（claude-sonnet-4-5 主 Agent）
+#### Claude Provider（claude-sonnet-4-6 主 Agent）
 
 ```
 🧪 Grader LLM: claude-opus-4-6 (thinking=True)
@@ -64,12 +64,12 @@
 
 | 用例 | Agent 模型 | 轮次 | 耗时 | Code Grader | Model Grader |
 |------|-----------|------|------|-------------|-------------|
-| A1 | claude-sonnet-4-5 | 4 轮 | ~63s | ✅ 0 错误 | 待 Opus 评分 |
-| B1 | claude-sonnet-4-5 | 5 轮(跨 3 会话) | ~70s | — | 待 Opus 评分 |
-| D4 | claude-sonnet-4-5 | 多轮 | 数分钟 | ✅ 0 错误 | 待 Opus 评分 |
-| C1 | claude-sonnet-4-5 | 2 轮 | ~30s | ✅ Token 达标 | 待 Opus 评分 |
-| **B9** | claude-sonnet-4-5 | — | — | — | **待首次运行** |
-| **B10** | claude-sonnet-4-5 | — | — | — | **待首次运行** |
+| A1 | claude-sonnet-4-6 | 4 轮 | ~63s | ✅ 0 错误 | 待 Opus 评分 |
+| B1 | claude-sonnet-4-6 | 5 轮(跨 3 会话) | ~70s | — | 待 Opus 评分 |
+| D4 | claude-sonnet-4-6 | 多轮 | 数分钟 | ✅ 0 错误 | 待 Opus 评分 |
+| C1 | claude-sonnet-4-6 | 2 轮 | ~30s | ✅ Token 达标 | 待 Opus 评分 |
+| **B9** | claude-sonnet-4-6 | — | — | — | **待首次运行** |
+| **B10** | claude-sonnet-4-6 | — | — | — | **待首次运行** |
 
 #### Qwen Provider（qwen3-max 主 Agent）
 
@@ -84,7 +84,7 @@
 
 ### 2.3 模型对比发现
 
-| 指标 | claude-sonnet-4-5 | qwen3-max |
+| 指标 | claude-sonnet-4-6 | qwen3-max |
 |------|-------------------|-----------|
 | A1 完成轮次 | 4 轮 | 10+ 轮 |
 | A1 耗时 | ~63 秒 | 180+ 秒 |
@@ -230,8 +230,8 @@ instance_loader → 覆盖 provider → 使用 claude 模板
 ┌──────────┬─────────────────────┬──────────────────────┐
 │ 角色     │ qwen                │ claude               │
 ├──────────┼─────────────────────┼──────────────────────┤
-│ 主 Agent │ qwen3-max           │ claude-sonnet-4-5    │
-│ heavy    │ qwen3-max           │ claude-sonnet-4-5    │
+│ 主 Agent │ qwen3-max           │ claude-sonnet-4-6    │
+│ heavy    │ qwen3-max           │ claude-sonnet-4-6    │
 │ light    │ qwen-plus           │ claude-haiku-4-5     │
 └──────────┴─────────────────────┴──────────────────────┘
 ```

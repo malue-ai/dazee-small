@@ -12,7 +12,7 @@
 - 结构化输出（response_format）
 
 模型对应关系：
-- qwen3-max ↔ claude-sonnet-4-5（旗舰模型）
+- qwen3-max ↔ claude-sonnet-4-6（旗舰模型）
 - qwen-plus ↔ claude-haiku-4-5（快速模型）
 
 参考文档：
@@ -178,7 +178,7 @@ class QwenLLMService(BaseLLMService):
     基于 OpenAI 兼容接口，保持与 Claude 服务相同的接口规范。
 
     模型对应关系：
-    - qwen3-max: 对标 claude-sonnet-4-5（旗舰模型，适用于复杂推理）
+    - qwen3-max: 对标 claude-sonnet-4-6（旗舰模型，适用于复杂推理）
     - qwen-plus: 对标 claude-haiku-4-5（快速模型，适用于简单任务）
 
     支持的功能：
@@ -1500,7 +1500,7 @@ class QwenLLMService(BaseLLMService):
 
 
 def create_qwen_service(
-    model: str = "qwen3-max",
+    model: str | None = None,
     api_key: Optional[str] = None,
     region: str = "cn-beijing",
     base_url: Optional[str] = None,
@@ -1511,7 +1511,7 @@ def create_qwen_service(
     创建千问服务的便捷函数
 
     Args:
-        model: 模型名称（qwen3-max 或 qwen-plus）
+        model: 模型名称（默认从 defaults.py 获取）
         api_key: API 密钥（默认从环境变量读取）
         region: 地域（cn-beijing, singapore, us-virginia, finance）
         base_url: 自定义 API 端点（优先级高于 region）
@@ -1520,26 +1520,11 @@ def create_qwen_service(
 
     Returns:
         QwenLLMService 实例
-
-    示例：
-        # qwen3-max: 对标 claude-sonnet-4-5（旗舰模型）
-        llm = create_qwen_service(
-            model="qwen3-max",
-            enable_thinking=True
-        )
-
-        # qwen-plus: 对标 claude-haiku-4-5（快速模型）
-        llm = create_qwen_service(
-            model="qwen-plus",
-            enable_thinking=False
-        )
-
-        # 自定义端点（使用代理）
-        llm = create_qwen_service(
-            model="qwen3-max-2026-01-23",
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        )
     """
+    if model is None:
+        from .defaults import get_default_model
+        model = get_default_model("qwen")
+
     if api_key is None:
         api_key = os.getenv("DASHSCOPE_API_KEY")
 
@@ -1563,13 +1548,14 @@ def create_qwen_service(
 
 def _register_qwen():
     """延迟注册 Qwen Provider（避免循环导入）"""
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="qwen",
         service_class=QwenLLMService,
-        adaptor_class=OpenAIAdaptor,  # 千问使用 OpenAI 兼容接口
-        default_model="qwen3-max",
+        adaptor_class=OpenAIAdaptor,
+        default_model=get_default_model("qwen"),
         api_key_env="DASHSCOPE_API_KEY",
         config_class=QwenConfig,
         display_name="通义千问",

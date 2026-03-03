@@ -759,7 +759,7 @@ class MiniMaxLLMService(BaseLLMService):
 
 
 def create_minimax_service(
-    model: str = "MiniMax-M2.5",
+    model: str | None = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     enable_thinking: bool = True,
@@ -778,20 +778,11 @@ def create_minimax_service(
 
     Returns:
         MiniMaxLLMService instance
-
-    Examples:
-        # MiniMax-M2.5: latest flagship (~60 tps)
-        llm = create_minimax_service(
-            model="MiniMax-M2.5",
-            enable_thinking=True
-        )
-
-        # MiniMax-M2.5-highspeed: fast version (~100 tps)
-        llm = create_minimax_service(
-            model="MiniMax-M2.5-highspeed",
-            enable_thinking=False
-        )
     """
+    if model is None:
+        from .defaults import get_default_model
+        model = get_default_model("minimax")
+
     if api_key is None:
         api_key = os.getenv("MINIMAX_API_KEY")
 
@@ -820,13 +811,14 @@ def create_minimax_service(
 
 def _register_minimax():
     """Register MiniMax provider (lazy, avoids circular imports)."""
+    from .defaults import get_default_model
     from .registry import LLMRegistry
 
     LLMRegistry.register(
         name="minimax",
         service_class=MiniMaxLLMService,
         adaptor_class=ClaudeAdaptor,
-        default_model="MiniMax-M2.5",
+        default_model=get_default_model("minimax"),
         api_key_env="MINIMAX_API_KEY",
         display_name="MiniMax",
         description="MiniMax M2.5/M2 系列模型（Anthropic API 兼容）",

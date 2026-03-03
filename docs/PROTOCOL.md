@@ -378,7 +378,7 @@ seq=...  session_end              ← 会话结束
     "type": "message",
     "role": "assistant",
     "content": [],
-    "model": "claude-sonnet-4-5-20250929",
+    "model": "claude-sonnet-4-6",
     "stop_reason": null,
     "stop_sequence": null,
     "usage": { "input_tokens": 0, "output_tokens": 0 }
@@ -1085,7 +1085,7 @@ ws://{host}/api/v1/realtime/ws?model=gpt-4o-realtime-preview&voice=alloy&instruc
   "total_tokens": 390,
   "latency": 1.5,
   "llm_calls": 3,
-  "model": "claude-sonnet-4-5-20250929"
+  "model": "claude-sonnet-4-6"
 }
 ```
 
