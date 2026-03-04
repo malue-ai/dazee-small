@@ -88,24 +88,21 @@ except NameError:
 # 解决：对这些包使用 collect_all() 将 .py 文件也复制到输出目录。
 hiddenimports = []
 _native_packages = [
-    # Rust / C 扩展类
+    # Rust / C 扩展类（含 .so/.dylib，必须用 collect_all 确保 .py 同步复制）
     'pydantic_core',   # Rust 扩展 + core_schema.py
     'yaml',            # _yaml.so + error.py 等
     'aiohttp',         # _http_parser.so 等
-    'asyncpg',         # PostgreSQL C 扩展
     'charset_normalizer',
     'cryptography',    # Rust 扩展
     'frozenlist',
     'greenlet',
     'httptools',
     'jiter',
-    'lxml',
     'multidict',
     'numpy',
     'propcache',
     'psutil',
     'regex',
-    'rpds',
     'tiktoken',
     'uvloop',
     'watchfiles',
@@ -113,17 +110,22 @@ _native_packages = [
     'yarl',
     'PIL',             # Pillow
     'llama_cpp',       # GGUF 本地 Embedding（C 扩展）
-    # 数据文件类（有 .py 时区数据 / JSON schema / 模板文件导致建目录）
+    # 数据文件类（有 .py 时区数据 / 模板文件导致建目录）
     'pytz',
-    'jsonschema',
-    'jsonschema_specifications',
     'Crypto',          # pycryptodome
-    'boto3',
-    'botocore',
     'docx',            # python-docx
+    'pdfplumber',      # PDF 表格+文本解析（document_parser.py 延迟导入）
     'google',          # google-* 命名空间
-    'grpc',
-    'grpc_tools',
+    # 以下仅在实际使用时取消注释：
+    # 'asyncpg',       # PostgreSQL（本项目用 SQLite，不需要）
+    # 'boto3',         # AWS S3（未使用）
+    # 'botocore',      # AWS SDK core（未使用）
+    # 'rpds',          # jsonschema 内部依赖（已随 jsonschema 自动打包）
+    # 'jsonschema',    # JSON Schema 验证（随 pydantic 自动打包）
+    # 'jsonschema_specifications',
+    # 'grpc',          # gRPC（仅开发用，桌面端不需要）
+    # 'grpc_tools',    # gRPC 代码生成（仅开发用）
+    # 'lxml',          # XML 处理（未直接使用）
 ]
 
 for _pkg in _native_packages:
@@ -181,6 +183,9 @@ hiddenimports += [
     'croniter',
     # PDF 解析（core/knowledge/file_indexer.py 延迟导入）
     'pypdf',
+    # 文档结构化解析（utils/document_parser.py 延迟导入）
+    'pdfplumber',
+    'unstructured_client',
     # .env 文件加载（utils/instance_loader.py、services/settings_service.py 延迟导入）
     'dotenv',
 ]

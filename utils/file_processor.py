@@ -394,7 +394,14 @@ class FileProcessor:
                     category = FileCategory.DOCUMENT
 
         # Document: for parseable types (PDF/DOCX), attempt pre-parse
-        if mime_type in self.PARSEABLE_DOC_TYPES and local_path:
+        # Tauri/browsers may identify .docx as application/octet-stream instead of the official MIME
+        is_parseable = mime_type in self.PARSEABLE_DOC_TYPES
+        if not is_parseable and mime_type == "application/octet-stream" and filename:
+            ext = Path(filename).suffix.lower()
+            if ext in (".docx", ".pdf"):
+                is_parseable = True
+                logger.info(f"MIME 为 octet-stream 但扩展名为 {ext}，视为可解析文档")
+        if is_parseable and local_path:
             preparsed = await self._preparse_document(local_path, filename)
             if preparsed:
                 return ProcessedFile(
@@ -416,6 +423,7 @@ class FileProcessor:
 
     async def _preparse_document(self, local_path: str, filename: str) -> str:
         """对 PDF/DOCX 调用 DocumentParser 预解析，返回适合注入上下文的摘要。"""
+        logger.info(f"开始文档预解析: {filename} (path={local_path})")
         try:
             from utils.document_parser import DocumentParser
 
@@ -436,7 +444,7 @@ class FileProcessor:
                 f"完整解析内容已保存: {scratchpad_file}"
             )
         except Exception as e:
-            logger.warning(f"文档预解析失败 ({filename}): {e}")
+            logger.warning(f"文档预解析失败 ({filename}): {type(e).__name__}: {e}", exc_info=True)
             return ""
 
     def _categorize_mime_type(self, mime_type: str) -> FileCategory:

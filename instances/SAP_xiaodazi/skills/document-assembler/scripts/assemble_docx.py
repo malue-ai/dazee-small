@@ -3,9 +3,11 @@ SAP 文档组装（Pandoc 主转换 + python-docx 后处理）
 
 流程：
   1. 按 ASSEMBLY_ORDER 将各章节 Markdown 拼接为完整 .md
-  2. Pandoc 用 sap_reference.docx 模板转为 Word（表格/标题/列表/公式原生渲染）
-  3. python-docx 后处理：[AI-INFERRED] 黄色高亮、[PLACEHOLDER] 红色高亮
-  4. 无 Pandoc 时自动降级到纯 python-docx 方案
+  2. 去重：按章节标题检测重复内容，仅保留最后一次生成的版本
+  3. 清理 Markdown 残留（**bold** -> 保留原文，--- 移除）
+  4. Pandoc 用 sap_reference.docx 模板转为 Word
+  5. python-docx 后处理：[AI-INFERRED] 黄色高亮、[PLACEHOLDER] 红色高亮
+  6. 无 Pandoc 时自动降级到纯 python-docx 方案
 
 用法：python assemble_docx.py <chapters_dir> <entities_path> <output_path>
 """
@@ -21,36 +23,67 @@ try:
 except ImportError:
     DOCX_OK = False
 
-ASSEMBLY_ORDER = [
-    ("title_page.md", "Title Page"),
-    ("section_1_1_estimand.md", "1.1 Objectives, Endpoints, and Estimands"),
-    ("section_1_2_study_design.md", "1.2 Study Design Overview"),
-    ("section_1_3_sample_size.md", "1.3 Sample Size Determination"),
-    ("section_2_1_multiplicity.md", "2.1 Multiplicity Adjustment"),
-    ("section_3_analysis_sets.md", "3 Analysis Sets"),
-    ("section_4_2_primary.md", "4.2 Primary Efficacy Analyses"),
-    ("section_4_3_key_secondary.md", "4.3 Key Secondary Efficacy Analyses"),
-    ("section_4_4_other_secondary.md", "4.4 Other Secondary Efficacy Analyses"),
-    ("section_4_5_sensitivity.md", "4.5 Sensitivity Analyses"),
-    ("section_4_6_subgroup.md", "4.6 Subgroup Analyses"),
-    ("section_4_7_safety.md", "4.7 Safety Analyses"),
-    ("section_6_changes.md", "6 Changes from Protocol-Planned Analyses"),
-    ("section_7_references.md", "7 References"),
-    ("appendix_a_abbreviations.md", "Appendix A: Abbreviations"),
+FALLBACK_ASSEMBLY_ORDER = [
+    ("00_title_page.md", "Title Page"),
+    ("01_estimand.md", "1. Objectives, Endpoints, and Estimands"),
+    ("02_study_design.md", "2. Study Design"),
+    ("03_multiplicity.md", "3. Statistical Hypotheses and Multiplicity Adjustment"),
+    ("04_analysis_sets.md", "4. Analysis Sets"),
+    ("05_1_general.md", "5.1 General Considerations"),
+    ("05_2_primary.md", "5.2 Primary Endpoint Analysis"),
+    ("05_3_secondary.md", "5.3 Secondary Endpoint Analysis"),
+    ("05_4_other_secondary.md", "5.4 Other Secondary and Exploratory Analyses"),
+    ("05_5_safety.md", "5.5 Safety Analyses"),
+    ("05_6_subgroup.md", "5.6 Other Analyses"),
+    ("05_7_interim_changes.md", "5.7 Interim Analysis / Changes from Protocol"),
+    ("06_sample_size.md", "6. Sample Size Determination"),
+    ("07_references.md", "7. References"),
+    ("08_appendix_abbreviations.md", "Appendix A: Abbreviations"),
 ]
 
 SCRIPT_DIR = Path(__file__).parent
 REFERENCE_DOCX = SCRIPT_DIR.parent / "styles" / "sap_reference.docx"
 
 
-# ==================== Step 1: 拼接 Markdown ====================
+def _load_assembly_order(chapters_dir: Path):
+    """Load assembly order from template_structure.json if available, else fallback."""
+    ts_path = chapters_dir.parent / "template_structure.json"
+    if not ts_path.exists():
+        ts_path = chapters_dir / ".." / "template_structure.json"
+    if ts_path.exists():
+        try:
+            data = json.loads(ts_path.read_text(encoding="utf-8"))
+            sections = data.get("sections", [])
+            if sections:
+                order = []
+                for i, sec in enumerate(sections):
+                    sid = sec.get("id", str(i + 1))
+                    title = sec.get("title", f"Section {sid}")
+                    safe_id = re.sub(r"[^a-zA-Z0-9_.-]", "_", sid)
+                    fname = f"{i:02d}_{safe_id}.md"
+                    order.append((fname, f"{sid} {title}" if sid[0].isdigit() else title))
+                print(f"  Loaded {len(order)} sections from template_structure.json")
+                return order
+        except Exception as e:
+            print(f"  WARN: Failed to load template_structure.json: {e}")
+    return FALLBACK_ASSEMBLY_ORDER
+
+
+# ==================== Step 1: 拼接 + 去重 ====================
 
 
 def merge_chapters(chapters_dir: Path):
-    """将各章节 .md 按顺序拼接，返回 (合并文本, 已包含数, 缺失列表)。"""
+    """将各章节 .md 按顺序拼接，自动去重，返回 (合并文本, 已包含数, 缺失列表)。"""
+    assembly_order = _load_assembly_order(chapters_dir)
     parts, count, missing = [], 0, []
-    for fname, title in ASSEMBLY_ORDER:
+
+    for fname, title in assembly_order:
         f = chapters_dir / fname
+        if not f.exists():
+            # scan for any file containing the section id in its name
+            candidates = [p for p in chapters_dir.glob("*.md") if fname.split("_", 1)[-1].replace(".md", "") in p.stem]
+            if candidates:
+                f = candidates[0]
         if f.exists():
             content = f.read_text(encoding="utf-8")
             parts.append(f"# {title}\n\n{content}\n\n\\newpage\n")
@@ -58,7 +91,43 @@ def merge_chapters(chapters_dir: Path):
             print(f"  + {title} ({f.stat().st_size} bytes)")
         else:
             missing.append(fname)
-    return "\n".join(parts), count, missing
+
+    merged = "\n".join(parts)
+    merged = _dedup_sections(merged)
+    merged = _clean_markdown_residuals(merged)
+    return merged, count, missing
+
+
+def _dedup_sections(text: str) -> str:
+    """Heading-level dedup: if the same heading appears multiple times, keep only the last occurrence."""
+    heading_re = re.compile(r"^(#{1,3}\s+.+)$", re.MULTILINE)
+    headings = heading_re.findall(text)
+
+    seen = {}
+    for h in headings:
+        normalized = h.strip().lower()
+        seen.setdefault(normalized, []).append(h)
+
+    duplicates = {k: v for k, v in seen.items() if len(v) > 1}
+    if not duplicates:
+        return text
+
+    for norm_key, occurrences in duplicates.items():
+        to_remove = occurrences[:-1]
+        for heading in to_remove:
+            pattern = re.escape(heading) + r"\n(.*?)(?=\n#{1,3}\s|\n\\newpage|\Z)"
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                text = text[:match.start()] + text[match.end():]
+                print(f"  DEDUP: removed duplicate section: {heading.strip()}")
+
+    return text
+
+
+def _clean_markdown_residuals(text: str) -> str:
+    """Remove Markdown artifacts that should not appear in the final document."""
+    text = re.sub(r"^---\s*$", "", text, flags=re.MULTILINE)
+    return text
 
 
 # ==================== Step 2: Pandoc 转换 ====================
@@ -144,10 +213,6 @@ def _highlight_paragraph(para) -> bool:
 
         parent = run._element.getparent()
         run_idx = list(parent).index(run._element)
-
-        original_font_name = run.font.name
-        original_font_size = run.font.size
-        original_bold = run.bold
 
         run.text = parts[0]
 
@@ -287,13 +352,13 @@ def main(chapters_dir: str, entities_path: str, output_path: str) -> None:
         sys.exit(1)
 
     if convert_with_pandoc(md_text, output_path):
-        print(f"  PANDOC: {count} chapters → {output_path}")
+        print(f"  PANDOC: {count} chapters -> {output_path}")
         postprocess_markers(output_path)
     else:
         print("  FALLBACK: python-docx 方案")
         convert_with_python_docx(md_text, output_path)
 
-    print(f"\nAssembled {count}/{len(ASSEMBLY_ORDER)} chapters → {output_path}")
+    print(f"\nAssembled {count}/{len(ASSEMBLY_ORDER)} chapters -> {output_path}")
     if missing:
         print(f"Missing: {missing}")
 

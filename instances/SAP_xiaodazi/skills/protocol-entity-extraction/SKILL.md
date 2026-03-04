@@ -1,6 +1,8 @@
 ---
 name: protocol-entity-extraction
 description: Extract structured entities from clinical trial Protocol PDF/DOCX for SAP authoring. Multi-pass parsing with Unstructured API, entity merging, and confidence scoring.
+requires:
+  env: [UNSTRUCTURED_API_KEY]
 ---
 # Protocol 实体抽取
 从 Protocol PDF/DOCX 中抽取 SAP 所需的全部关键实体，输出结构化 JSON。

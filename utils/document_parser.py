@@ -88,11 +88,13 @@ class DocumentParser:
 
     def _unstructured_available(self) -> bool:
         if not self._api_key:
+            logger.info("UNSTRUCTURED_API_KEY 未配置，将使用本地解析 (pdfplumber/PyPDF2)")
             return False
         try:
             import unstructured_client  # noqa: F401
             return True
         except ImportError:
+            logger.warning("unstructured_client 未安装，降级到本地解析。安装: pip install unstructured-client")
             return False
 
     def _pdfplumber_available(self) -> bool:

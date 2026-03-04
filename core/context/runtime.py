@@ -26,6 +26,7 @@ Content 数据结构（Claude API 标准）：
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # 3. 本地模块
