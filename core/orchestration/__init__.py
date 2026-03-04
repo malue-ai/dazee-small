@@ -7,7 +7,12 @@
 - PipelineExecutor: 确定性工作流引擎（YAML 管道定义 + 审批卡点 + 断点恢复）
 """
 
-from .background import BackgroundTaskManager, create_background_task_manager
+from .background import (
+    BackgroundTaskManager,
+    create_background_task_manager,
+    get_global_bg_manager,
+    init_global_bg_manager,
+)
 from .code_orchestrator import CodeOrchestrator, create_code_orchestrator
 from .code_validator import CodeValidator, ValidationResult, create_code_validator
 from .pipeline import (
@@ -51,4 +56,6 @@ __all__ = [
     # Background Task Manager
     "BackgroundTaskManager",
     "create_background_task_manager",
+    "get_global_bg_manager",
+    "init_global_bg_manager",
 ]

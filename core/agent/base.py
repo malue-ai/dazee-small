@@ -841,6 +841,14 @@ class Agent:
         # 创建新 broadcaster
         broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
 
+        # 自动注入 BackgroundTaskManager（如调用方未传入）
+        if "background_task_manager" not in extra:
+            from core.orchestration.background import get_global_bg_manager
+
+            bg_mgr = get_global_bg_manager()
+            if bg_mgr is not None:
+                extra["background_task_manager"] = bg_mgr
+
         # 创建独立的 ToolExecutor（并发安全）
         tool_context = create_tool_context(
             event_manager=event_manager,

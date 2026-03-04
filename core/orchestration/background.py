@@ -304,3 +304,32 @@ def create_background_task_manager(
         on_progress_event=on_progress_event,
         max_concurrent=max_concurrent,
     )
+
+
+# ================================================================
+# 全局单例（供 core 层和 services 层统一获取）
+# ================================================================
+
+_global_manager: Optional[BackgroundTaskManager] = None
+
+
+def get_global_bg_manager() -> Optional[BackgroundTaskManager]:
+    """获取全局 BackgroundTaskManager 单例（未初始化时返回 None）"""
+    return _global_manager
+
+
+def init_global_bg_manager(
+    on_notify: Optional[NotifyFn] = None,
+    on_progress_event: Optional[ProgressEventFn] = None,
+    max_concurrent: int = 5,
+) -> BackgroundTaskManager:
+    """初始化全局 BackgroundTaskManager 单例（幂等，重复调用返回已有实例）"""
+    global _global_manager
+    if _global_manager is None:
+        _global_manager = create_background_task_manager(
+            on_notify=on_notify,
+            on_progress_event=on_progress_event,
+            max_concurrent=max_concurrent,
+        )
+        logger.info("📋 全局 BackgroundTaskManager 已初始化")
+    return _global_manager

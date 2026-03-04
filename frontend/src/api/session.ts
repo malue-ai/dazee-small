@@ -42,11 +42,17 @@ export async function submitHITLConfirm(
 }
 
 /**
- * 确认继续长任务（V11 终止策略）
- * 执行器发出 long_running_confirm 后，用户点击「继续」时调用
+ * 确认长任务处理方式（V11 终止策略）
+ * 执行器发出 long_running_confirm 后，用户选择「继续」或「转后台」时调用
+ * @param action "continue" 前台继续 | "background" 转后台执行
  */
-export async function confirmContinueSession(sessionId: string): Promise<void> {
-  await api.post(`/v1/session/${sessionId}/confirm_continue`)
+export async function confirmContinueSession(
+  sessionId: string,
+  action: 'continue' | 'background' = 'continue'
+): Promise<void> {
+  await api.post(`/v1/session/${sessionId}/confirm_continue`, null, {
+    params: { action }
+  })
 }
 
 /**

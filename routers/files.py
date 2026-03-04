@@ -9,12 +9,13 @@ import io
 import mimetypes
 import os
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 
 from infra.storage.local import LocalStorage
 from logger import get_logger
@@ -184,7 +185,7 @@ def _resolve_instance_storage(file_path: str) -> tuple[Path, str]:
         return current_dir, file_path
 
     # Fallback: scan all instance data directories for the file
-    instances_root = get_user_data_dir() / "data" / "instances"
+    instances_root = get_user_data_dir() / "instances"
     if instances_root.exists():
         for instance_dir in instances_root.iterdir():
             if not instance_dir.is_dir():
@@ -195,3 +196,23 @@ def _resolve_instance_storage(file_path: str) -> tuple[Path, str]:
                 return instance_dir / "storage", file_path
 
     return current_dir, file_path
+
+
+@router.get("/download-zip")
+async def download_zip(paths: List[str] = Query(..., description="要打包的文件路径列表")):
+    """将多个文件打包为 ZIP 下载。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel_path in paths:
+            storage_dir, resolved = _resolve_file_path(rel_path)
+            full = storage_dir / resolved
+            if full.exists() and full.is_file():
+                zf.write(full, arcname=Path(resolved).name)
+            else:
+                logger.warning(f"download-zip: 跳过不存在的文件 {rel_path}")
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=files.zip"},
+    )

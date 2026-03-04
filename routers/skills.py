@@ -1047,29 +1047,27 @@ async def configure_skill(request: SkillConfigureRequest):
         )
 
     try:
-        import yaml as _yaml
+        from infra.local_store.instance_config_store import upsert
 
-        from services.settings_service import _load_settings, _save_settings
-
-        # Load existing config, merge into api_keys section
-        settings = _load_settings()
-        if "api_keys" not in settings:
-            settings["api_keys"] = {}
+        instance_id = request.agent_id if request.agent_id and request.agent_id != "global" else os.getenv("AGENT_INSTANCE", "default")
 
         for key, value in request.env_vars.items():
-            if value:  # skip empty values
-                settings["api_keys"][key] = value
-                # Immediately inject into os.environ
+            if value:
+                upsert(
+                    instance_id=instance_id,
+                    category="credential",
+                    key=key,
+                    value=value,
+                    skill_name=request.skill_name,
+                    source="skill_configure",
+                )
                 os.environ[key] = value
 
-        await _save_settings(settings)
-
         logger.info(
-            f"✅ 配置 Skill API Key: {request.skill_name}, "
-            f"keys={list(request.env_vars.keys())}"
+            f"配置 Skill credential: {request.skill_name}, "
+            f"keys={list(request.env_vars.keys())}, instance={instance_id}"
         )
 
-        # Re-check status
         updated_env = _parse_required_env(skill_md_path)
         new_status, new_msg = _compute_skill_status(skill_md_path, updated_env)
 
