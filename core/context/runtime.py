@@ -740,6 +740,32 @@ class RuntimeContext:
         }
 
 
+    # ==================== Scratchpad（会话级中间产物存储）====================
+
+    def _scratchpad_dir(self) -> Path:
+        d = Path("workspace") / "scratchpad" / (self.session_id or "default")
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def write_scratchpad(self, filename: str, content: str) -> str:
+        """写入 scratchpad 文件，返回路径字符串。"""
+        path = self._scratchpad_dir() / filename
+        path.write_text(content, encoding="utf-8")
+        return str(path)
+
+    def read_scratchpad(self, filename: str) -> str:
+        """读取 scratchpad 文件内容，不存在返回空字符串。"""
+        path = self._scratchpad_dir() / filename
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        return ""
+
+    def list_scratchpad(self) -> list[str]:
+        """返回当前会话 scratchpad 目录下的文件名列表。"""
+        d = self._scratchpad_dir()
+        return [f.name for f in d.iterdir() if f.is_file()] if d.exists() else []
+
+
 def create_runtime_context(session_id: str, max_turns: int = 999) -> RuntimeContext:
     """
     创建运行时上下文

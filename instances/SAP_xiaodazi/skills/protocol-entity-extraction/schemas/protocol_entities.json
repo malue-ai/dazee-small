@@ -1,0 +1,11 @@
+{
+  "study_identification": {"protocol_number": {"value": "", "confidence": 0.0, "source_page": 0}},
+  "study_design": {"type": "", "treatment_arms": [], "stratification_factors": []},
+  "endpoints": {"primary": [], "key_secondary": [], "other_secondary": [], "safety": []},
+  "sample_size": {"total": 0, "per_arm": {}, "alpha": 0.05, "sided": "two-sided"},
+  "analysis_populations": {},
+  "statistical_methods": [],
+  "multiplicity": {"strategy": "", "overall_alpha": 0.05, "testing_sequence": []},
+  "missing_data": {},
+  "needs_review_items": []
+}

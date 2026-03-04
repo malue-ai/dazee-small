@@ -254,13 +254,23 @@ class FileIndexer:
             return ""
 
     async def _read_docx(self, path: Path) -> str:
-        """读取 DOCX 文件（需要 python-docx）"""
+        """读取 DOCX 文件（段落+表格，保留原始顺序）"""
         try:
             from docx import Document
 
             doc = Document(str(path))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            return "\n\n".join(paragraphs)
+            parts: list[str] = []
+            for element in doc.element.body:
+                tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
+                if tag == "p":
+                    para = next((p for p in doc.paragraphs if p._element is element), None)
+                    if para and para.text.strip():
+                        parts.append(para.text)
+                elif tag == "tbl":
+                    table = next((t for t in doc.tables if t._element is element), None)
+                    if table:
+                        parts.append(self._table_to_markdown(table))
+            return "\n\n".join(parts)
         except ImportError:
             logger.debug(
                 "python-docx 未安装，跳过 DOCX 索引（pip install python-docx）"
@@ -269,6 +279,18 @@ class FileIndexer:
         except Exception as e:
             logger.warning(f"DOCX 读取失败: {path} - {e}")
             return ""
+
+    @staticmethod
+    def _table_to_markdown(table) -> str:
+        """将 python-docx Table 转为 Markdown 格式。"""
+        rows = []
+        for row in table.rows:
+            cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+            rows.append("| " + " | ".join(cells) + " |")
+        if len(rows) >= 1:
+            header_sep = "| " + " | ".join("---" for _ in table.rows[0].cells) + " |"
+            rows.insert(1, header_sep)
+        return "\n".join(rows)
 
     # ==================== 分块 ====================
 

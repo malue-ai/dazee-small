@@ -8,9 +8,9 @@
 - GET  /api/v1/settings/schema  — 获取配置项定义
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from pydantic import BaseModel
 
@@ -305,3 +305,72 @@ async def memory_health() -> Dict[str, Any]:
             "success": False,
             "error": str(e),
         }
+
+
+# ==================== 实例级配置（统一 Config Store） ====================
+
+
+class InstanceConfigBody(BaseModel):
+    """实例配置写入请求"""
+
+    instance_id: str
+    category: str  # credential | package | permission | setting
+    key: str
+    value: str
+    skill_name: str = ""
+
+
+@router.get("/instance-config")
+async def get_instance_config(
+    instance_id: str = Query(..., description="实例 ID"),
+    category: Optional[str] = Query(None, description="品类过滤"),
+) -> Dict[str, Any]:
+    """
+    获取实例的持久化配置。
+
+    不传 category 返回全部品类 ``{category: {key: value}}``；
+    传 category 返回该品类的 ``{key: value}``。
+    """
+    try:
+        from infra.local_store.instance_config_store import get_all, get_by_category
+        if category:
+            data = get_by_category(instance_id, category)
+        else:
+            data = get_all(instance_id)
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.exception("get_instance_config 失败")
+        return {"success": False, "error": str(e), "data": {}}
+
+
+@router.put("/instance-config")
+async def put_instance_config(body: InstanceConfigBody) -> Dict[str, Any]:
+    """
+    写入实例配置（credential/package/permission/setting）。
+
+    credential 品类会同步注入 os.environ 即时生效。
+    """
+    try:
+        import os as _os
+
+        from infra.local_store.instance_config_store import VALID_CATEGORIES, upsert
+
+        if body.category not in VALID_CATEGORIES:
+            return {
+                "success": False,
+                "error": f"无效品类 '{body.category}'，支持: {', '.join(sorted(VALID_CATEGORIES))}",
+            }
+        upsert(
+            instance_id=body.instance_id,
+            category=body.category,
+            key=body.key,
+            value=body.value,
+            skill_name=body.skill_name,
+            source="settings_page",
+        )
+        if body.category == "credential" and body.value:
+            _os.environ[body.key] = body.value
+        return {"success": True, "message": f"已保存 {body.category}/{body.key}"}
+    except Exception as e:
+        logger.exception("put_instance_config 失败")
+        return {"success": False, "error": str(e)}

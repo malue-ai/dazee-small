@@ -351,6 +351,54 @@ capabilities:
         default: 120
     required: [title, questions]
 
+- name: configure_instance
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 2
+  implementation:
+    module: tools.configure_instance
+    class: ConfigureInstanceTool
+  capabilities:
+    - human_interaction
+    - configuration
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      将实例级配置持久化到用户本地 SQLite（按实例隔离，按品类分类）。
+      支持四种品类：
+        credential — 服务/工具 API Key（切换实例时自动注入 os.environ）
+        package    — 已安装包记录（pip install 成功后记录）
+        permission — OS 权限授权状态（用户确认后记录）
+        setting    — 工具/Skill 配置项
+      典型场景：
+        用户提供 API Key → configure_instance(category='credential', key='UNSTRUCTURED_API_KEY', value='xxx')
+        pip install 成功 → configure_instance(category='package', key='pdfplumber', value='0.11.4')
+        用户授权辅助功能 → configure_instance(category='permission', key='accessibility', value='granted')
+  input_schema:
+    type: object
+    properties:
+      category:
+        type: string
+        enum: [credential, package, permission, setting]
+        description: |
+          配置品类：
+          - credential: 服务 API Key（如 UNSTRUCTURED_API_KEY、TAVILY_API_KEY）
+          - package: 已安装的包（如 pdfplumber 0.11.4）
+          - permission: OS 权限（如 accessibility granted）
+          - setting: 工具/Skill 配置项
+      key:
+        type: string
+        description: 配置键名（环境变量名 / 包名 / 权限名 / 设置项名）
+      value:
+        type: string
+        description: 配置值（API Key / 版本号 / granted|denied / 配置值）
+      skill_name:
+        type: string
+        description: 关联的 Skill 名称（可选，用于追溯）
+    required: [category, key, value]
+
 - name: plan
   type: TOOL
   subtype: SESSION

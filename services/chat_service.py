@@ -1246,6 +1246,107 @@ class ChatService:
     # Agent 在同一个 SSE 流中继续执行，无需重建历史或新建 Session
     _HITL_BLOCKING_MODE_NOTE = True
 
+    async def _move_agent_to_background(
+        self,
+        agent,
+        session_id: str,
+        user_id: str,
+        conversation_id: str,
+        assistant_message_id: str,
+        events,
+    ) -> None:
+        """
+        V13: 将正在执行的 Agent 任务移交到后台
+
+        当用户在 long_running_confirm 弹窗选择"转后台"时调用。
+        Agent 的 RVR-B 循环仍在异步运行（generator 还没结束），
+        这里把它包装成 BackgroundTask 让后台继续消费。
+        """
+        from core.orchestration.background import get_global_bg_manager
+
+        bg_manager = get_global_bg_manager()
+        if not bg_manager:
+            logger.warning("BackgroundTaskManager 未初始化，无法转后台")
+            return
+
+        async def _bg_consume_agent(task, manager):
+            """后台消费 agent generator 的剩余事件"""
+            collected_text = []
+            try:
+                async for event in agent.chat_generator_ref:
+                    if event is None:
+                        continue
+                    event_type = event.get("type", "")
+                    if event_type == "content_delta":
+                        text = event.get("data", {}).get("text", "")
+                        if text:
+                            collected_text.append(text)
+                    await manager.update_progress(
+                        task.task_id,
+                        progress=min(task.progress + 0.01, 0.95),
+                        message=f"Agent 执行中...",
+                    )
+            except Exception as e:
+                logger.error(f"后台 Agent 执行异常: {e}", exc_info=True)
+                raise
+
+            final_text = "".join(collected_text)
+
+            try:
+                if final_text:
+                    await self.conversation_service.update_message(
+                        message_id=assistant_message_id,
+                        content=[{"type": "text", "text": final_text}],
+                    )
+            except Exception as e:
+                logger.warning(f"后台任务结果写回会话失败: {e}")
+
+            return {
+                "conversation_id": conversation_id,
+                "assistant_message_id": assistant_message_id,
+                "text_length": len(final_text),
+                "preview": final_text[:500] if final_text else "",
+            }
+
+        task = bg_manager.submit(
+            name="Agent 后台执行",
+            fn=_bg_consume_agent,
+            user_id=user_id,
+            session_id=session_id,
+            conversation_id=conversation_id,
+            description=f"从第 {getattr(agent, '_current_turn', '?')} 轮转为后台执行",
+        )
+
+        logger.info(
+            f"🔄 Agent 已转后台: task_id={task.task_id}, session_id={session_id}"
+        )
+
+        await agent.broadcaster.emit_message_delta(
+            session_id=session_id,
+            delta={
+                "type": "moved_to_background",
+                "content": {
+                    "task_id": task.task_id,
+                    "message": "任务已转为后台执行，完成后会通知你。",
+                },
+            },
+            message_id=assistant_message_id,
+            persist=False,
+        )
+
+        await agent.broadcaster.emit_message_stop(
+            session_id=session_id, message_id=assistant_message_id
+        )
+
+        await events.session.emit_session_end(
+            session_id=session_id,
+            conversation_id=conversation_id,
+            status="moved_to_background",
+            duration_ms=0,
+            output_format=events.output_format,
+            adapter=events.adapter,
+        )
+
     async def _dispatch_background_tasks(
         self,
         background_tasks: List[str],
@@ -1654,9 +1755,17 @@ class ChatService:
                 self.session_service.register_state_manager(session_id, state_mgr)
 
             # V11: 长任务确认等待（执行器 yield long_running_confirm 后 await 此函数）
-            agent._wait_long_run_confirm_async = (
-                lambda s=session_id: self.session_service.wait_long_run_confirm(s)
-            )
+            # V13: 支持 "background" 选择 — wait_fn 返回后通过 flag 通知外层循环
+            _move_to_background = False
+
+            async def _wait_long_run_with_background(session_id=session_id):
+                nonlocal _move_to_background
+                result = await self.session_service.wait_long_run_confirm(session_id)
+                if result == "background":
+                    _move_to_background = True
+                return result
+
+            agent._wait_long_run_confirm_async = _wait_long_run_with_background
 
             # V11.1: HITL 危险操作确认等待（执行器 yield hitl_confirm 后 await 此函数）
             agent._wait_hitl_confirm_async = (
@@ -1680,13 +1789,17 @@ class ChatService:
 
             _assistant_text_for_tasks = ""
 
-            async for event in agent.chat(
+            # 保存 generator 引用，供 _move_agent_to_background 后台继续消费
+            _chat_gen = agent.chat(
                 messages=history_messages,
                 session_id=session_id,
                 message_id=assistant_message_id,
                 enable_stream=True,
                 intent=routing_intent,
-            ):
+            )
+            agent.chat_generator_ref = _chat_gen
+
+            async for event in _chat_gen:
                     if event is None:
                         continue
 
@@ -1773,6 +1886,20 @@ class ChatService:
                             self.conversation_service, event, conversation_id
                         )
 
+                    # V13: 检测"转后台"信号 — wait_fn 返回 background 后，
+                    # Executor 会继续跑（它不知道），但我们在这里把剩余执行移交后台
+                    if _move_to_background:
+                        await self._move_agent_to_background(
+                            agent=agent,
+                            session_id=session_id,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            assistant_message_id=assistant_message_id,
+                            events=events,
+                        )
+                        execution_status = "moved_to_background"
+                        break
+
             single_agent_duration = (time.time() - single_agent_start) * 1000
             logger.info(
                 "单智能体执行 完成",
@@ -1781,6 +1908,11 @@ class ChatService:
                     "duration_ms": round(single_agent_duration, 2),
                 },
             )
+
+            # V13: 转后台后跳过阶段 3（session 已在 _move_agent_to_background 中结束）
+            if execution_status == "moved_to_background":
+                logger.info("Agent 已转后台，跳过完成处理", extra={"session_id": session_id})
+                return
 
             # 阶段 3: 完成处理
             duration_ms = int((time.time() - start_time) * 1000)

@@ -23,6 +23,12 @@
 #   bash scripts/auto_build_app.sh --clean               # 清理后重新构建
 #   bash scripts/auto_build_app.sh --dry-run             # 仅检查环境，不执行构建
 #
+# 镜像源（中国大陆 / 海外）：
+# - 默认自动检测：同时探测 GitHub 与清华 TUNA 的延迟，大陆环境自动用国内镜像，海外用官方源
+# - 强制国内镜像：USE_CHINA_MIRROR=1 bash scripts/auto_build_app.sh
+# - 强制官方源：  USE_CHINA_MIRROR=0 bash scripts/auto_build_app.sh
+# 国内镜像包括：Homebrew 清华 TUNA、pip 清华、npm npmmirror、Rust 中科大
+#
 
 set -e
 
@@ -80,6 +86,48 @@ fail()  { echo "ERROR: $1"; exit 1; }
 ok()    { echo "  ✓  $1"; }
 need()  { echo "  ✗  $1 — 需要安装"; }
 
+# 面向小白：长时间步骤开始提示（预计时间可选）
+# 用法: long_step_begin "正在安装 Python" "约 3–5 分钟"
+long_step_begin() {
+  local desc="$1"
+  local estimate="${2:-}"
+  if [ -n "$estimate" ]; then
+    echo ""
+    info "⏳ $desc（预计 $estimate，请耐心等待）"
+  else
+    echo ""
+    info "⏳ $desc..."
+  fi
+}
+
+# 长时间步骤结束
+long_step_end() {
+  local desc="$1"
+  ok "${desc}完成"
+}
+
+# 面向小白：结构化错误与下一步建议
+# 用法: fail_with_help "简短错误描述" "可能原因（多行）" "建议操作（多行，每行一条）"
+fail_with_help() {
+  local err_title="$1"
+  local reasons="$2"
+  local actions="$3"
+  echo ""
+  echo "============================================"
+  echo "  ❌ 错误：$err_title"
+  echo "============================================"
+  echo "可能原因："
+  echo "$reasons"
+  echo ""
+  echo "建议操作："
+  echo "$actions"
+  echo ""
+  echo "若仍无法解决，请将上述错误信息与终端完整输出保存后反馈给开发者。"
+  echo "============================================"
+  echo ""
+  exit 1
+}
+
 # 检查命令是否存在
 has_cmd() { command -v "$1" &> /dev/null; }
 
@@ -108,17 +156,63 @@ RUST_INSTALL_URL="https://sh.rustup.rs"
 HOMEBREW_MIRROR_INSTALL_URL="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/install/raw/HEAD/install.sh"
 CURL_TIMEOUT="--connect-timeout 10 --max-time 30"
 
+# 自动检测是否为中国大陆网络（用于默认选国内镜像）
+# 同时探测 GitHub 与清华 TUNA 的响应时间；若 GitHub 不可达或明显慢于 TUNA，判定为大陆环境
+# 输出 "cn" 或 "overseas"，无外部 API 依赖、不传 IP
+detect_region_for_mirror() {
+  local gh_time tuna_time
+  gh_time=$(curl -s -o /dev/null -w '%{time_total}' --connect-timeout 3 --max-time 5 https://api.github.com 2>/dev/null) || true
+  tuna_time=$(curl -s -o /dev/null -w '%{time_total}' --connect-timeout 3 --max-time 5 https://mirrors.tuna.tsinghua.edu.cn 2>/dev/null) || true
+  [ -z "$gh_time" ] && gh_time=999
+  [ -z "$tuna_time" ] && tuna_time=999
+  # 中国大陆：GitHub 不可达/很慢，或国内镜像明显更快
+  if echo "$gh_time $tuna_time" | awk 'BEGIN {r="overseas"} $1+0 >= 3.5 || $1+0 == 0 {r="cn"} $2+0 > 0 && $2+0 < 2.5 && $1+0 > 2 {r="cn"} END {print r}' | grep -q cn; then
+    echo "cn"
+  else
+    echo "overseas"
+  fi
+}
+
+# 区分中国大陆 / 海外源：
+# - 若已设置 USE_CHINA_MIRROR=1：直接使用国内镜像
+# - 若已设置 USE_CHINA_MIRROR=0：强制使用官方源，不自动检测
+# - 未设置：自动检测（GitHub vs 清华 TUNA 可达性/延迟），大陆默认国内镜像，海外默认官方源
 check_network_and_setup_mirrors() {
-  info "检测网络连通性..."
-  if curl --connect-timeout 5 -sI https://github.com >/dev/null 2>&1; then
-    ok "github.com 可达，使用官方源"
+  info "检测网络与镜像源（中国大陆 / 海外）..."
+
+  if [ -n "${USE_CHINA_MIRROR:-}" ] && [ "$USE_CHINA_MIRROR" != "0" ]; then
+    info "已设置 USE_CHINA_MIRROR，使用国内镜像源（Homebrew 清华 / pip 清华 / npm npmmirror / Rust 中科大）"
+    MIRROR_EXPLICIT_CN=1 setup_brew_mirror
+    MIRROR_EXPLICIT_CN=1 setup_pip_mirror
+    MIRROR_EXPLICIT_CN=1 setup_npm_mirror
+    MIRROR_EXPLICIT_CN=1 setup_rust_mirror
+    ok "国内镜像已启用，后续 brew/pip/npm/rust 将走国内源"
+    echo ""
     return 0
   fi
-  warn "无法连接 github.com（可能未开启 VPN），自动启用全部国内镜像源"
-  setup_brew_mirror
-  setup_pip_mirror
-  setup_npm_mirror
-  setup_rust_mirror
+
+  if [ -n "${USE_CHINA_MIRROR:-}" ] && [ "$USE_CHINA_MIRROR" = "0" ]; then
+    ok "已设置 USE_CHINA_MIRROR=0，使用官方源（海外）"
+    echo ""
+    return 0
+  fi
+
+  # 自动检测：大陆默认国内镜像，海外默认官方源
+  local region
+  region=$(detect_region_for_mirror)
+  if [ "$region" = "cn" ]; then
+    info "检测到中国大陆网络环境（GitHub 较慢或不可达），自动使用国内镜像源"
+    setup_brew_mirror
+    setup_pip_mirror
+    setup_npm_mirror
+    setup_rust_mirror
+    ok "国内镜像已启用，后续 brew/pip/npm/rust 将走国内源"
+    echo ""
+    return 0
+  fi
+
+  ok "检测到海外网络环境，使用官方源"
+  echo "  💡 若实际在中国大陆且下载很慢，可强制国内镜像：USE_CHINA_MIRROR=1 bash scripts/auto_build_app.sh"
   echo ""
 }
 
@@ -126,7 +220,11 @@ setup_brew_mirror() {
   if [ "$USING_MIRROR" = true ] && [ -n "${HOMEBREW_BOTTLE_DOMAIN:-}" ]; then
     return 0
   fi
-  warn "切换 Homebrew 到国内镜像源（清华 TUNA）..."
+  if [ -n "${MIRROR_EXPLICIT_CN:-}" ]; then
+    info "Homebrew 使用国内镜像（清华 TUNA）"
+  else
+    warn "切换 Homebrew 到国内镜像源（清华 TUNA）..."
+  fi
   export HOMEBREW_BREW_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git"
   export HOMEBREW_CORE_GIT_REMOTE="https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git"
   export HOMEBREW_API_DOMAIN="https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api"
@@ -138,7 +236,11 @@ setup_pip_mirror() {
   if [ -n "$PIP_MIRROR_ARGS" ]; then
     return 0
   fi
-  warn "切换 pip 到国内镜像源（清华 TUNA）..."
+  if [ -n "${MIRROR_EXPLICIT_CN:-}" ]; then
+    info "pip 使用国内镜像（清华 TUNA）"
+  else
+    warn "切换 pip 到国内镜像源（清华 TUNA）..."
+  fi
   PIP_MIRROR_ARGS="-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn"
   USING_MIRROR=true
 }
@@ -147,7 +249,11 @@ setup_npm_mirror() {
   if [ -n "${npm_config_registry:-}" ]; then
     return 0
   fi
-  warn "切换 npm 到国内镜像源（npmmirror）..."
+  if [ -n "${MIRROR_EXPLICIT_CN:-}" ]; then
+    info "npm 使用国内镜像（npmmirror）"
+  else
+    warn "切换 npm 到国内镜像源（npmmirror）..."
+  fi
   export npm_config_registry="https://registry.npmmirror.com"
   USING_MIRROR=true
 }
@@ -156,7 +262,11 @@ setup_rust_mirror() {
   if [ "$RUST_INSTALL_URL" != "https://sh.rustup.rs" ]; then
     return 0
   fi
-  warn "切换 Rust 到国内镜像源（中科大 USTC）..."
+  if [ -n "${MIRROR_EXPLICIT_CN:-}" ]; then
+    info "Rust 使用国内镜像（中科大 USTC）"
+  else
+    warn "切换 Rust 到国内镜像源（中科大 USTC）..."
+  fi
   export RUSTUP_DIST_SERVER="https://mirrors.ustc.edu.cn/rust-static"
   export RUSTUP_UPDATE_ROOT="https://mirrors.ustc.edu.cn/rust-static/rustup"
   RUST_INSTALL_URL="https://mirrors.ustc.edu.cn/misc/rustup-install.sh"
@@ -227,23 +337,28 @@ install_homebrew() {
   fi
 
   if [ -n "${HOMEBREW_BOTTLE_DOMAIN:-}" ]; then
-    info "安装 Homebrew（镜像源）..."
+    long_step_begin "安装 Homebrew（镜像源）" "约 2–5 分钟"
     /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL "$HOMEBREW_MIRROR_INSTALL_URL")" 2>&1 || true
     ensure_brew_path
     if ! has_cmd brew; then
-      fail "Homebrew 安装失败，请手动安装: https://brew.sh"
+      fail_with_help "Homebrew 安装失败（镜像源）" \
+        "• 网络不稳定或镜像源暂时不可用\n• 安装脚本需要交互时被非交互环境跳过" \
+        "1. 手动安装：打开 https://brew.sh 按页面说明安装
+2. 安装完成后在终端执行：eval \"\$(/opt/homebrew/bin/brew shellenv)\" 或 eval \"\$(/usr/local/bin/brew shellenv)\"
+3. 重新运行本脚本：bash scripts/auto_build_app.sh"
     fi
+    long_step_end "Homebrew（镜像源）"
     export HOMEBREW_NO_AUTO_UPDATE=1
     ok "Homebrew 安装完成（镜像源）"
     return 0
   fi
 
-  info "安装 Homebrew..."
+  long_step_begin "安装 Homebrew" "约 2–5 分钟"
   if /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" 2>&1; then
     ensure_brew_path
     if has_cmd brew; then
       export HOMEBREW_NO_AUTO_UPDATE=1
-      ok "Homebrew 安装完成"
+      long_step_end "Homebrew"
       return 0
     fi
   fi
@@ -253,10 +368,15 @@ install_homebrew() {
   /bin/bash -c "$(curl $CURL_TIMEOUT -fsSL "$HOMEBREW_MIRROR_INSTALL_URL")" 2>&1 || true
   ensure_brew_path
   if ! has_cmd brew; then
-    fail "Homebrew 安装失败（官方源和镜像源均失败），请手动安装: https://brew.sh"
+    fail_with_help "Homebrew 安装失败（官方源和镜像源均失败）" \
+      "• 无法连接 GitHub（可尝试开启 VPN 或使用镜像）\n• 安装脚本需要输入密码或确认时未完成\n• 磁盘空间不足或权限不足" \
+      "1. 手动安装：打开 https://brew.sh 按页面说明执行安装命令
+2. 若在国内网络，可改用国内安装脚本：https://mirrors.tuna.tsinghua.edu.cn/help/homebrew/
+3. 安装完成后根据提示执行 PATH 配置（如 eval \"\$(/opt/homebrew/bin/brew shellenv)\"）
+4. 再运行本脚本：bash scripts/auto_build_app.sh"
   fi
   export HOMEBREW_NO_AUTO_UPDATE=1
-  ok "Homebrew 安装完成（镜像源）"
+  long_step_end "Homebrew（镜像源）"
 }
 
 # 确保 Homebrew 可用（需要时自动安装）
@@ -368,7 +488,7 @@ else
 
   if [ "$(uname)" = "Darwin" ]; then
     ensure_brew
-    info "通过 Homebrew 安装 Python ${PYTHON_VERSION}..."
+    long_step_begin "通过 Homebrew 安装 Python ${PYTHON_VERSION}" "约 2–5 分钟"
     brew_install_or_mirror "python@${PYTHON_VERSION}" || true
     ensure_brew_path
     BREW_PYTHON_PREFIX=$(brew --prefix "python@${PYTHON_VERSION}" 2>/dev/null || true)
@@ -377,11 +497,23 @@ else
     fi
     # 尝试链接（已链接时会返回非零，忽略）
     brew link --overwrite "python@${PYTHON_VERSION}" 2>/dev/null || true
+    long_step_end "Python ${PYTHON_VERSION}"
   else
-    fail "请手动安装 Python 3.12: https://www.python.org/downloads/"
+    fail_with_help "当前系统不支持自动安装 Python" \
+      "• 本脚本在 macOS 上可通过 Homebrew 自动安装 Python" \
+      "1. 请手动安装 Python 3.12 或 3.13：https://www.python.org/downloads/
+2. 安装后确保 python3 或 python3.12 在 PATH 中
+3. 再运行本脚本：bash scripts/auto_build_app.sh"
   fi
   PYTHON_CMD=$(find_python || true)
-  [ -z "$PYTHON_CMD" ] && fail "Python 安装后仍未找到，请检查 PATH 或手动安装: https://www.python.org/downloads/"
+  if [ -z "$PYTHON_CMD" ]; then
+    fail_with_help "Python 安装后仍未找到" \
+      "• Homebrew 已安装但 PATH 未包含 Python\n• 或 python@${PYTHON_VERSION} 未正确链接" \
+      "1. 在终端执行：brew --prefix python@${PYTHON_VERSION}，记下输出路径
+2. 将该路径下的 bin 加入 PATH，例如：export PATH=\"\$(brew --prefix python@${PYTHON_VERSION})/bin:\$PATH\"
+3. 再运行本脚本：bash scripts/auto_build_app.sh
+4. 或从 https://www.python.org/downloads/ 安装官方 Python 并确保在 PATH 中"
+  fi
   INSTALLED_SOMETHING=true
   ok "Python 安装完成 ($($PYTHON_CMD --version 2>&1))"
 fi
@@ -399,12 +531,17 @@ if has_cmd node; then
     fi
     if [ "$(uname)" = "Darwin" ]; then
       ensure_brew
-      info "通过 Homebrew 升级 Node.js..."
+      long_step_begin "通过 Homebrew 升级 Node.js" "约 2–5 分钟"
       brew_install_or_mirror "node@${NODE_MAJOR_VERSION}" || true
       brew link --overwrite "node@${NODE_MAJOR_VERSION}" 2>/dev/null || true
       ensure_brew_path
+      long_step_end "Node.js 升级"
     else
-      fail "请手动升级 Node.js >= 18: https://nodejs.org"
+      fail_with_help "Node.js 版本过旧，且当前系统不支持自动升级" \
+        "• 需要 Node.js >= 18（当前 $(node --version)）" \
+        "1. 请手动安装或升级 Node.js：https://nodejs.org
+2. 安装后确认 node --version >= 18
+3. 再运行本脚本：bash scripts/auto_build_app.sh"
     fi
     INSTALLED_SOMETHING=true
   fi
@@ -415,12 +552,17 @@ else
   fi
   if [ "$(uname)" = "Darwin" ]; then
     ensure_brew
-    info "通过 Homebrew 安装 Node.js ${NODE_MAJOR_VERSION}..."
+    long_step_begin "通过 Homebrew 安装 Node.js ${NODE_MAJOR_VERSION}" "约 2–5 分钟"
     brew_install_or_mirror "node@${NODE_MAJOR_VERSION}" || true
     brew link --overwrite "node@${NODE_MAJOR_VERSION}" 2>/dev/null || true
     ensure_brew_path
+    long_step_end "Node.js ${NODE_MAJOR_VERSION}"
   else
-    fail "请手动安装 Node.js: https://nodejs.org"
+    fail_with_help "Node.js 未安装，且当前系统不支持自动安装" \
+      "• 本脚本在 macOS 上可通过 Homebrew 自动安装 Node.js" \
+      "1. 请手动安装 Node.js 18 或更高：https://nodejs.org
+2. 安装后确保 node 与 npm 在 PATH 中
+3. 再运行本脚本：bash scripts/auto_build_app.sh"
   fi
   INSTALLED_SOMETHING=true
   ok "Node.js 安装完成 ($(node --version))"
@@ -435,7 +577,7 @@ else
   if [ "$DRY_RUN" = true ]; then
     fail "Rust 未安装（--dry-run 模式不自动安装）"
   fi
-  info "通过 rustup 安装 Rust..."
+  long_step_begin "通过 rustup 安装 Rust" "约 5–15 分钟（首次下载较大）"
   curl $CURL_TIMEOUT --proto '=https' --tlsv1.2 -sSf "$RUST_INSTALL_URL" | sh -s -- -y 2>&1 || true
   [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
   if ! has_cmd rustc; then
@@ -445,8 +587,15 @@ else
     fi
     curl $CURL_TIMEOUT --proto '=https' --tlsv1.2 -sSf "$RUST_INSTALL_URL" | sh -s -- -y
     [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
-    has_cmd rustc || fail "Rust 安装失败，请手动安装: https://rustup.rs"
+    if ! has_cmd rustc; then
+      fail_with_help "Rust 安装失败" \
+        "• 网络超时或无法连接 rustup 服务器（可尝试 VPN 或使用镜像）\n• 磁盘空间不足\n• 安装脚本中途被中断" \
+        "1. 手动安装：在终端执行 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+2. 国内用户可设置镜像后重试：export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
+3. 安装完成后执行 source \"\$HOME/.cargo/env\"，再运行本脚本：bash scripts/auto_build_app.sh"
+    fi
   fi
+  long_step_end "Rust"
   INSTALLED_SOMETHING=true
   ok "Rust 安装完成 ($(rustc --version | head -1))"
 fi
@@ -514,6 +663,21 @@ if [ "$SKIP_BACKEND" = false ]; then
     ok "PyInstaller 安装完成"
   else
     ok "PyInstaller 已安装"
+  fi
+fi
+
+# ---------- 0d-2. Pandoc（Markdown → Word 转换）----------
+
+if has_cmd pandoc; then
+  ok "Pandoc 已安装 ($(pandoc --version | head -1))"
+else
+  info "安装 Pandoc（Markdown → Word 文档转换）..."
+  brew_install_or_mirror pandoc
+  if has_cmd pandoc; then
+    ok "Pandoc 安装完成"
+    INSTALLED_SOMETHING=true
+  else
+    warn "Pandoc 安装失败（可选依赖，Word 文档生成将降级到 python-docx 方案）"
   fi
 fi
 
@@ -707,25 +871,9 @@ if [ "$CLEAN" = true ]; then
   info "清理完成"
 fi
 
-# ==================== 清理 instances 测试残留 ====================
-
-info "清理 instances/ 测试残留..."
-INSTANCE_CLEANED=0
-for item in "$PROJECT_ROOT/instances/"*; do
-  name=$(basename "$item")
-  case "$name" in
-    _template|xiaodazi|.gitignore) ;; # 白名单：保留
-    *)
-      rm -rf "$item"
-      INSTANCE_CLEANED=$((INSTANCE_CLEANED + 1))
-      ;;
-  esac
-done
-if [ "$INSTANCE_CLEANED" -gt 0 ]; then
-  info "已清理 $INSTANCE_CLEANED 个测试残留实例"
-else
-  ok "instances/ 目录干净，无需清理"
-fi
+# 注意：不清理 instances/ 目录。
+# 打包范围由 xiaodazi-backend.spec 的 datas 列表精确控制，
+# 本地实例（SAP_xiaodazi 等）不会被误打包，也不应被构建脚本删除。
 
 # ==================== Tauri Updater 签名密钥 ====================
 

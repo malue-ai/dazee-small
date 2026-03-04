@@ -44,40 +44,32 @@ class BackgroundTaskListResponse(BaseModel):
 # Singleton accessor
 # ============================================================
 
-_manager = None
-
-
 def get_manager():
-    """获取全局 BackgroundTaskManager 单例"""
-    global _manager
-    if _manager is None:
-        from core.orchestration.background import create_background_task_manager
+    """获取全局 BackgroundTaskManager 单例（委托 core 层统一管理）"""
+    from core.orchestration.background import get_global_bg_manager, init_global_bg_manager
 
-        async def on_notify(task):
-            """完成后发送系统通知"""
-            try:
-                from tools.nodes_tool import NodesTool
-                nodes = NodesTool()
-                title = "后台任务完成" if task.status.value == "completed" else "后台任务失败"
-                message = f"{task.name}\n耗时 {task.elapsed_ms // 1000}s"
-                if task.error:
-                    message += f"\n错误: {task.error[:100]}"
-                await nodes.execute({
-                    "action": "notify",
-                    "title": title,
-                    "message": message,
-                })
-            except Exception as e:
-                logger.debug(f"发送通知失败: {e}")
+    mgr = get_global_bg_manager()
+    if mgr is not None:
+        return mgr
 
-        _manager = create_background_task_manager(on_notify=on_notify)
-    return _manager
+    async def on_notify(task):
+        """完成后发送系统通知"""
+        try:
+            from tools.nodes_tool import NodesTool
+            nodes = NodesTool()
+            title = "后台任务完成" if task.status.value == "completed" else "后台任务失败"
+            message = f"{task.name}\n耗时 {task.elapsed_ms // 1000}s"
+            if task.error:
+                message += f"\n错误: {task.error[:100]}"
+            await nodes.execute({
+                "action": "notify",
+                "title": title,
+                "message": message,
+            })
+        except Exception as e:
+            logger.debug(f"发送通知失败: {e}")
 
-
-def set_manager(manager):
-    """外部注入 BackgroundTaskManager（如 ChatService 初始化时）"""
-    global _manager
-    _manager = manager
+    return init_global_bg_manager(on_notify=on_notify)
 
 
 # ============================================================

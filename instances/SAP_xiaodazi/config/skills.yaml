@@ -1,0 +1,29 @@
+skill_groups:
+  sap_generation:
+    description: "SAP 文档生成全流程"
+    skills: [protocol-entity-extraction, sap-template-parser, sap-content-generator, statistical-code-generator, document-assembler, compliance-checker]
+  document_processing:
+    description: "文档解析与处理"
+    skills: [mineru-pdf, word-processor, pdf-toolkit]
+  _always:
+    description: "始终注入"
+    skills: [file-manager]
+
+skills:
+  loading_mode: "lazy"
+  os_aware: true
+  common:
+    builtin:
+      - { name: plan-todo, backend_type: tool, tool_name: plan_todo, system: true, description: "任务规划与进度追踪" }
+      - { name: hitl, backend_type: tool, tool_name: hitl, system: true, description: "涉及敏感操作时请求用户确认" }
+      - { name: api-calling, backend_type: tool, tool_name: api_calling, system: true, description: "通用 HTTP API 调用能力" }
+      - { name: file-manager, backend_type: local, skill_source: library, system: true, description: "本地文件管理" }
+      - { name: protocol-entity-extraction, backend_type: local, skill_source: instance, description: "从 Protocol PDF 抽取结构化实体 JSON" }
+      - { name: sap-template-parser, backend_type: local, skill_source: instance, description: "解析 SAP 模板的章节结构和填写指引" }
+      - { name: sap-content-generator, backend_type: local, skill_source: instance, description: "按章节生成 SAP 正文内容" }
+      - { name: statistical-code-generator, backend_type: local, skill_source: instance, description: "生成 SAS/R 统计分析代码" }
+      - { name: document-assembler, backend_type: local, skill_source: instance, description: "组装 Word/PDF 格式的 SAP 文档" }
+      - { name: compliance-checker, backend_type: local, skill_source: instance, description: "ICH E9(R1) 合规性检查" }
+      - { name: mineru-pdf, backend_type: local, skill_source: library, description: "PDF 结构化解析", python_packages: ["magic-pdf"] }
+      - { name: word-processor, backend_type: local, skill_source: library, description: "Word 文档创建和编辑", python_packages: ["python-docx"], auto_install: true }
+      - { name: pdf-toolkit, backend_type: local, skill_source: library, description: "PDF 操作", python_packages: ["pypdf", "reportlab"] }
