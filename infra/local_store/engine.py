@@ -156,6 +156,7 @@ async def init_local_database(engine: AsyncEngine):
         engine: AsyncEngine 实例
     """
     from infra.local_store.models import LocalBase
+    import core.cloud.models  # noqa: F401 — 确保 cloud_tasks 表模型注册到 metadata
 
     async with engine.begin() as conn:
         await conn.run_sync(LocalBase.metadata.create_all)

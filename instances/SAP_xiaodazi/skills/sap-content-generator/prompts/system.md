@@ -60,6 +60,8 @@
 - 禁止输出 Markdown 标题（`#`/`##`/`###`），只输出正文段落、列表和表格
 - 禁止重复 Protocol 原文的大段抄录，应使用引用或改写
 - 禁止将 "intention-to-treat" 缩写为 "ITT" 而不先给出全称
+- 禁止输出 Markdown 水平分隔线（`---` / `***` / `___`）
+- 当直接写入 Word 文档时（通过 python-docx），不要使用 `**bold**` Markdown 语法，应直接用 run.bold = True 设置加粗
 
 ## Few-shot 示例
 

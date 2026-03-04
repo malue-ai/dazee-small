@@ -95,6 +95,7 @@ export type ContentBlockType =
   | 'server_tool_use'
   | 'image'
   | 'file'
+  | 'cloud_progress'
 
 /**
  * 基础内容块
@@ -178,6 +179,7 @@ export type ContentBlock =
   | ToolResultContentBlock
   | ImageContentBlock
   | FileContentBlock
+  | CloudProgressContentBlock
 
 // ==================== 工具状态 ====================
 
