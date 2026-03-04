@@ -606,29 +606,108 @@ When a request requires local capabilities but local is offline, the cloud respo
 
 ## 8 — Phased Implementation
 
-### Phase 0.5: Direct API Call (Current — Zero Cloud Changes)
+### Phase 0.5: Direct API Call (Completed — Zero Cloud Changes)
 
-**Goal**: Local cloud_agent Skill calls the cloud's existing `/api/v1/chat/stream` endpoint directly. No custom ACP protocol, no cloud-side changes.
+**Goal**: Local cloud_agent Skill calls the cloud's existing `/api/v1/chat` endpoint directly. No custom ACP protocol, no cloud-side changes.
 
 | Side | Work |
 |---|---|
 | **Cloud** | **Zero changes** — uses the existing containerized deployment as-is |
-| **Local** | `core/cloud/client.py` (CloudClient: login + chat_stream SSE), `tools/cloud_agent.py` (simplified), `skills/library/cloud-agent/SKILL.md`, `config/capabilities.yaml`, `skills.yaml` |
-| **Auth** | Reuses existing username/password → JWT (same as web frontend) |
-| **Verify** | `python scripts/test_cloud_e2e.py --cloud-url http://cloud:8001` |
+| **Local** | `services/cloud_client.py` (CloudClient: login + chat_stream SSE + health_check), `tools/cloud_agent.py`, `skills/library/cloud-agent/SKILL.md`, skill registration in `config/skills.yaml` + `skill_registry.yaml` |
+| **Auth** | Reuses existing username/password → JWT (same as web frontend), auto-login via `_ensure_auth()` |
+| **Verify** | `python -m pytest tests/test_cloud_agent_e2e.py -v -k "not slow"` |
 
-**Key insight**: The cloud already provides a complete agent-as-a-service API (`/api/v1/chat/stream`). The SSE events use the same zenflux format as the local agent, so no event mapping layer is needed. The cloud_agent tool just consumes the SSE stream and bridges `content_delta` / `content_start(tool_use)` events to local `cloud_progress` message deltas.
+**Key insight**: The cloud already provides a complete agent-as-a-service API (`/api/v1/chat`). The SSE events use the same zenflux format as the local agent, so no event mapping layer is needed. The cloud_agent tool consumes the SSE stream and bridges events to local progress updates.
 
-### Phase 1: Forward ACP + Cloud Skill (Local delegates to cloud)
+### Phase 1: Forward ACP + Local Task Tracking (Implemented — Cloud Zero Changes)
 
-**Goal**: Add task-level tracking, structured progress events, and reconnection support on top of Phase 0.5.
+**Goal**: Add task-level tracking, structured progress events, instance-level cloud config on top of Phase 0.5. All logic stays local; cloud remains a black box accessed only via public API.
+
+**Architecture**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     本地端 (zenflux_agent)                                       │
+│                                                                                 │
+│   cloud_agent Tool                                                              │
+│       │                                                                         │
+│       ├── 1. 读取实例 config.yaml → cloud.enabled / cloud.url                    │
+│       │                                                                         │
+│       ├── 2. get_cloud_client_for_instance(instance_id)                         │
+│       │       └── 按实例缓存，cloud.enabled: false 则返回 None（不可用）           │
+│       │                                                                         │
+│       ├── 3. 本地 Task Manager (SQLite)                                          │
+│       │       ├── create_task() → task_id                                       │
+│       │       ├── update_status(streaming / completed / failed / canceled)       │
+│       │       └── 记录 progress_steps（工具调用链 JSON）                           │
+│       │                                                                         │
+│       ├── 4. CloudClient.chat_stream_with_tracking()                            │
+│       │       ├── 消费 SSE 事件流                                                │
+│       │       ├── 产出 CloudStreamEvent（结构化）                                 │
+│       │       └── endpoint_mode: "direct" (Phase 1) / "proxy" (Phase 1.5+)     │
+│       │                                                                         │
+│       └── 5. 事件桥接 → 前端 cloud_progress 卡片                                 │
+│               ├── session_info → 记录 conversation_id                           │
+│               ├── tool_start   → cloud_progress: phase=tool_call, running       │
+│               ├── tool_end     → cloud_progress: phase=tool_call, done          │
+│               ├── text_delta   → cloud_progress: phase=streaming                │
+│               └── completed    → cloud_progress: phase=completed                │
+│                                                                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                     前端 (Tauri / Web)                                           │
+│                                                                                 │
+│   SettingsView.vue              MessageContent.vue                              │
+│   ┌──────────────────────┐      ┌───────────────────────────┐                   │
+│   │ 云端协同               │      │ cloud_progress 类型        │                   │
+│   │  URL / 用户名 / 密码   │      │  → CloudProgressCard.vue  │                   │
+│   │  测试连接(走后端代理)   │      │  (执行时间线+进度+状态)     │                   │
+│   └──────────────────────┘      └───────────────────────────┘                   │
+└────────────────────────────────────┬────────────────────────────────────────────┘
+                                     │
+                                     │ Phase 1: 直调公开 API
+                                     │ Phase 1.5+: 走独立 ACP 代理 (tool 层无感知)
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     云端 (zeno-backend-agent, 不改源码)                           │
+│                                                                                 │
+│   /api/v1/auth/login   POST   用户名密码 → JWT                                   │
+│   /api/v1/chat         POST   消息 + SSE 流式响应（zenflux 事件格式）              │
+│   /api/v1/files/upload POST   文件上传 → file_url                                │
+│   /health              GET    健康检查                                           │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Phase 1.5+ 预留：
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     独立 ACP 代理 (可选，独立部署)                                 │
+│                                                                                 │
+│   ACP Proxy Service (二次封装，不改云端源码)                                       │
+│       ├── Proxy DB (task 持久化)                                                │
+│       ├── WS 在线注册表 (Mobile/IM 转发)                                         │
+│       └── 代理转发 → 云端 /api/v1/chat                                           │
+│                                                                                 │
+│   本地 CloudClient 切换 endpoint_mode: "proxy" → 指向代理端点                     │
+│   tool 层代码无需任何修改                                                         │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Instance-level config** (`instances/xiaodazi/config.yaml`):
+
+```yaml
+cloud:
+  enabled: true                    # 本实例开启云端协同
+  url: https://your-cloud-agent.example.com      # 云端地址（可覆盖）
+```
+
+不配或 `enabled: false` 的实例（如 solo-vc）不会初始化云端客户端。
 
 | Side | Work |
 |---|---|
-| **Cloud** | `routers/acp.py` (task endpoints + SSE wrapper), `services/acp_service.py` (task state machine, event mapping) |
-| **Local** | `core/acp/client.py` (task lifecycle: create/stream/control), enhanced `tools/cloud_agent.py` |
-| **Frontend** | `CloudBindSettings.vue` (settings page), `CloudProgressCard.vue` (progress rendering), `useChat.ts` (cloud_progress handler) |
-| **Verify** | Local sends "run this Python script" → cloud sandbox executes → progress streams back → result displayed |
+| **Cloud** | **Zero changes** — accessed only via public API |
+| **Local** | `core/cloud/` (TaskManager + models), `services/cloud_client.py` (chat_stream_with_tracking + get_cloud_client_for_instance), `tools/cloud_agent.py` (task lifecycle + event bridging) |
+| **Frontend** | `CloudProgressCard.vue` (progress card), `SettingsView.vue` (cloud config section + test via backend proxy), `MessageContent.vue` + `useChat.ts` (cloud_progress rendering) |
+| **Verify** | Local sends "调用云端智能体调研 AI Agent" → cloud agent executes → SSE progress streams back → CloudProgressCard displays |
 
 ### Phase 2: Reverse ACP + WebSocket (Mobile/IM routes to local)
 
