@@ -411,6 +411,100 @@
           </div>
         </div>
 
+        <!-- ==================== 云端协同 ==================== -->
+        <div>
+          <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
+            云端协同
+          </h2>
+
+          <div class="bg-card rounded-lg border border-border overflow-hidden">
+            <div class="px-4 py-3 border-b border-border">
+              <div class="flex items-center gap-2 mb-1">
+                <Cloud class="w-4 h-4 text-primary" />
+                <span class="text-sm font-medium text-foreground">云端 Agent 连接</span>
+                <span
+                  v-if="cloudStatus === 'connected'"
+                  class="ml-auto inline-flex items-center gap-1 text-xs text-success"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-success" />
+                  已连接
+                </span>
+                <span
+                  v-else-if="cloudStatus === 'checking'"
+                  class="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground"
+                >
+                  <Loader2 class="w-3 h-3 animate-spin" />
+                  检查中
+                </span>
+                <span
+                  v-else
+                  class="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+                  未连接
+                </span>
+              </div>
+              <p class="text-[11px] text-muted-foreground">
+                连接到云端 Agent 可使用沙箱代码执行、深度调研和持续运行任务
+              </p>
+            </div>
+
+            <div class="px-4 py-3 space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-muted-foreground mb-1">云端 URL</label>
+                <input
+                  v-model="cloudUrl"
+                  type="text"
+                  placeholder="https://your-cloud-agent.example.com"
+                  class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-muted-foreground mb-1">用户名</label>
+                <input
+                  v-model="cloudUsername"
+                  type="text"
+                  placeholder="用户名（可选）"
+                  class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-muted-foreground mb-1">密码</label>
+                <div class="relative">
+                  <input
+                    v-model="cloudPassword"
+                    :type="showCloudPassword ? 'text' : 'password'"
+                    placeholder="密码（可选）"
+                    class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 pr-8"
+                  />
+                  <button
+                    @click="showCloudPassword = !showCloudPassword"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <Eye v-if="!showCloudPassword" class="w-3.5 h-3.5" />
+                    <EyeOff v-else class="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="px-4 py-3 border-t border-border flex items-center gap-3">
+              <button
+                @click="testCloudConnection"
+                :disabled="cloudStatus === 'checking'"
+                class="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-40 transition-colors flex items-center gap-1.5"
+              >
+                <Loader2 v-if="cloudStatus === 'checking'" class="w-3 h-3 animate-spin" />
+                <Wifi v-else class="w-3 h-3" />
+                测试连接
+              </button>
+              <span v-if="cloudTestMessage" class="text-xs" :class="cloudStatus === 'connected' ? 'text-success' : 'text-destructive'">
+                {{ cloudTestMessage }}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <!-- ==================== 多渠道网关 ==================== -->
         <div ref="gatewaySectionRef">
           <h2 class="text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
@@ -696,6 +790,7 @@ import {
   type SettingsStatus,
   type EmbeddingStatus,
 } from '@/api/settings'
+import api from '@/api'
 import { modelApi, type ProviderDetail, type ValidateKeyResult } from '@/api/models'
 import {
   getGatewayConfig,
@@ -916,6 +1011,35 @@ async function applySemanticMode() {
     if (downloadState.value !== 'downloading') {
       semanticOperating.value = false
     }
+  }
+}
+
+// ==================== 云端协同状态 ====================
+
+const cloudUrl = ref('https://your-cloud-agent.example.com')
+const cloudUsername = ref('')
+const cloudPassword = ref('')
+const showCloudPassword = ref(false)
+const cloudStatus = ref<'idle' | 'checking' | 'connected' | 'failed'>('idle')
+const cloudTestMessage = ref('')
+
+async function testCloudConnection() {
+  cloudStatus.value = 'checking'
+  cloudTestMessage.value = ''
+  try {
+    const { data } = await api.post('/v1/settings/cloud/test-connection', {
+      url: cloudUrl.value,
+    })
+    if (data.success) {
+      cloudStatus.value = 'connected'
+      cloudTestMessage.value = data.message || '连接成功'
+    } else {
+      cloudStatus.value = 'failed'
+      cloudTestMessage.value = data.message || '连接失败'
+    }
+  } catch (e: any) {
+    cloudStatus.value = 'failed'
+    cloudTestMessage.value = e?.response?.data?.message || e?.message || '无法连接'
   }
 }
 

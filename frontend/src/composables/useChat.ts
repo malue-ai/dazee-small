@@ -884,6 +884,10 @@ export function useChat() {
       case 'tool_result':
         if (!('content' in block)) (block as any).content = ''
         break
+      case 'cloud_progress':
+        if (!('steps' in block)) (block as any).steps = []
+        if (!('status' in block)) (block as any).status = 'running'
+        break
     }
     
     return block as ContentBlock

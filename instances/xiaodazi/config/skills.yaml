@@ -99,6 +99,9 @@ skill_groups:
   skill_management:
     description: "Skill 管理：创建新 Skill、搜索发现 Skill、安装社区 Skill、浏览已安装 Skill"
     skills: [skill-creator, skill-finder]
+  cloud_skills:
+    description: "云端协同：隔离沙箱代码执行、项目构建发布到公网、24/7 持续运行任务、长时间深度调研"
+    skills: [cloud-agent]
   _always:
     description: "始终注入（基础能力）"
     skills: [local-search, app-recommender, weather]
@@ -263,6 +266,9 @@ skills:
       - { name: image-resize,           backend_type: local, skill_source: library, bins: ["magick"], description: "ImageMagick 图片批量处理（缩放/裁剪/转格式/压缩）" }
 
     cloud_api:
+      # --- 云端 Agent 委托 ---
+      - { name: cloud-agent, backend_type: tool, skill_source: library, description: "云端 Agent 委托执行（隔离沙箱/项目发布到公网/24/7 持续运行/长时间深度调研）" }
+
       # --- Claude Computer Use（终极 UI 自动化：截屏+视觉理解+坐标操作） ---
       - { name: claude-computer-use, backend_type: local, skill_source: instance, description: "Claude Computer Use - 截屏+视觉理解操作任意桌面应用（坐标点击/滚动/拖拽/键盘）" }
 

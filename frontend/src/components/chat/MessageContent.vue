@@ -65,6 +65,9 @@
         <img :src="getImageSrc(block)" :alt="block.alt || '图片'" />
       </div>
 
+      <!-- 云端执行进度 -->
+      <CloudProgressCard v-else-if="block.type === 'cloud_progress'" :block="block" />
+
       <!-- 文件 -->
       <div v-else-if="block.type === 'file'" class="content-block file-block">
         <div class="file-card">
@@ -103,6 +106,7 @@
 import { ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import ToolBlock from './ToolBlock.vue'
+import CloudProgressCard from './CloudProgressCard.vue'
 import { resolveResourceUrl } from '@/api'
 import { 
   CheckCircle2, 

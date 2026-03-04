@@ -85,8 +85,11 @@ def merge_chapters(chapters_dir: Path):
             if candidates:
                 f = candidates[0]
         if f.exists():
-            content = f.read_text(encoding="utf-8")
-            parts.append(f"# {title}\n\n{content}\n\n\\newpage\n")
+            content = f.read_text(encoding="utf-8").strip()
+            if content.startswith("#"):
+                parts.append(f"{content}\n\n\\newpage\n")
+            else:
+                parts.append(f"# {title}\n\n{content}\n\n\\newpage\n")
             count += 1
             print(f"  + {title} ({f.stat().st_size} bytes)")
         else:
@@ -126,7 +129,9 @@ def _dedup_sections(text: str) -> str:
 
 def _clean_markdown_residuals(text: str) -> str:
     """Remove Markdown artifacts that should not appear in the final document."""
-    text = re.sub(r"^---\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*-{3,}\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\*{3,}\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*_{3,}\s*$", "", text, flags=re.MULTILINE)
     return text
 
 
@@ -173,27 +178,75 @@ def convert_with_pandoc(md_text: str, output_path: str) -> bool:
 
 
 MARKER_PATTERN = re.compile(r"(\[AI-INFERRED\]|\[PLACEHOLDER[^\]]*\])")
+BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
 
 
-def postprocess_markers(docx_path: str) -> None:
-    """扫描 Word 文档中的 [AI-INFERRED]/[PLACEHOLDER] 文本，添加高亮。"""
+def postprocess_docx(docx_path: str) -> None:
+    """Post-process Word: convert **bold** markers + highlight [AI-INFERRED]/[PLACEHOLDER]."""
     if not DOCX_OK:
         return
     doc = Document(docx_path)
     changed = False
 
     for para in doc.paragraphs:
+        changed |= _convert_bold_in_paragraph(para)
         changed |= _highlight_paragraph(para)
 
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
+                    changed |= _convert_bold_in_paragraph(para)
                     changed |= _highlight_paragraph(para)
 
     if changed:
         doc.save(docx_path)
-        print("  POST: [AI-INFERRED]/[PLACEHOLDER] 标记已高亮")
+        print("  POST: **bold** 转换 + [AI-INFERRED]/[PLACEHOLDER] 高亮完成")
+
+
+def _convert_bold_in_paragraph(para) -> bool:
+    """Convert **text** markdown bold to native Word bold in a paragraph."""
+    full_text = para.text
+    if "**" not in full_text:
+        return False
+
+    for run in list(para.runs):
+        if "**" not in run.text:
+            continue
+        parts = BOLD_PATTERN.split(run.text)
+        if len(parts) <= 1:
+            continue
+
+        parent = run._element.getparent()
+        run_idx = list(parent).index(run._element)
+        original_props = run._element.find(qn("w:rPr"))
+
+        run.text = ""
+        for k, part in enumerate(parts):
+            if not part:
+                continue
+            from copy import deepcopy
+            new_r = deepcopy(run._element)
+            new_r.text = ""
+            rpr = new_r.find(qn("w:rPr"))
+            if rpr is None:
+                rpr = new_r.makeelement(qn("w:rPr"), {})
+                new_r.insert(0, rpr)
+            t_el = new_r.makeelement(qn("w:t"), {})
+            t_el.text = part
+            t_el.set(qn("xml:space"), "preserve")
+            new_r.append(t_el)
+
+            is_bold_part = (k % 2 == 1)
+            if is_bold_part:
+                b_el = rpr.makeelement(qn("w:b"), {})
+                rpr.append(b_el)
+
+            parent.insert(run_idx + k + 1, new_r)
+
+        parent.remove(run._element)
+
+    return True
 
 
 def _highlight_paragraph(para) -> bool:
@@ -283,15 +336,22 @@ def _add_word_table(doc, rows):
 
 
 def _add_run_with_markers(para, text):
-    parts = MARKER_PATTERN.split(text)
+    combined = re.compile(r"(\[AI-INFERRED\]|\[PLACEHOLDER[^\]]*\]|\*\*.+?\*\*)")
+    parts = combined.split(text)
     for part in parts:
         if not part:
             continue
-        run = para.add_run(part)
         if part == "[AI-INFERRED]":
+            run = para.add_run(part)
             run.font.highlight_color = 7
         elif part.startswith("[PLACEHOLDER"):
+            run = para.add_run(part)
             run.font.highlight_color = 6
+        elif part.startswith("**") and part.endswith("**"):
+            run = para.add_run(part[2:-2])
+            run.bold = True
+        else:
+            para.add_run(part)
 
 
 def convert_with_python_docx(md_text: str, output_path: str) -> None:
@@ -353,7 +413,7 @@ def main(chapters_dir: str, entities_path: str, output_path: str) -> None:
 
     if convert_with_pandoc(md_text, output_path):
         print(f"  PANDOC: {count} chapters -> {output_path}")
-        postprocess_markers(output_path)
+        postprocess_docx(output_path)
     else:
         print("  FALLBACK: python-docx 方案")
         convert_with_python_docx(md_text, output_path)

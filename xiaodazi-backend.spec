@@ -186,6 +186,7 @@ hiddenimports += [
     # 文档结构化解析（utils/document_parser.py 延迟导入）
     'pdfplumber',
     'unstructured_client',
+    'docling',
     # .env 文件加载（utils/instance_loader.py、services/settings_service.py 延迟导入）
     'dotenv',
 ]

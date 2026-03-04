@@ -1,9 +1,11 @@
 """
 统一文档解析器 — Document Parser
 
-三级降级链：
-    Unstructured API (云端, 表格+结构+OCR)
+四级降级链：
+    Unstructured API (云端, 表格+结构+OCR, 需 API Key)
         ↓ API 不可用
+    Docling (本地, 视觉+语言模型, 表格识别最强)
+        ↓ 未安装
     pdfplumber (本地, 表格+文本)
         ↓ 未安装
     PyPDF2 (本地, 仅文本)
@@ -76,10 +78,9 @@ class ParsedDocument:
 
 
 class DocumentParser:
-    """统一文档解析器：Unstructured API (主) + pdfplumber (降级) + PyPDF2 (兜底)"""
+    """统一文档解析器：Unstructured API (主) + Docling (本地AI) + pdfplumber (降级) + PyPDF2 (兜底)"""
 
     def __init__(self) -> None:
-        # API Key 可来自：环境变量、实例 .env、或对话 HITL 持久化到本地 SQLite 后注入的 os.environ
         self._api_key: Optional[str] = os.getenv("UNSTRUCTURED_API_KEY")
         self._api_url: str = os.getenv(
             "UNSTRUCTURED_API_URL",
@@ -88,13 +89,20 @@ class DocumentParser:
 
     def _unstructured_available(self) -> bool:
         if not self._api_key:
-            logger.info("UNSTRUCTURED_API_KEY 未配置，将使用本地解析 (pdfplumber/PyPDF2)")
+            logger.info("UNSTRUCTURED_API_KEY 未配置，将使用本地解析 (Docling/pdfplumber/PyPDF2)")
             return False
         try:
             import unstructured_client  # noqa: F401
             return True
         except ImportError:
             logger.warning("unstructured_client 未安装，降级到本地解析。安装: pip install unstructured-client")
+            return False
+
+    def _docling_available(self) -> bool:
+        try:
+            from docling.document_converter import DocumentConverter  # noqa: F401
+            return True
+        except ImportError:
             return False
 
     def _pdfplumber_available(self) -> bool:
@@ -143,7 +151,13 @@ class DocumentParser:
                     chunk_max_chars=chunk_max_chars,
                 )
             except Exception as e:
-                logger.warning(f"Unstructured API 失败，降级到本地解析: {e}")
+                logger.warning(f"Unstructured API 失败，降级到 Docling/pdfplumber: {e}")
+
+        if self._docling_available():
+            try:
+                return await self._parse_with_docling(path)
+            except Exception as e:
+                logger.warning(f"Docling 解析失败，降级到 pdfplumber: {e}")
 
         if self._pdfplumber_available():
             try:
@@ -243,6 +257,73 @@ class DocumentParser:
             page_count=max(pages_seen) if pages_seen else 0,
             table_count=table_count,
             parser_used="unstructured",
+        )
+
+    # -------------------- Docling (本地 AI) --------------------
+
+    async def _parse_with_docling(self, path: Path) -> ParsedDocument:
+        """IBM Docling: 视觉+语言模型，表格识别精度最高的本地方案。"""
+        import asyncio
+        from docling.document_converter import DocumentConverter
+
+        logger.info(f"使用 Docling 解析: {path.name}")
+
+        def _convert():
+            converter = DocumentConverter()
+            return converter.convert(str(path))
+
+        result = await asyncio.get_event_loop().run_in_executor(None, _convert)
+        doc = result.document
+        md = doc.export_to_markdown()
+
+        elements = []
+        table_count = 0
+        for item in doc.iterate_items():
+            item_obj = item[1] if isinstance(item, tuple) else item
+            text = getattr(item_obj, "text", "") or ""
+            if not text.strip():
+                continue
+            label = getattr(item_obj, "label", "")
+            label_str = str(label).lower() if label else ""
+            if "table" in label_str:
+                table_count += 1
+                etype = ElementType.TABLE
+            elif "title" in label_str or "heading" in label_str or "section" in label_str:
+                etype = ElementType.TITLE
+            elif "list" in label_str:
+                etype = ElementType.LIST_ITEM
+            else:
+                etype = ElementType.NARRATIVE_TEXT
+
+            page_no = getattr(item_obj, "prov", None)
+            page_num = None
+            if page_no and hasattr(page_no, "__iter__"):
+                for p in page_no:
+                    page_num = getattr(p, "page_no", None)
+                    break
+
+            elements.append(Element(
+                type=etype,
+                text=text.strip(),
+                metadata={"page_number": page_num} if page_num else {},
+            ))
+
+        page_count = 0
+        try:
+            page_count = doc.num_pages()
+        except Exception:
+            if elements:
+                pages = [e.metadata.get("page_number", 0) for e in elements if e.metadata.get("page_number")]
+                page_count = max(pages) if pages else 0
+
+        logger.info(f"Docling 解析完成: {len(elements)} 元素, {table_count} 表格, {page_count} 页")
+
+        return ParsedDocument(
+            elements=elements,
+            markdown=md,
+            page_count=page_count,
+            table_count=table_count,
+            parser_used="docling",
         )
 
     # -------------------- pdfplumber (本地) --------------------

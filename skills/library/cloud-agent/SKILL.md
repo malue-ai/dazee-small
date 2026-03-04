@@ -1,6 +1,6 @@
 ---
 name: cloud-agent
-description: 将任务委托给云端 Agent 执行。云端拥有联网搜索、代码沙箱、项目发布等本地不具备的能力，适用于持续运行、沙箱执行、深度调研三类场景。支持带文件委托。
+description: 将任务委托给云端 Agent 执行。云端拥有隔离代码沙箱、项目构建发布到公网、24/7 持续运行等本地不具备的能力。适用于需要沙箱执行、应用发布、不受开机限制的长任务。支持带文件委托。
 metadata:
   xiaodazi:
     dependency_level: cloud_api
@@ -13,13 +13,28 @@ metadata:
 
 云端 Agent 是本地的能力扩展。本地优先处理，但当本地不适合或无法完成时，委托云端。
 
-## 云端具备的能力（本地没有或较弱）
+## 云端与本地的能力边界
 
-- **联网搜索**：Tavily、Exa 深度搜索，多来源信息聚合
-- **网页爬取**：Crawl4AI、Puppeteer 全页面爬取与数据提取
-- **代码沙箱**：Docker 隔离环境，安全执行任意代码
-- **项目构建与发布**：沙箱内 build + 发布到公网 URL
-- **文件处理**：支持接收 PDF / Excel / 图片等附件并分析
+### 云端独有（本地做不到）
+
+- **隔离代码沙箱**：Docker 容器内安全执行任意代码（Python/Node/Shell），不影响用户系统
+- **项目构建与发布**：沙箱内 build 项目 + 打包 Docker 镜像 + 部署到公网 URL，用户可直接访问
+- **24/7 持续运行**：云端定时任务不受电脑开关机影响，支持 cron/interval/once 三种调度模式
+- **云端文件存储**：S3/OSS 持久化，生成预签名下载链接
+
+### 本地独有（云端做不到）
+
+- 桌面 UI 自动化（peekaboo / pywinauto / Claude Computer Use）
+- 本地应用控制（打开微信、操作飞书、Apple Mail/Calendar 等）
+- 截图 + OCR、剪贴板读写
+- 本地文件直接访问（整理桌面、移动文件）
+
+### 两端都有（不是委托云端的理由）
+
+- **联网搜索**：本地有 DuckDuckGo/Brave/Tavily/arXiv/论文搜索，日常搜索本地即可
+- **网页内容提取**：本地有 Jina Reader、Crawl4AI
+- **知识库检索**：本地有 FTS5 + 语义搜索 + RAG
+- **文件处理**：本地可直接读写 PDF/Excel/Word
 
 ## 什么时候委托云端
 
@@ -51,7 +66,7 @@ metadata:
 <reason>用户正在用电脑，本地提醒更即时可靠</reason>
 </example>
 
-### 理由 2：沙箱执行 — 需要运行代码、构建项目、发布应用
+### 理由 2：沙箱执行 — 需要隔离环境运行代码或构建发布项目
 
 <example>
 <query>帮我跑一下这段 Python 数据分析脚本</query>
@@ -77,18 +92,23 @@ metadata:
 <reason>本地有 PPT Skill，无需沙箱</reason>
 </example>
 
-### 理由 3：深度调研 — 需要联网搜索多来源信息
+### 理由 3：深度调研 — 长时间、多轮、不怕关机的深度分析
+
+云端深度调研的优势不在于"能搜索"（本地也能），而在于：
+- 不受开机限制，可以跑数小时
+- 多轮迭代搜索 + 分析 + 再搜索，自主推进
+- 适合产出完整报告、对比分析等重度输出
 
 <example>
 <query>调研最新的 AI Agent 框架并写对比报告</query>
 <use_cloud>true</use_cloud>
-<reason>需要多来源联网搜索（Tavily/Exa）+ 长时间分析</reason>
+<reason>需要多轮搜索 + 长时间分析 + 产出完整报告，用户可能中途关机</reason>
 </example>
 
 <example>
 <query>帮我分析这三家竞品的功能差异，写一份对比分析</query>
 <use_cloud>true</use_cloud>
-<reason>需要爬取多个竞品网站 + 深度对比</reason>
+<reason>需要爬取多个竞品网站 + 长时间深度对比</reason>
 </example>
 
 <example>
@@ -123,6 +143,12 @@ metadata:
 <reason>文本生成是本地基础能力，无需委托</reason>
 </example>
 
+<example>
+<query>帮我搜一下这个问题</query>
+<use_cloud>false</use_cloud>
+<reason>本地有多个搜索 Skill（DuckDuckGo/Brave/Tavily），即时返回</reason>
+</example>
+
 ## 使用方式
 
 基本调用：
@@ -153,9 +179,8 @@ cloud_agent(
 
 ## 执行特性
 
-- **流式输出**：云端默认流式返回，执行过程中会实时推送进度（思考中 → 工具调用 → 生成文本）
+- **流式输出**：云端默认流式返回，执行过程中会实时推送进度（思考中 -> 工具调用 -> 生成文本）
 - **执行时间**：简单任务 10-30 秒，深度调研 1-3 分钟，沙箱构建项目 2-5 分钟
 - **文件支持**：可传入 PDF、Excel、CSV、图片等文件，本地文件会自动上传到云端 S3
 - **网络依赖**：需要网络连接，不可达时工具会返回明确错误提示
 - **结果格式**：返回纯文本结果，如需生成本地文件（PPT / Excel），应在本地完成
-
