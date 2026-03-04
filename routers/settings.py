@@ -374,3 +374,25 @@ async def put_instance_config(body: InstanceConfigBody) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("put_instance_config 失败")
         return {"success": False, "error": str(e)}
+
+
+class CloudTestRequest(BaseModel):
+    url: str = "https://agent.dazee.ai"
+
+
+@router.post("/cloud/test-connection")
+async def test_cloud_connection(body: CloudTestRequest) -> Dict[str, Any]:
+    """通过后端代理测试云端连接（避免浏览器 CORS 限制）"""
+    import httpx
+
+    target = body.url.rstrip("/") + "/health"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(target)
+            if resp.status_code == 200:
+                return {"success": True, "message": "连接成功"}
+            return {"success": False, "message": f"返回 {resp.status_code}"}
+    except httpx.TimeoutException:
+        return {"success": False, "message": "连接超时"}
+    except Exception as e:
+        return {"success": False, "message": f"无法连接: {e}"}

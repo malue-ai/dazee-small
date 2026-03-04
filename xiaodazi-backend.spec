@@ -215,8 +215,11 @@ hiddenimports += ['PyPDF2', 'pypdf', 'docx', 'pptx', 'openpyxl']
 hiddenimports += collect_submodules('huggingface_hub')
 
 # 飞书 SDK（core/gateway/channels/feishu.py 延迟导入）
+# 排除 adapter 子模块（flask/starlette 等需可选依赖，避免 ModuleNotFoundError 告警）
 try:
-    hiddenimports += collect_submodules('lark_oapi')
+    def _filter_lark_adapter(name):
+        return '.adapter.' not in name  # 排除 lark_oapi.adapter.flask 等
+    hiddenimports += collect_submodules('lark_oapi', filter=_filter_lark_adapter)
 except Exception:
     pass  # 未安装时跳过
 
