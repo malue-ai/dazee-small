@@ -105,7 +105,7 @@ class NodeInvokeRequest:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     command: str = ""
     params: Dict[str, Any] = field(default_factory=dict)
-    timeout_ms: int = 30000
+    timeout_ms: int = 60000
     node_id: str = "local"  # 默认本地节点
 
     @classmethod
@@ -113,7 +113,7 @@ class NodeInvokeRequest:
         cls,
         command: str,
         params: Optional[Dict[str, Any]] = None,
-        timeout_ms: int = 30000,
+        timeout_ms: int = 60000,
         node_id: str = "local",
     ) -> "NodeInvokeRequest":
         """创建调用请求"""
@@ -234,7 +234,7 @@ class SystemRunParams:
     command: List[str]
     cwd: Optional[str] = None
     env: Optional[Dict[str, str]] = None
-    timeout_ms: int = 30000
+    timeout_ms: int = 60000
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SystemRunParams":
@@ -242,5 +242,5 @@ class SystemRunParams:
             command=data.get("command", []),
             cwd=data.get("cwd"),
             env=data.get("env"),
-            timeout_ms=data.get("timeout_ms", 30000),
+            timeout_ms=data.get("timeout_ms", 60000),
         )

@@ -21,6 +21,7 @@ from core.nodes.protocol import (
     ShellResult,
     SystemRunParams,
 )
+from utils.app_paths import get_bundle_dir
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,11 @@ class LocalNodeBase(ABC):
         self.display_name = display_name
         self._initialized = False
 
-        # Shell 执行器
+        # Shell 执行器：默认 cwd 为项目根，使相对路径如 skills/library/... 可解析
         self.shell_executor = ShellExecutor(
             allowlist=allowlist,
             safe_bins=safe_bins,
+            default_cwd=str(get_bundle_dir()),
         )
 
     @property
