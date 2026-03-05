@@ -37,15 +37,26 @@ class ConfigureInstanceTool(BaseTool):
             return {"success": False, "error": "无法确定当前实例"}
 
         try:
-            from infra.local_store.instance_config_store import VALID_CATEGORIES, upsert
+            from infra.local_store.engine import get_local_session_factory
+            from infra.local_store import instance_config_store
 
-            if category not in VALID_CATEGORIES:
+            if category not in instance_config_store.VALID_CATEGORIES:
                 return {
                     "success": False,
-                    "error": f"无效品类 '{category}'，支持: {', '.join(sorted(VALID_CATEGORIES))}",
+                    "error": f"无效品类 '{category}'，支持: {', '.join(sorted(instance_config_store.VALID_CATEGORIES))}",
                 }
 
-            upsert(instance_id, category, key, value, skill_name=skill_name, source="hitl")
+            factory = await get_local_session_factory()
+            async with factory() as session:
+                await instance_config_store.upsert(
+                    session,
+                    instance_id,
+                    category,
+                    key,
+                    value,
+                    skill_name=skill_name,
+                    source="hitl",
+                )
 
             if category == "credential" and value:
                 os.environ[key] = value
