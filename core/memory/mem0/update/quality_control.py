@@ -13,6 +13,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from json_repair import repair_json
 from logger import get_logger
 
 from ..pool import get_mem0_pool
@@ -446,20 +447,31 @@ Do not return anything except the JSON format.
         return str(response)
 
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
-        """解析 LLM 响应 JSON（对齐 mem0）"""
+        """解析 LLM 响应 JSON，使用 json_repair 处理常见格式错误"""
+        text = response.strip()
+
+        json_start = text.find("{")
+        json_end = text.rfind("}") + 1
+        if json_start == -1 or json_end <= json_start:
+            logger.warning("[QualityController] 响应中未找到 JSON")
+            return {}
+
+        json_str = text[json_start:json_end]
+
         try:
-            cleaned = response.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.strip("`")
-            try:
-                return json.loads(cleaned)
-            except json.JSONDecodeError:
-                json_start = cleaned.find("{")
-                json_end = cleaned.rfind("}") + 1
-                if json_start != -1 and json_end > json_start:
-                    return json.loads(cleaned[json_start:json_end])
-        except Exception:
-            logger.warning("[QualityController] LLM JSON 解析失败")
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            result = repair_json(json_str, return_objects=True)
+            if isinstance(result, dict):
+                logger.info("[QualityController] JSON 修复成功 (json_repair)")
+                return result
+            logger.warning(f"[QualityController] json_repair 返回非 dict: {type(result)}")
+        except Exception as e:
+            logger.warning(f"[QualityController] JSON 修复失败: {e}")
+
         return {}
 
     def extract_update_actions(self, decision: Dict[str, Any]) -> Dict[str, Any]:

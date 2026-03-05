@@ -103,8 +103,13 @@ class FileProcessor:
         "application/xml",
     }
 
-    # 最大文本大小（50KB）
-    MAX_TEXT_SIZE = 50 * 1024
+    # 最大文本大小（10KB）— 超出走 scratchpad
+    MAX_TEXT_SIZE = 10 * 1024
+
+    PARSEABLE_DOC_TYPES = {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
 
     # 预览文本最大字符数
     MAX_PREVIEW_CHARS = 500
@@ -388,7 +393,26 @@ class FileProcessor:
                     logger.warning(f"读取文本失败，降级为文档处理: {str(e)}")
                     category = FileCategory.DOCUMENT
 
-        # Document: provide local path reference for agent
+        # Document: for parseable types (PDF/DOCX), attempt pre-parse
+        # Tauri/browsers may identify .docx as application/octet-stream instead of the official MIME
+        is_parseable = mime_type in self.PARSEABLE_DOC_TYPES
+        if not is_parseable and mime_type == "application/octet-stream" and filename:
+            ext = Path(filename).suffix.lower()
+            if ext in (".docx", ".pdf"):
+                is_parseable = True
+                logger.info(f"MIME 为 octet-stream 但扩展名为 {ext}，视为可解析文档")
+        if is_parseable and local_path:
+            preparsed = await self._preparse_document(local_path, filename)
+            if preparsed:
+                return ProcessedFile(
+                    category=FileCategory.DOCUMENT,
+                    filename=filename,
+                    mime_type=mime_type,
+                    text_content=preparsed,
+                    file_url=display_path,
+                    file_size=file_size,
+                )
+
         return ProcessedFile(
             category=FileCategory.DOCUMENT,
             filename=filename,
@@ -396,6 +420,32 @@ class FileProcessor:
             file_url=display_path,
             file_size=file_size,
         )
+
+    async def _preparse_document(self, local_path: str, filename: str) -> str:
+        """对 PDF/DOCX 调用 DocumentParser 预解析，返回适合注入上下文的摘要。"""
+        logger.info(f"开始文档预解析: {filename} (path={local_path})")
+        try:
+            from utils.document_parser import DocumentParser
+
+            parser = DocumentParser()
+            result = await parser.parse(local_path)
+            if not result.markdown:
+                return ""
+
+            if len(result.markdown) <= 2000:
+                return f"[文档预解析] {filename}\n{result.summary}\n\n{result.markdown}"
+
+            scratchpad_dir = Path("workspace/scratchpad")
+            scratchpad_dir.mkdir(parents=True, exist_ok=True)
+            scratchpad_file = scratchpad_dir / f"{Path(filename).stem}_parsed.md"
+            scratchpad_file.write_text(result.markdown, encoding="utf-8")
+            return (
+                f"[文档预解析] {filename}\n{result.summary}\n"
+                f"完整解析内容已保存: {scratchpad_file}"
+            )
+        except Exception as e:
+            logger.warning(f"文档预解析失败 ({filename}): {type(e).__name__}: {e}", exc_info=True)
+            return ""
 
     def _categorize_mime_type(self, mime_type: str) -> FileCategory:
         """根据 MIME 类型分类"""

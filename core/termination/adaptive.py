@@ -10,7 +10,7 @@ V12 更新（回溯↔终止联动 + 费用限制）：
 - 新增维度 6.5：回溯感知（回溯耗尽 → HITL 三选一 / 意图澄清）
 - 所有决策使用 FinishReason 枚举
 
-八维度终止判断：
+九维度终止判断：
 1. 用户主动停止（stop event）
 2. HITL 人工干预（危险操作确认）
 3. LLM 自主终止（stop_reason == "end_turn"）
@@ -19,6 +19,7 @@ V12 更新（回溯↔终止联动 + 费用限制）：
 5. 安全兜底：最大时长
 6. 安全兜底：空闲超时
 6.5 回溯感知：回溯耗尽 / 意图澄清（V12 新增）
+6.7 同工具循环检测：工具不报错但 LLM 陷入同工具死循环（V12.2 新增）
 7. 安全兜底：连续失败 → 回滚选项
 8. 长任务用户确认
 """
@@ -282,6 +283,23 @@ class AdaptiveTerminator(BaseTerminator):
                     finish_reason=FinishReason.BACKTRACK_EXHAUSTED,
                     action=TerminationAction.ASK_USER,
                 )
+
+        # === 6.7 同工具循环检测（V12.2 新增）===
+        # 补充回溯机制的盲区：工具返回"成功"但 LLM 反复用同一工具微调参数，
+        # 不触发 backtrack 也不触发 consecutive_failures，陷入死循环。
+        tool_loop = getattr(ctx, "tool_loop_detected", False)
+        if tool_loop:
+            loop_tool = getattr(ctx, "_tool_loop_tool_name", None) or "unknown"
+            logger.warning(
+                f"终止决策: 检测到同工具循环调用 "
+                f"(tool={loop_tool})，等待用户决定"
+            )
+            return TerminationDecision(
+                should_stop=False,
+                reason=f"tool_call_loop:{loop_tool}",
+                finish_reason=FinishReason.TOOL_CALL_LOOP,
+                action=TerminationAction.ASK_USER,
+            )
 
         # === 7. 安全兜底：连续失败 → 提供回滚选项 ===
         consecutive_failures = ctx.consecutive_failures

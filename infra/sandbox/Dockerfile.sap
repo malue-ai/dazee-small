@@ -1,0 +1,34 @@
+# SAP Creation Assistant — 沙箱镜像
+#
+# 预装 SAP 工作流所需的全部依赖：
+#   - pandoc: Markdown → Word 工业级转换（表格/公式/脚注/目录原生支持）
+#   - python-docx: Word 后处理（高亮标记、精细调整）
+#   - pdfplumber: PDF 表格提取
+#   - LibreOffice headless: DOCX → PDF 转换
+#   - R base: 统计代码语法验证
+#
+# 构建：
+#   docker build -f infra/sandbox/Dockerfile.sap -t zenflux-sandbox-sap .
+#
+# 使用：
+#   docker run --rm -v /tmp/workspace:/workspace zenflux-sandbox-sap python script.py
+
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pandoc \
+    libreoffice-writer \
+    r-base-core \
+    fonts-liberation \
+    fonts-noto \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    python-docx>=0.8.11 \
+    docxtpl>=0.18.0 \
+    pdfplumber>=0.11.0 \
+    pypdf>=4.0.0 \
+    openpyxl>=3.0.0 \
+    && true
+
+WORKDIR /workspace

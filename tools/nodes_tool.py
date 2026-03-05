@@ -20,12 +20,38 @@ from tools.base import BaseTool
 logger = logging.getLogger(__name__)
 
 
+_INSTALL_COMMANDS: set[tuple[str, str]] = {
+    ("pip", "install"),
+    ("pip3", "install"),
+    ("python", "-m"),  # python -m pip install ...
+    ("python3", "-m"),
+    ("npm", "install"),
+    ("npm", "ci"),
+    ("pnpm", "install"),
+    ("yarn", "install"),
+    ("yarn", "add"),
+    ("brew", "install"),
+    ("apt", "install"),
+    ("apt-get", "install"),
+}
+
+_INSTALL_TIMEOUT_MS = 120_000  # 2 min for package install commands
+
+
+def _is_install_command(command: list[str]) -> bool:
+    if len(command) < 2:
+        return False
+    return (command[0], command[1]) in _INSTALL_COMMANDS
+
+
 class NodesTool(BaseTool):
     """
     Nodes 工具 - 发现、管理和操作本地/远程节点
 
     统一的节点操作工具
     """
+
+    execution_timeout: int = 300
 
     def __init__(self, node_manager: Optional[NodeManager] = None):
         """
@@ -103,7 +129,7 @@ output_handling 使用规范（run action）:
                 },
                 "cwd": {"type": "string", "description": "工作目录（run action）"},
                 "env": {"type": "object", "description": "环境变量（run action）"},
-                "timeout_ms": {"type": "integer", "description": "超时毫秒数", "default": 30000},
+                "timeout_ms": {"type": "integer", "description": "超时毫秒数（安装类命令自动提升至 120s）", "default": 60000},
                 "title": {"type": "string", "description": "通知标题（notify action）"},
                 "message": {"type": "string", "description": "通知内容（notify action）"},
                 "subtitle": {"type": "string", "description": "通知副标题（notify action）"},
@@ -193,11 +219,15 @@ output_handling 使用规范（run action）:
         if isinstance(command, str):
             command = command.split()
 
+        timeout_ms = params.get("timeout_ms", 60_000)
+        if _is_install_command(command):
+            timeout_ms = max(timeout_ms, _INSTALL_TIMEOUT_MS)
+
         response = await self.node_manager.run_command(
             command=command,
             cwd=params.get("cwd"),
             env=params.get("env"),
-            timeout_ms=params.get("timeout_ms", 30000),
+            timeout_ms=timeout_ms,
             node_id=node_id,
         )
 

@@ -808,32 +808,38 @@ def load_instance_env_from_config(instance_name: str) -> None:
         except ImportError:
             logger.warning("python-dotenv 未安装，跳过 .env 加载。安装: pip install python-dotenv")
 
-    # Step 2: 加载 config.yaml 的 env_vars 段（优先级更高，会覆盖 .env）
+    # Step 2: 加载 config.yaml 的 env_vars 段（优先级高于 .env）
     config_path = instance_dir / "config.yaml"
-    if not config_path.exists():
-        if not env_file.exists():
-            logger.warning(f"实例配置文件不存在: {config_path}")
-        return
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                raw_config = yaml.safe_load(f) or {}
+            env_vars = raw_config.get("env_vars", {})
+            if isinstance(env_vars, dict) and env_vars:
+                injected_count = 0
+                for key, value in env_vars.items():
+                    if value is not None and str(value).strip():
+                        os.environ[key] = str(value).strip()
+                        injected_count += 1
+                if injected_count > 0:
+                    logger.info(f"从实例 {instance_name}/config.yaml 注入 {injected_count} 个环境变量")
+        except Exception as e:
+            logger.error(f"加载实例配置失败: {e}", exc_info=True)
+    elif not env_file.exists():
+        logger.warning(f"实例配置文件不存在: {config_path}")
 
+    # Step 3: 从 instance_config_store 注入 credential 品类到 os.environ
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw_config = yaml.safe_load(f) or {}
+        from infra.local_store.instance_config_store import get_by_category, migrate_from_instance_env_db
+        migrate_from_instance_env_db()
+        credentials = get_by_category(instance_name, "credential")
+        if credentials:
+            for k, v in credentials.items():
+                if v:
+                    os.environ[k] = v
+            logger.info(f"从 instance_config_store 注入实例 {instance_name} 的 {len(credentials)} 个 credential")
     except Exception as e:
-        logger.error(f"加载实例配置失败: {e}", exc_info=True)
-        return
-
-    env_vars = raw_config.get("env_vars", {})
-    if not isinstance(env_vars, dict) or not env_vars:
-        return
-
-    injected_count = 0
-    for key, value in env_vars.items():
-        if value is not None and str(value).strip():
-            os.environ[key] = str(value).strip()
-            injected_count += 1
-
-    if injected_count > 0:
-        logger.info(f"从实例 {instance_name}/config.yaml 注入 {injected_count} 个环境变量")
+        logger.debug("加载实例 config_store 跳过: %s", e)
 
 
 def _merge_config_to_schema(base_schema, config: InstanceConfig):

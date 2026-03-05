@@ -35,6 +35,8 @@ class SkillSummary:
     requires_bins: List[str] = field(default_factory=list)
     requires_env: List[str] = field(default_factory=list)
     parameters: List[Dict] = field(default_factory=list)  # optional structured params
+    backend_type: str = ""  # "tool" 表示可直接调用的框架工具
+    tool_name: str = ""  # backend_type=tool 时对应的工具名（如 cloud_agent）
 
 
 class SkillPromptBuilder:
@@ -86,7 +88,15 @@ class SkillPromptBuilder:
                 location = Path(location).relative_to(Path.cwd())
             except (ValueError, TypeError):
                 pass  # 无法转相对路径时保留原值
-            lines.append(f'  <skill name="{skill.name}" location="{location}">')
+
+            # backend_type=tool 的 Skill 标记工具名，告诉 LLM 直接调用
+            if skill.backend_type == "tool" and skill.tool_name:
+                lines.append(
+                    f'  <skill name="{skill.name}" backend_type="tool" '
+                    f'tool_name="{skill.tool_name}" location="{location}">'
+                )
+            else:
+                lines.append(f'  <skill name="{skill.name}" location="{location}">')
             lines.append(f"    <description>{emoji_prefix}{skill.description}</description>")
             if skill.quickstart:
                 lines.append(f"    <quickstart>\n{skill.quickstart}\n    </quickstart>")
@@ -141,12 +151,17 @@ class SkillPromptBuilder:
 
 扫描 `<available_skills>` 的 `<description>` 条目，选择最匹配的 Skill。
 
-**关键约束：** `<available_skills>` 中的 Skill 名称（如 ddg-search、brave-search）不是工具，不能直接调用。必须通过 `nodes` 或 `api_calling` 工具执行 Skill 中的代码。
+**⚠️ 两种 Skill 类型，执行方式完全不同：**
 
-**执行方式：**
-- 如果 Skill 有 `<quickstart>`：直接按 quickstart 代码用 `nodes` 工具执行
-- 如果没有 `<quickstart>`：先 Read `location` 路径的 SKILL.md，再按其代码示例用 `nodes` 或 `api_calling` 执行
-- 不要把 Skill 名当作工具名调用——Skill 名不在可调用工具列表中，直接调用会报错"工具未找到"
+**类型 A — `backend_type="tool"` 的 Skill（标记了 `tool_name`）：**
+- 这是框架内置工具的使用指南，**直接调用 `tool_name` 指定的工具**即可
+- 例如 `<skill name="cloud-agent" backend_type="tool" tool_name="cloud_agent">` → 直接调用 `cloud_agent` 工具
+- **禁止** 用 nodes 读取 SKILL.md 或执行代码，直接调用工具！
+
+**类型 B — 普通 Skill（无 `backend_type` 属性）：**
+- 名称不是工具，**不能**直接调用，必须通过 `nodes` 或 `api_calling` 执行 Skill 代码
+- 如果有 `<quickstart>`：按 quickstart 代码用 `nodes` 工具执行
+- 如果没有 `<quickstart>`：先 Read `location` 路径的 SKILL.md，再按代码示例执行
 
 **需安装的 Skill（description 含 [需安装: ...]）：**
 1. 先用 hitl 工具请求用户确认安装（说明安装什么、为什么需要）
@@ -171,8 +186,17 @@ MCP 类请求（用户提到"MCP"或某个 MCP Server）：
 - 不要尝试直接安装 MCP Server 的 npm 包然后期望能连上——框架不会自动连接任意 MCP Server
 - 正确做法：引导用户提供 MCP Server 的 URL，然后用 skill-creator 创建一个 `backend_type: mcp` 的 Skill
 
+**网络搜索/内容提取的正确方式（严格遵守优先级）：**
+1. **ddg-search**（Jina Search）：通过 `nodes` 工具执行 `python3 -c "import httpx,json; r=httpx.get('https://s.jina.ai/关键词', ...)"` 搜索
+2. **jina-reader**：通过 `nodes` 工具执行 `python3 -c "import httpx; r=httpx.get('https://r.jina.ai/URL', ...)"` 提取网页内容
+3. **web-scraper**（Crawl4AI）：需要批量抓取或反爬场景时使用
+4. **cloud_agent**：用户明确要求云端调研时直接调用此工具
+5. **绝对禁止**：不要用 `open -a Safari`、`osascript` 打开浏览器做手动搜索！不要用 `observe_screen` 截屏来读网页！这浪费大量轮次且效率极低。搜索/爬虫 Skill 失败时，用不同的搜索词重试，或告知用户搜索暂不可用。
+
 **禁止行为：**
-- 不要把 Skill 名（如 ddg-search）当作工具名调用，这会报错"工具未找到"。Skill 中的代码必须通过 `nodes` 或 `api_calling` 执行
+- 对于普通 Skill（无 `backend_type` 属性）：不要把 Skill 名当作工具名调用，必须通过 `nodes` 执行代码
+- 对于 `backend_type="tool"` 的 Skill：不要用 nodes 读取 SKILL.md 或执行代码，直接调用 `tool_name` 指定的工具
+- 不要把 Skill 名（如 `cloud-agent`、`ddg-search`）当作 `api_calling` 的 `api_name` 传入——它们不是注册 API
 - 不要为了"可能有用"而安装系统级软件（homebrew、node、java、docker 等），这超出了 Skill 依赖范围
 - 不要在未确认最终能使用的情况下安装一连串前置依赖
 - 安装非 pip 包的系统级依赖前，必须用 hitl 工具征求用户同意并说明理由
@@ -188,12 +212,17 @@ MCP 类请求（用户提到"MCP"或某个 MCP Server）：
 
 Scan `<available_skills>` `<description>` entries, choose the best match.
 
-**Critical constraint:** Skill names in `<available_skills>` (e.g. ddg-search, brave-search) are NOT callable tools. You must execute Skill code via `nodes` or `api_calling` tools.
+**⚠️ Two Skill types with DIFFERENT execution methods:**
 
-**Execution:**
+**Type A — Skills with `backend_type="tool"` (marked with `tool_name`):**
+- These are usage guides for built-in tools — **call the tool specified by `tool_name` directly**
+- E.g. `<skill name="cloud-agent" backend_type="tool" tool_name="cloud_agent">` → call `cloud_agent` tool directly
+- Do NOT use nodes to read SKILL.md or execute code — just call the tool!
+
+**Type B — Regular Skills (no `backend_type` attribute):**
+- Names are NOT callable tools — execute Skill code via `nodes` or `api_calling`
 - If Skill has `<quickstart>`: execute directly via `nodes` tool following the quickstart code
 - If no `<quickstart>`: Read the SKILL.md at `location` path first, then follow its code via `nodes` or `api_calling`
-- Do NOT call a Skill name as a tool — Skill names are not in the callable tool list and will return "tool not found"
 
 **Skills requiring setup (description contains [needs setup: ...]):**
 1. Use hitl tool to ask user to confirm installation (explain what and why)
@@ -218,8 +247,17 @@ MCP requests (user mentions "MCP" or a specific MCP Server):
 - Do NOT install MCP Server npm packages expecting them to "just work" — the framework won't auto-connect to arbitrary MCP Servers
 - Correct approach: ask user for the MCP Server URL, then use skill-creator to create a `backend_type: mcp` Skill
 
+**Web search / content extraction priority (strict):**
+1. **ddg-search** (Jina Search): via `nodes` tool with `python3 -c "import httpx,json; r=httpx.get('https://s.jina.ai/keyword', ...)"`
+2. **jina-reader**: via `nodes` tool with `python3 -c "import httpx; r=httpx.get('https://r.jina.ai/URL', ...)"`
+3. **web-scraper** (Crawl4AI): for batch crawling or anti-detection scenarios
+4. **cloud_agent**: when user explicitly requests cloud-based research
+5. **ABSOLUTELY FORBIDDEN**: Do NOT open Safari/browsers (`open -a Safari`, `osascript`) for manual search! Do NOT use `observe_screen` to read web pages! This wastes turns and is extremely inefficient.
+
 **Prohibited actions:**
-- Do NOT call Skill names (e.g. ddg-search, brave-search) as tool names — this will fail with "tool not found". Skill code must be executed via `nodes` or `api_calling`
+- For regular Skills (no `backend_type`): Do NOT call Skill names as tool names — execute code via `nodes`
+- For `backend_type="tool"` Skills: Do NOT use nodes to read SKILL.md or execute code — call the `tool_name` tool directly
+- Do NOT pass Skill names (like `cloud-agent`, `ddg-search`) as `api_name` to `api_calling` — they are NOT registered APIs
 - Do NOT install system-level software (homebrew, node, java, docker, etc.) speculatively — this is beyond Skill dependency scope
 - Do NOT install a chain of prerequisites without confirming the end result will actually work
 - Before installing any non-pip system-level dependency, MUST use hitl tool to get user consent with clear justification

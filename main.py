@@ -45,6 +45,11 @@ class UnicodeJSONResponse(JSONResponse):
             separators=(",", ":"),
         ).encode("utf-8")
 
+# ==================== 启动 heartbeat ====================
+# 在所有 local import 之前输出，确保进程存活可见。
+# 若此行出现但后续无输出，说明 import 阶段卡死或报错。
+print(f"[xiaodazi] Python {sys.version.split()[0]}, importing modules...", flush=True)
+
 # 加载配置（统一从 config.yaml）
 from services.settings_service import load_config_to_env
 load_config_to_env()
@@ -69,6 +74,8 @@ from infra.resilience.config import apply_resilience_config
 from core.tool.registry import get_capability_registry
 from infra.local_store import close_all_workspaces
 from infra.local_store.engine import close_local_engine
+
+print("[xiaodazi] All modules imported.", flush=True)
 
 # ==================== 常量定义 ====================
 
@@ -104,14 +111,17 @@ async def _init_resilience_config() -> None:
 async def _init_local_store() -> None:
     """初始化本地存储（SQLite 共享引擎 + 旧实例数据迁移）"""
     print("💾 初始化本地存储...")
-    from infra.local_store.engine import get_local_engine
-    await get_local_engine()
+    try:
+        from infra.local_store.engine import get_local_engine
+        await get_local_engine()
 
-    from scripts.migrate_to_shared_db import auto_migrate
-    if auto_migrate():
-        print("📦 已完成旧实例数据迁移")
+        from scripts.migrate_to_shared_db import auto_migrate
+        if auto_migrate():
+            print("📦 已完成旧实例数据迁移")
 
-    print("✅ 本地存储就绪（共享引擎模式）")
+        print("✅ 本地存储就绪（共享引擎模式）")
+    except Exception as e:
+        print(f"❌ 本地存储初始化失败: {e}", flush=True)
 
 
 
@@ -122,9 +132,13 @@ async def _preload_capability_registry() -> None:
     必须在 Agent 加载之前完成，确保 capabilities.yaml 中的工具被正确加载
     """
     print("📋 加载工具注册表...")
-    registry = get_capability_registry()
-    await registry.initialize()
-    print(f"✅ 已加载 {len(registry.capabilities)} 个工具能力")
+    try:
+        registry = get_capability_registry()
+        await registry.initialize()
+        print(f"✅ 已加载 {len(registry.capabilities)} 个工具能力")
+    except Exception as e:
+        print(f"❌ 工具注册表加载失败: {e}", flush=True)
+        raise
 
 
 def _is_hash_instance(name: str) -> bool:

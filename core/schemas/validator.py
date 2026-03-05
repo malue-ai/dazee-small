@@ -535,10 +535,14 @@ class AgentSchema(BaseModel):
     @classmethod
     def validate_model(cls, v):
         """验证模型名称"""
+        # 空字符串表示「待由 config.yaml 注入」，不告警
+        if not v or not v.strip():
+            return v
         valid_prefixes = [
             "claude-", "gpt-", "gemini-", "qwen",
             "deepseek-", "glm-", "MiniMax-", "minimax-", "kimi-",
             "o1", "o3", "o4-",
+            "text-",  # OpenAI embedding 等（少数场景会经此校验）
         ]
         if not any(v.startswith(p) for p in valid_prefixes):
             logger.warning(f"未知模型 '{v}'，可能不受支持", extra={"model": v})

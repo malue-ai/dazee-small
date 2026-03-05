@@ -628,15 +628,18 @@ async def stop_session(session_id: str):
 
 @router.post("/session/{session_id}/confirm_continue", response_model=APIResponse[Dict])
 @handle_exceptions("确认继续长任务")
-async def confirm_continue_session(session_id: str):
+async def confirm_continue_session(session_id: str, action: str = "continue"):
     """
-    用户确认继续长任务（V11 终止策略）
+    用户确认长任务处理方式（V11 终止策略）
 
-    当执行器发出 long_running_confirm 事件后，前端调用此接口表示用户点击「继续」。
+    当执行器发出 long_running_confirm 事件后，前端调用此接口。
+
+    Args:
+        action: "continue"（前台继续） 或 "background"（转后台执行）
     """
-    logger.info(f"📨 长任务确认继续: session_id={session_id}")
-    session_service.confirm_long_running(session_id)
-    return APIResponse(code=200, message="已确认继续", data={"session_id": session_id})
+    logger.info(f"📨 长任务确认: session_id={session_id}, action={action}")
+    session_service.confirm_long_running(session_id, action=action)
+    return APIResponse(code=200, message="已确认", data={"session_id": session_id, "action": action})
 
 
 @router.post("/session/{session_id}/hitl_confirm", response_model=APIResponse[Dict])
@@ -715,6 +718,27 @@ async def submit_intent_clarify(session_id: str, text: str = ""):
         code=200,
         message="意图澄清已提交",
         data={"session_id": session_id},
+    )
+
+
+@router.post("/session/{session_id}/tool_loop_confirm", response_model=APIResponse[Dict])
+@handle_exceptions("同工具循环确认")
+async def submit_tool_loop_confirm(session_id: str, choice: str = "stop"):
+    """
+    用户提交同工具循环确认选择（V12.2 HITL）
+
+    当执行器检测到 LLM 反复调用同一工具无进展并发出 tool_loop_confirm 事件后，
+    前端调用此接口提交用户选择。
+
+    - choice="continue": 确认继续尝试
+    - choice="stop": 停止任务
+    """
+    logger.info(f"📨 同工具循环确认: session_id={session_id}, choice={choice}")
+    session_service.submit_tool_loop_confirm(session_id, choice)
+    return APIResponse(
+        code=200,
+        message=f"同工具循环确认: {choice}",
+        data={"session_id": session_id, "choice": choice},
     )
 
 

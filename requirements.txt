@@ -34,6 +34,7 @@ numpy>=1.26.0
 
 # JSON 解析（宽松模式）
 json5>=0.9.0
+json-repair>=0.44.0
 
 
 # Mem0 记忆系统
@@ -44,7 +45,10 @@ llama-cpp-python>=0.2.0   # GGUF 本地 Embedding（BGE-M3 Q4，推荐方案）
 # 文件处理
 Pillow>=10.0.0            # 图片压缩
 PyPDF2>=3.0.0             # PDF 文本提取
+pdfplumber>=0.11.0        # PDF 表格+文本提取（本地降级方案）
+docling>=2.31.0           # IBM 文档解析（视觉+语言模型，表格识别，本地运行）
 python-docx>=0.8.11       # Word 文档解析（页数估算）
+docxtpl>=0.18.0           # Word 模板渲染（Jinja2 驱动）
 python-pptx>=0.6.21       # PPT 生成和解析
 openpyxl>=3.0.0           # Excel 表格解析（工作表数量）
 odfpy>=1.4.1              # ODT 文档解析

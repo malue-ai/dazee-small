@@ -816,8 +816,19 @@ async def _reload_semantic_components() -> None:
     await reload_knowledge_manager()
 
     # 2. Reset IntentCache singleton → re-creates with new config (including EmbeddingService)
-    #    不直接操作内部私有属性，避免 _embedding_service 为 None 时崩溃
     from core.routing.intent_cache import IntentSemanticCache
     IntentSemanticCache.reset_instance()
 
-    logger.info("Semantic components reloaded")
+    # 3. Reset Mem0 — 释放旧 Memory 实例（不删磁盘文件），下次访问按新 mode 重建
+    from core.memory.mem0 import reset_mem0_pool
+    reset_mem0_pool()
+
+    # 4. Reset QualityController — 持有旧 pool 引用
+    from core.memory.mem0.update.quality_control import reset_quality_controller
+    reset_quality_controller()
+
+    # 5. 清空 InstanceMemoryManager 缓存 — 旧 manager 持有旧 _mem0_pool
+    from core.memory.instance_memory import reset_memory_manager_cache
+    reset_memory_manager_cache()
+
+    logger.info("Semantic components reloaded (including Mem0 + memory manager)")

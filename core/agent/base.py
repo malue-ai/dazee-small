@@ -189,6 +189,7 @@ class Agent:
         self._wait_backtrack_confirm_async: Optional[Any] = None
         self._wait_cost_confirm_async: Optional[Any] = None
         self._wait_intent_clarify_async: Optional[Any] = None
+        self._wait_tool_loop_confirm_async: Optional[Any] = None
 
         executor_name = executor.name if executor else "None"
         logger.info(f"✅ Agent 初始化完成: executor={executor_name}")
@@ -457,6 +458,9 @@ class Agent:
                 ),
                 "wait_intent_clarify_async": getattr(
                     self, "_wait_intent_clarify_async", None
+                ),
+                "wait_tool_loop_confirm_async": getattr(
+                    self, "_wait_tool_loop_confirm_async", None
                 ),
                 "state_manager": state_mgr_ref,
                 "event_manager": getattr(self, "event_manager", None),
@@ -840,6 +844,14 @@ class Agent:
 
         # 创建新 broadcaster
         broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
+
+        # 自动注入 BackgroundTaskManager（如调用方未传入）
+        if "background_task_manager" not in extra:
+            from core.orchestration.background import get_global_bg_manager
+
+            bg_mgr = get_global_bg_manager()
+            if bg_mgr is not None:
+                extra["background_task_manager"] = bg_mgr
 
         # 创建独立的 ToolExecutor（并发安全）
         tool_context = create_tool_context(

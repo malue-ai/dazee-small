@@ -543,6 +543,8 @@ class RVRBExecutor(RVRExecutor):
         "consecutive_failures": "连续多次执行失败。",
         "user_stop": "用户已请求停止。",
         "hitl_no_confirm": "有操作需要用户确认，但当前无法获取确认，已暂停。",
+        "tool_loop_no_confirm": "反复使用同一工具未取得进展，已暂停。",
+        "user_stop_tool_loop": "用户选择停止同工具循环尝试。",
     }
 
     async def _generate_termination_reply(
@@ -1310,6 +1312,44 @@ class RVRBExecutor(RVRExecutor):
                             ctx.stop_reason = "intent_clarify_no_confirm"
                             break
 
+                    # === V12.2 新增：同工具循环 → HITL 二选一 ===
+                    elif (
+                        decision.action == TerminationAction.ASK_USER
+                        and decision.finish_reason == FinishReason.TOOL_CALL_LOOP
+                    ):
+                        _loop_tool = getattr(ctx, "_tool_loop_tool_name", None) or "unknown"
+                        yield {
+                            "type": "tool_loop_confirm",
+                            "data": {
+                                "turn": ctx.current_turn,
+                                "tool_name": _loop_tool,
+                                "message": (
+                                    f"小搭子注意到一直在用 {_loop_tool} 工具"
+                                    f"反复尝试，但似乎没有取得进展。"
+                                    f"您希望怎么做？"
+                                ),
+                                "options": [
+                                    {"id": "continue", "label": "没关系，继续尝试"},
+                                    {"id": "stop", "label": "先停下来吧"},
+                                ],
+                            },
+                        }
+                        wait_fn = (context.extra or {}).get(
+                            "wait_tool_loop_confirm_async"
+                        )
+                        if callable(wait_fn):
+                            user_choice = await _call_async(wait_fn)
+                            if user_choice == "stop":
+                                ctx.stop_reason = "user_stop_tool_loop"
+                                break
+                            ctx.confirm_tool_loop_continue()
+                            logger.info(
+                                f"🔄 用户确认继续（同工具循环: {_loop_tool}）"
+                            )
+                        else:
+                            ctx.stop_reason = "tool_loop_no_confirm"
+                            break
+
                     # === V12.1 重构：费用确认 → HITL 阶梯式提醒 ===
                     # 所有阶梯都是 HITL 询问，智能体不会主动替用户终止任务
                     elif (
@@ -1627,6 +1667,10 @@ class RVRBExecutor(RVRExecutor):
                 f"{ctx._consecutive_duplicate_count + 1} 次，注入反思提示"
             )
 
+        # V12.2: 同工具循环检测 — 参数不同但反复调用同一工具（绕过精确去重）
+        # 设置标志后由 AdaptiveTerminator 在本轮末尾触发 HITL
+        ctx.detect_tool_loop(window=8, min_same=6)
+
         # HITL pending 检测：如果工具返回了 pending_user_input，暂停执行等待用户响应。
         # 防止 LLM 看到 pending 结果后再次调用 hitl（连续 2 次调用 bug）。
         for _tr in tool_results:
@@ -1789,6 +1833,9 @@ class RVRBExecutor(RVRExecutor):
                 f"🔁 轨迹去重: 完全相同的工具调用连续 "
                 f"{ctx._consecutive_duplicate_count + 1} 次，注入反思提示"
             )
+
+        # V12.2: 同工具循环检测（non-stream 版本，逻辑与 stream 版本一致）
+        ctx.detect_tool_loop(window=8, min_same=6)
 
         # HITL pending 检测（non-stream 版本，逻辑与 stream 版本一致）
         for _tr in tool_results:

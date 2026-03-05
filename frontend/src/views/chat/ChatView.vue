@@ -384,11 +384,12 @@
       @reject="chat.rejectHITLConfirm"
     />
 
-    <!-- V11: 长任务确认模态框 -->
+    <!-- V11: 长任务确认模态框 + V13: 转后台 -->
     <LongRunConfirmModal
       :show="chat.showLongRunConfirmModal.value"
       :data="chat.longRunConfirmData.value"
       @confirm="chat.confirmLongRunContinue"
+      @background="chat.confirmLongRunBackground"
       @dismiss="chat.dismissLongRunConfirm"
     />
 

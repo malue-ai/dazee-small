@@ -127,6 +127,7 @@ class ToolExecutor:
         session_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        instance_id: Optional[str] = None,
         memory: Optional[Any] = None,
         event_manager: Optional[Any] = None,
         apis_config: Optional[List[Dict]] = None,
@@ -144,6 +145,8 @@ class ToolExecutor:
             self._context.conversation_id = conversation_id
         if user_id is not None:
             self._context.user_id = user_id
+        if instance_id is not None:
+            self._context.instance_id = instance_id
         if memory is not None:
             self._context.memory = memory
         if event_manager is not None:
@@ -211,6 +214,15 @@ class ToolExecutor:
                 tool_instance = LegacyToolAdapter(tool_instance)
 
             self._tool_instances[tool_name] = tool_instance
+
+            # 泛化兜底：如果 YAML 漏配了 input_schema，从 tool class 自动补全
+            if not cap.input_schema and hasattr(tool_instance, "input_schema") and tool_instance.input_schema:
+                cap.input_schema = tool_instance.input_schema
+                desc = (cap.metadata.get("description") or "").strip()
+                if not desc and hasattr(tool_instance, "description"):
+                    cap.metadata["description"] = tool_instance.description
+                logger.info(f"🔧 工具 {tool_name}: 从 class 补全 input_schema")
+
             logger.info(f"✅ 加载工具: {tool_name}")
 
         except (ModuleNotFoundError, ImportError) as e:

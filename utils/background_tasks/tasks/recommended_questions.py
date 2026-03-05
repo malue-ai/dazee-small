@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from ..context import TaskContext
     from ..service import BackgroundTaskService
 
-from core.llm.base import Message
-
 logger = get_logger("background_tasks.recommended_questions")
 
 
@@ -119,6 +117,7 @@ async def _generate_questions_with_llm(
             user_message=user_message, assistant_response=assistant_response
         )
 
+        from core.llm.base import Message
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
         )

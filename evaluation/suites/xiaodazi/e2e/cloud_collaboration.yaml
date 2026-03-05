@@ -1,0 +1,158 @@
+# E2E 云端协同测评 — 维度 J（J1-J4）
+# 真实打向 https://agent.dazee.ai，验证 Phase 0.5 云端直调全链路
+#
+# 运行：
+#   python -m pytest tests/test_cloud_agent_e2e.py -v
+#   python -m pytest tests/test_cloud_agent_e2e.py -v -k "J4"  # 仅多轮调研
+
+id: xiaodazi_e2e_cloud_collaboration
+name: E2E 云端协同验证
+description: |
+  验证本地 Agent 委托云端 Agent 执行任务的端到端链路。
+  核心场景：本地做不了深度网络搜索 → 委托云端 → 搜索→分析→结构化输出。
+  所有请求打向真实远端 https://agent.dazee.ai，无 Mock。
+category: xiaodazi_e2e
+default_trials: 1
+
+metadata:
+  version: "1.0.0"
+  dimension: e2e_cloud
+  runner: pytest
+  cloud_url: "https://agent.dazee.ai"
+  test_file: "tests/test_cloud_agent_e2e.py"
+
+tasks:
+
+  # ================================================================
+  # J1 — CloudClient SSE 全链路
+  # ================================================================
+  - id: J1
+    description: "CloudClient SSE 全链路 — 健康检查 + 事件完整 + 文本提取"
+    category: e2e_cloud_connectivity
+    input:
+      user_query: "回复一个字：好"
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      health_check_pass: true
+      sse_event_types_gte: 6
+      text_extraction_non_empty: true
+      seq_monotonic: true
+    graders:
+      - type: code
+        name: test_health_check_reachable
+        check: "TestJ1CloudClientSSE::test_health_check_reachable"
+      - type: code
+        name: test_sse_event_completeness
+        check: "TestJ1CloudClientSSE::test_sse_event_completeness"
+      - type: code
+        name: test_text_extraction
+        check: "TestJ1CloudClientSSE::test_text_extraction"
+    trials: 1
+    timeout_seconds: 60
+    tags: ["e2e", "cloud", "connectivity", "sse"]
+
+  # ================================================================
+  # J2 — CloudAgentTool 端到端委托
+  # ================================================================
+  - id: J2
+    description: "CloudAgentTool 端到端 — 参数校验 + 正常委托 + 结果返回"
+    category: e2e_cloud_tool
+    input:
+      user_query: "简单回复两个字：收到"
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      empty_task_rejected: true
+      successful_delegation: true
+      result_non_empty: true
+    graders:
+      - type: code
+        name: test_empty_task_rejected
+        check: "TestJ2CloudAgentTool::test_empty_task_rejected"
+      - type: code
+        name: test_successful_delegation
+        check: "TestJ2CloudAgentTool::test_successful_delegation"
+    trials: 1
+    timeout_seconds: 60
+    tags: ["e2e", "cloud", "tool", "delegation"]
+
+  # ================================================================
+  # J3 — 云端异常降级
+  # ================================================================
+  - id: J3
+    description: "云端异常降级 — 不可达/超时/错误 URL 的友好处理"
+    category: e2e_cloud_error
+    input:
+      user_query: "test"
+      conversation_history: []
+      context:
+        cloud_url: "http://localhost:19999"
+      files: []
+    expected_outcome:
+      health_returns_false: true
+      chat_raises_error: true
+      tool_returns_success_false: true
+      no_crash: true
+    graders:
+      - type: code
+        name: test_unreachable_health_check
+        check: "TestJ3ErrorHandling::test_unreachable_health_check"
+      - type: code
+        name: test_tool_unreachable_returns_error
+        check: "TestJ3ErrorHandling::test_tool_unreachable_returns_error"
+    trials: 1
+    timeout_seconds: 30
+    tags: ["e2e", "cloud", "error_handling", "degradation"]
+
+  # ================================================================
+  # J4 — 云端深度调研（核心价值场景）
+  # 金句："本地做不了的事，交给云端"
+  # ================================================================
+  - id: J4
+    description: "云端深度调研 — 搜索→分析→结构化（3 轮，真实业务价值）"
+    category: e2e_cloud_research
+    input:
+      user_query: ""
+      conversation_history: []
+      context: {}
+      files: []
+    expected_outcome:
+      turn1_has_real_info: true
+      turn1_topic_relevant: true
+      turn2_cross_turn_context: true
+      turn3_structured_output: true
+      cloud_tools_invoked: "optional but preferred"
+    graders:
+      - type: code
+        name: test_cloud_research_multi_turn
+        check: "TestJ4CloudResearch::test_cloud_research_multi_turn"
+      - type: code
+        name: test_cloud_tool_invocation
+        check: "TestJ4CloudResearch::test_cloud_tool_invocation"
+      - type: code
+        name: test_cloud_delegation_value
+        check: "TestJ4CloudResearch::test_cloud_delegation_value"
+    trials: 1
+    timeout_seconds: 180
+    tags: ["e2e", "cloud", "research", "multi_turn", "value"]
+    metadata:
+      multi_turn_sequence:
+        - new_conversation: true
+          user_query: "搜索一下 FastAPI 这个 Python Web 框架的最新版本号和主要特性，给我 3 个要点。"
+        - new_conversation: false
+          user_query: "根据你刚才查到的信息，FastAPI 和 Django 相比有什么优势？简要对比 3 点。"
+        - new_conversation: false
+          user_query: "把刚才的调研和对比整理成一个表格，包含：框架名、适用场景、性能特点。"
+      expected_behavior: >
+        轮次1：云端调用搜索工具获取 FastAPI 真实信息（版本号/特性）。
+        轮次2：基于搜索结果对比 FastAPI vs Django（上下文延续，非重新搜索）。
+        轮次3：整合两轮信息输出结构化表格。
+        核心验证：
+        1. 云端是否调用了搜索工具（SSE 中有 tool_use 事件）
+        2. 返回信息是否有实质内容（>= 50 字，非空泛）
+        3. 跨轮上下文是否保持（轮次2 引用轮次1 结果）
+        4. 结构化输出是否整合了全部信息
+        铁律：轮次1 结果与主题无关 → <= 2 分（委托无价值）

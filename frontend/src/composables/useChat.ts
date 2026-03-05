@@ -451,7 +451,7 @@ export function useChat() {
   }
 
   /**
-   * V11: 确认继续长任务
+   * V11: 确认继续长任务（前台）
    */
   async function confirmLongRunContinue(): Promise<void> {
     const sessionId =
@@ -459,11 +459,28 @@ export function useChat() {
       sessionStore.getSessionIdByConversation(conversationStore.currentId)
     if (!sessionId) return
     try {
-      await sessionApi.confirmContinueSession(sessionId)
+      await sessionApi.confirmContinueSession(sessionId, 'continue')
       showLongRunConfirmModal.value = false
       longRunConfirmData.value = null
     } catch (e) {
       console.error('❌ 确认继续失败:', e)
+    }
+  }
+
+  /**
+   * V13: 转后台执行
+   */
+  async function confirmLongRunBackground(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    if (!sessionId) return
+    try {
+      await sessionApi.confirmContinueSession(sessionId, 'background')
+      showLongRunConfirmModal.value = false
+      longRunConfirmData.value = null
+    } catch (e) {
+      console.error('❌ 转后台失败:', e)
     }
   }
 
@@ -781,6 +798,13 @@ export function useChat() {
       }
     }
 
+    // V13: 任务已转后台 — 在消息中追加提示
+    if (delta.type === 'moved_to_background') {
+      const bgData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
+      const taskId = bgData?.task_id ?? ''
+      msg.content += `\n\n> 任务已转为后台执行（ID: ${taskId}），完成后会通知你。\n> 你可以在[后台任务](/background-tasks)页面查看进度。`
+    }
+
     // HITL 超时/关闭事件：后端 HITL 工具超时后发送，前端关闭弹窗
     if (delta.type === 'hitl') {
       try {
@@ -859,6 +883,10 @@ export function useChat() {
         break
       case 'tool_result':
         if (!('content' in block)) (block as any).content = ''
+        break
+      case 'cloud_progress':
+        if (!('steps' in block)) (block as any).steps = []
+        if (!('status' in block)) (block as any).status = 'running'
         break
     }
     
@@ -1136,10 +1164,11 @@ export function useChat() {
     approveHITLConfirm,
     rejectHITLConfirm,
 
-    // V11: 长任务确认
+    // V11: 长任务确认 + V13: 转后台
     showLongRunConfirmModal,
     longRunConfirmData,
     confirmLongRunContinue,
+    confirmLongRunBackground,
     dismissLongRunConfirm,
 
     // 连接状态

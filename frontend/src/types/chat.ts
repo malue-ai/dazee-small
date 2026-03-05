@@ -95,6 +95,7 @@ export type ContentBlockType =
   | 'server_tool_use'
   | 'image'
   | 'file'
+  | 'cloud_progress'
 
 /**
  * 基础内容块
@@ -178,6 +179,7 @@ export type ContentBlock =
   | ToolResultContentBlock
   | ImageContentBlock
   | FileContentBlock
+  | CloudProgressContentBlock
 
 // ==================== 工具状态 ====================
 
@@ -339,3 +341,22 @@ export interface ActiveSessionInfo {
  * 活跃会话映射（conversationId -> sessionInfo）
  */
 export type ActiveSessionsMap = Record<string, ActiveSessionInfo>
+
+// ==================== Cloud Progress ====================
+
+export interface CloudProgressStep {
+  id: string
+  label: string
+  status: 'pending' | 'running' | 'done'
+  detail?: string
+}
+
+export interface CloudProgressContentBlock {
+  type: 'cloud_progress'
+  taskId: string
+  status: 'pending' | 'connecting' | 'running' | 'completed' | 'failed'
+  title: string
+  message?: string
+  elapsedMs?: number
+  steps: CloudProgressStep[]
+}
