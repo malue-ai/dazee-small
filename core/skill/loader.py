@@ -141,6 +141,9 @@ class SkillsLoader:
         for entry in merged:
             self._check_status(entry)
 
+        # 守护：SKILL.md 文件大小 + 总数量上限
+        self._guard_skill_limits(merged)
+
         self._entries = merged
         self._loaded = True
 
@@ -256,6 +259,24 @@ class SkillsLoader:
                 tool_name = entry.tool_name or entry.name
                 caps[tool_name] = True
         return caps
+
+    def get_env_overrides_for_tool(self, tool_name: str) -> Dict[str, str]:
+        """
+        获取某个 Tool 对应 Skill 的 env 覆盖配置。
+
+        供 ToolExecutor 在执行工具前注入、执行后回滚。
+
+        Args:
+            tool_name: 工具名称（如 "browser"、"web_search"）
+
+        Returns:
+            env 覆盖字典，如 {"DISCORD_BOT_TOKEN": "xxx"}；无配置时返回空字典
+        """
+        for entry in self._entries:
+            if entry.backend_type == BackendType.TOOL and entry.enabled:
+                if (entry.tool_name or entry.name) == tool_name:
+                    return entry.env_overrides
+        return {}
 
     def get_status_table(self) -> List[Dict[str, Any]]:
         """
@@ -409,8 +430,8 @@ class SkillsLoader:
                 )
                 if meta and isinstance(meta.get("parameters"), list):
                     parameters = meta["parameters"]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Skill '{entry.name}' frontmatter 解析失败: {e}")
 
             summaries.append(
                 SkillSummary(
@@ -527,6 +548,14 @@ class SkillsLoader:
         except ValueError:
             dep_level = DependencyLevel.BUILTIN
 
+        # 解析 Skill 级 env 覆盖（支持每个 Skill 配置独立 API Key）
+        raw_env = item.get("env", {})
+        env_overrides: Dict[str, str] = {}
+        if isinstance(raw_env, dict):
+            for k, v in raw_env.items():
+                if v is not None:
+                    env_overrides[str(k)] = str(v)
+
         return SkillEntry(
             name=name,
             description=item.get("description", ""),
@@ -543,6 +572,7 @@ class SkillsLoader:
             system_auth=item.get("system_auth"),
             requires_app=item.get("requires_app"),
             install_info=item.get("install"),
+            env_overrides=env_overrides,
             raw_config=item,
         )
 
@@ -749,7 +779,8 @@ class SkillsLoader:
                 )
                 ax_func = funcs.get('AXIsProcessTrusted')
                 return bool(ax_func()) if ax_func else False
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Accessibility 检查失败: {e}")
                 return False
 
         if auth_type == "screen_recording":
@@ -758,7 +789,8 @@ class SkillsLoader:
             try:
                 from Quartz import CGPreflightScreenCaptureAccess
                 return bool(CGPreflightScreenCaptureAccess())
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Screen recording 检查失败: {e}")
                 return False
 
         return False
@@ -842,7 +874,8 @@ class SkillsLoader:
 
             qs = meta.get("quickstart", "")
             return qs.strip() if isinstance(qs, str) else ""
-        except Exception:
+        except Exception as e:
+            logger.debug(f"quickstart 提取失败: {e}")
             return ""
 
     def _get_setup_hint(self, entry: SkillEntry) -> str:
@@ -888,6 +921,46 @@ class SkillsLoader:
         except Exception as e:
             logger.debug(f"读取 {entry.name} setup metadata 失败: {e}")
             return {}
+
+    # 单实例 Skill 数量上限：超出会显著膨胀 system prompt，影响命中率和 token 消耗
+    _MAX_SKILLS = 200
+    # SKILL.md 文件大小上限（字节）：超出说明文档过于冗长，应拆分子文件
+    _MAX_SKILL_MD_SIZE = 20 * 1024  # 20 KB
+
+    def _guard_skill_limits(self, entries: List[SkillEntry]) -> None:
+        """
+        守护 Skill 数量和单文件大小上限。
+
+        数量超限：WARNING 日志，不阻断启动，但超出部分仍会被加载
+        （防止排在后面的 skill 被静默丢弃，让用户知道需要清理）。
+
+        文件过大：WARNING 日志，提示开发者拆分到子文件。
+        """
+        # 1. 数量守护
+        if len(entries) > self._MAX_SKILLS:
+            logger.warning(
+                f"⚠️  Skill 数量 ({len(entries)}) 超过建议上限 {self._MAX_SKILLS}。"
+                f" 过多 Skill 会膨胀 system prompt，降低意图命中率。"
+                f" 建议禁用不常用的 Skill 或合并相关 Skill。"
+            )
+
+        # 2. 文件大小守护
+        for entry in entries:
+            if not entry.skill_path:
+                continue
+            skill_md = Path(entry.skill_path) / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            try:
+                size = skill_md.stat().st_size
+                if size > self._MAX_SKILL_MD_SIZE:
+                    logger.warning(
+                        f"⚠️  {entry.name}/SKILL.md 文件过大 ({size // 1024} KB > "
+                        f"{self._MAX_SKILL_MD_SIZE // 1024} KB 建议上限)。"
+                        f" 将核心内容保留在 SKILL.md，详细资料移至子文件（reference/、prompts/）。"
+                    )
+            except OSError:
+                pass
 
     def _log_summary(self) -> None:
         """打印加载摘要"""
@@ -935,7 +1008,8 @@ class SkillsLoader:
             from core.tool.registry import create_capability_registry
             registry = create_capability_registry()
             registered_tools = {cap.name for cap in registry.all()}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"工具引用校验跳过（registry 不可用）: {e}")
             return
 
         pattern = re.compile(r"await\s+([a-z_][a-z0-9_]*)\s*\(", re.IGNORECASE)
@@ -957,8 +1031,8 @@ class SkillsLoader:
                             f"Skill '{entry.name}' 引用了不存在的工具 '{ref}'，"
                             f"请确认 capabilities.yaml 中已注册"
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Skill '{entry.name}' 工具引用校验失败: {e}")
 
     def _validate_dependencies(self) -> None:
         """
@@ -1011,8 +1085,8 @@ class SkillsLoader:
                                 f"Skill '{entry.name}' conflicts_with '{conflict}' "
                                 f"but both are available — possible conflict"
                             )
-            except Exception:
-                pass  # Non-critical, skip silently
+            except Exception as e:
+                logger.debug(f"Skill '{entry.name}' 依赖校验失败: {e}")
 
 
 # ================================================================

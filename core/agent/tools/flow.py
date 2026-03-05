@@ -219,6 +219,23 @@ class ToolExecutionFlow:
             # V11: 文件操作后置记录 — 记录到操作日志（支持回滚）
             _post_record_operation(context, tool_name, tool_input, result)
 
+            is_error = (
+                isinstance(result, dict)
+                and result.get("success") is False
+                and "error" in result
+            )
+            if is_error:
+                error_msg = result.get("error") or result.get("message") or str(result)
+                error_type = result.get("error_type", "")
+                return ToolExecutionResult(
+                    tool_id=tool_id,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    result=result,
+                    is_error=True,
+                    error_msg=f"[{error_type}] {error_msg}" if error_type else error_msg,
+                )
+
             return ToolExecutionResult(
                 tool_id=tool_id,
                 tool_name=tool_name,

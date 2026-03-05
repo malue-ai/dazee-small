@@ -548,7 +548,15 @@ class Agent:
                                 },
                             }
                 except Exception as re:
-                    logger.warning(f"异常处理中回滚逻辑失败: {re}", exc_info=True)
+                    logger.error(f"异常处理中回滚逻辑失败: {re}", exc_info=True)
+                    yield {
+                        "type": "rollback_failed",
+                        "data": {
+                            "task_id": session_id,
+                            "error": str(re),
+                            "original_error": str(exc),
+                        },
+                    }
             raise
 
         # Final Output
@@ -610,7 +618,11 @@ class Agent:
                         )
                     state_mgr.commit(session_id)
             except Exception as e:
-                logger.warning(f"状态一致性完成路径异常: {e}", exc_info=True)
+                logger.error(f"状态一致性完成路径异常: {e}", exc_info=True)
+                try:
+                    state_mgr.commit(session_id)
+                except Exception:
+                    logger.error(f"状态提交兜底也失败: session={session_id}")
 
         # Usage
         stats = self.usage_stats
@@ -696,19 +708,20 @@ class Agent:
 
         plan = self._plan_cache.get("plan")
 
-        # V12: simple 且不需要 plan 时，精简工具集（省 ~1500 tokens 工具定义）
-        schema_tools = (
-            self._schema.tools if self._schema and self._schema.tools else None
-        )
+        # 工具集选择：
+        #   simple task → 精简白名单（5 个核心工具，省 ~1700 tokens）
+        #   medium/complex → 不设白名单，由 level 分级 + intent/plan 能力匹配决定
+        # 安全由注册阶段保证（create_filtered_registry + enabled_capabilities + HITL），
+        # 不依赖选择阶段白名单。
+        schema_tools = None
         is_simple_task = (
             intent
             and intent.complexity.value == "simple"
             and not intent.needs_plan
             and not plan
-            and not intent.is_follow_up  # follow-up may need prior tools
+            and not intent.is_follow_up
         )
         if is_simple_task:
-            # Minimal tool set for simple tasks (from config/capabilities.yaml)
             schema_tools = get_simple_task_tools()
             logger.info(
                 f"工具裁剪: complexity=simple, 精简为 {len(schema_tools)} 个核心工具"
