@@ -343,3 +343,68 @@ class LocalIndexedFile(LocalBase):
 
     def __repr__(self) -> str:
         return f"<LocalIndexedFile(path={self.file_path}, chunks={self.chunk_count})>"
+
+
+# ==================== 实例配置 / Fragment / Mem0 历史 ====================
+
+
+class LocalInstanceConfig(LocalBase):
+    """实例级配置（credential / package / permission / setting）"""
+
+    __tablename__ = "instance_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    key: Mapped[str] = mapped_column(String(256), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    skill_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="hitl")
+    updated_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        Index("idx_ic_unique", "instance_id", "category", "key", unique=True),
+        Index("idx_ic_instance", "instance_id"),
+        Index("idx_ic_category", "instance_id", "category"),
+    )
+
+
+class LocalFragment(LocalBase):
+    """FragmentMemory 持久化"""
+
+    __tablename__ = "fragments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    timestamp: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    hints_json: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        Index("idx_fragments_user_time", "user_id", "timestamp"),
+        Index("idx_fragments_instance", "instance_id"),
+    )
+
+
+class LocalMem0History(LocalBase):
+    """Mem0 操作历史"""
+
+    __tablename__ = "mem0_history"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    memory_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    old_memory: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_memory: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    event: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_deleted: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        Index("idx_mem0_history_instance", "instance_id"),
+        Index("idx_mem0_history_memory", "memory_id"),
+    )
