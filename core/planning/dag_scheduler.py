@@ -550,7 +550,7 @@ class DAGScheduler:  # UNUSED: never instantiated, execution uses RVR/RVRB execu
             result = StepResult(
                 step_id=step.id,
                 success=False,
-                error=last_error or "未知错误",
+                error=last_error or f"步骤 {step.id} 在 {attempt} 次尝试后仍未返回结果",
             )
 
         result.duration_ms = duration_ms
@@ -561,7 +561,7 @@ class DAGScheduler:  # UNUSED: never instantiated, execution uses RVR/RVRB execu
             step.complete(result.output or "")
             logger.info(f"✅ 步骤 {step.id} 完成（{duration_ms}ms）")
         else:
-            step.fail(result.error or "执行失败")
+            step.fail(result.error or f"步骤 {step.id} 执行失败（无详细错误信息）")
             logger.error(f"❌ 步骤 {step.id} 失败: {result.error}")
 
         # 触发结束回调

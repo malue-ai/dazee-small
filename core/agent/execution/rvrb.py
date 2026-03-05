@@ -303,16 +303,39 @@ class RVRBExecutor(RVRExecutor):
         state.record_tool_failure(tool_name)
 
         # 记录失败路径（用于回溯反思注入）
-        approach_desc = str(tool_input)[:100] if tool_input else "default"
+        approach_desc = str(tool_input)[:200] if tool_input else "default"
         state.record_failed_approach(
             tool_name=tool_name,
             approach=approach_desc,
-            reason=classified_error.suggested_action[:100] if classified_error.suggested_action else str(error)[:100],
+            reason=classified_error.suggested_action[:300] if classified_error.suggested_action else str(error)[:300],
         )
 
-        # 基础设施层错误不需要回溯
+        # 基础设施层错误
         if classified_error.is_infrastructure_error():
-            logger.info(f"📦 基础设施层错误，委托给 resilience 机制")
+            from core.agent.backtrack.error_classifier import ErrorCategory
+            if classified_error.category in (
+                ErrorCategory.PERMISSION_DENIED,
+                ErrorCategory.DEPENDENCY_MISSING,
+            ):
+                # Environment errors require user action, not resilience retry
+                logger.info(
+                    f"🚨 环境层错误 ({classified_error.category.value})，"
+                    f"需要用户操作，升级处理"
+                )
+                return BacktrackResult(
+                    decision=BacktrackDecision.ESCALATE,
+                    backtrack_type=BacktrackType.NO_BACKTRACK,
+                    action={
+                        "notify_user": True,
+                        "error_category": classified_error.category.value,
+                        "suggested_action": classified_error.suggested_action,
+                    },
+                    reason=classified_error.suggested_action
+                    or "需要用户操作才能继续",
+                    confidence=0.95,
+                )
+
+            logger.info("📦 基础设施层错误，委托给 resilience 机制")
             return BacktrackResult(
                 decision=BacktrackDecision.CONTINUE,
                 backtrack_type=BacktrackType.NO_BACKTRACK,
@@ -453,7 +476,7 @@ class RVRBExecutor(RVRExecutor):
                     "decision": backtrack_result.decision.value,
                     "total_attempts": state.backtrack_count,
                     "failed_tools": state.failed_tools,
-                    "last_error": str(error)[:200],
+                    "last_error": str(error)[:500],
                     "escalation": runtime_ctx.backtrack_escalation
                     if runtime_ctx
                     else None,
@@ -729,7 +752,7 @@ class RVRBExecutor(RVRExecutor):
 
         if streak == 1:
             return (
-                f"[工具失败提醒] {tool_name} 执行失败: {error_msg[:150]}\n"
+                f"[工具失败提醒] {tool_name} 执行失败: {error_msg[:500]}\n"
                 "请分析失败原因，调整参数或换用其他工具。"
                 "不要使用完全相同的参数重试。"
             )
@@ -1291,7 +1314,7 @@ class RVRBExecutor(RVRExecutor):
                             "type": "intent_clarify_request",
                             "data": {
                                 "message": "小搭子不太确定您的具体需求，能再描述一下吗？",
-                                "context": str(state.last_error)[:200]
+                                "context": str(state.last_error)[:500]
                                 if state.last_error
                                 else "",
                             },
@@ -1575,7 +1598,8 @@ class RVRBExecutor(RVRExecutor):
                 if not is_error:
                     state.record_execution(f"tool:{tool_name}", True, result_content)
                 else:
-                    raise Exception(result_info.error_msg or "工具执行失败")
+                    error_detail = result_info.error_msg or result_content or "工具执行失败"
+                    raise Exception(error_detail)
 
             except Exception as e:
                 logger.error(f"❌ 工具执行失败: {tool_name} - {e}")
@@ -1601,7 +1625,7 @@ class RVRBExecutor(RVRExecutor):
 
             state.record_tool_outcome(tool_name, not is_error)
             if is_error:
-                _round_failures.append((tool_name, str(result_content)[:150]))
+                _round_failures.append((tool_name, str(result_content)[:500]))
 
             yield await content_handler.emit_block(
                 session_id=session_id,
@@ -1758,7 +1782,8 @@ class RVRBExecutor(RVRExecutor):
                 if not is_error:
                     state.record_execution(f"tool:{tool_name}", True, result_content)
                 else:
-                    raise Exception(result_info.error_msg or "工具执行失败")
+                    error_detail = result_info.error_msg or result_content or "工具执行失败"
+                    raise Exception(error_detail)
 
             except Exception as e:
                 logger.error(f"❌ 工具执行失败: {tool_name} - {e}")
@@ -1778,7 +1803,7 @@ class RVRBExecutor(RVRExecutor):
 
             state.record_tool_outcome(tool_name, not is_error)
             if is_error:
-                _round_failures.append((tool_name, str(result_content)[:150]))
+                _round_failures.append((tool_name, str(result_content)[:500]))
 
             # Immediate compression (non-stream path, same as stream)
             from core.context.compaction import compress_fresh_tool_result

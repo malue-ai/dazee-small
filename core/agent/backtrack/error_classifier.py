@@ -47,6 +47,10 @@ class ErrorCategory(Enum):
     AUTHENTICATION_ERROR = "auth_error"  # 认证错误
     QUOTA_EXCEEDED = "quota_exceeded"  # 配额超限
 
+    # Layer 1.5: 环境层错误（需要用户操作，不可通过重试/调参解决）
+    PERMISSION_DENIED = "permission_denied"
+    DEPENDENCY_MISSING = "dependency_missing"
+
     # Layer 2: 业务逻辑层错误（具体类别由 LLM 判断，此处仅作枚举定义）
     PLAN_INVALID = "plan_invalid"
     TOOL_MISMATCH = "tool_mismatch"
@@ -228,6 +232,43 @@ class ErrorClassifier:
         error_message = str(error).lower()
         error_type = type(error).__name__
 
+        # Step 0: Environment-level errors that require user action.
+        # These are NOT retryable and NOT fixable by param adjustment.
+        # Must be detected before Layer 1/2 classification.
+        if self._is_permission_error(error_message):
+            classified = ClassifiedError(
+                original_error=error,
+                layer=ErrorLayer.INFRASTRUCTURE,
+                category=ErrorCategory.PERMISSION_DENIED,
+                backtrack_type=BacktrackType.NO_BACKTRACK,
+                is_retryable=False,
+                confidence=0.95,
+                context=context,
+                suggested_action="需要用户授权 macOS 系统权限后重试",
+            )
+            logger.info(
+                f"🔍 错误分类完成: layer=infrastructure, "
+                f"category=permission_denied, backtrack=no_backtrack, confidence=0.95"
+            )
+            return classified
+
+        if self._is_dependency_error(error_message):
+            classified = ClassifiedError(
+                original_error=error,
+                layer=ErrorLayer.INFRASTRUCTURE,
+                category=ErrorCategory.DEPENDENCY_MISSING,
+                backtrack_type=BacktrackType.NO_BACKTRACK,
+                is_retryable=False,
+                confidence=0.95,
+                context=context,
+                suggested_action="缺少运行依赖，需要用户安装后重试",
+            )
+            logger.info(
+                f"🔍 错误分类完成: layer=infrastructure, "
+                f"category=dependency_missing, backtrack=no_backtrack, confidence=0.95"
+            )
+            return classified
+
         # Step 1: Exception type (deterministic)
         layer = self._classify_by_exception_type(error_type)
         category = ErrorCategory.UNKNOWN
@@ -277,6 +318,30 @@ class ErrorClassifier:
         )
 
         return classified
+
+    _PERMISSION_PATTERNS = re.compile(
+        r"permission.?denied|屏幕录制权限|辅助功能权限|"
+        r"\[permission_denied\]|privacy.*screen.*recording|"
+        r"accessibility.*not.*trusted",
+        re.IGNORECASE,
+    )
+
+    def _is_permission_error(self, error_message: str) -> bool:
+        """Detect macOS/OS permission errors that require user intervention."""
+        return bool(self._PERMISSION_PATTERNS.search(error_message))
+
+    _DEPENDENCY_PATTERNS = re.compile(
+        r"not installed|no module named|pip install|"
+        r"modulenotfounderror|importerror|"
+        r"dependency.?missing|package.?not.?found|"
+        r"brew install|npm install|cargo install|"
+        r"playwright install|command not found",
+        re.IGNORECASE,
+    )
+
+    def _is_dependency_error(self, error_message: str) -> bool:
+        """Detect missing dependency errors that require user installation."""
+        return bool(self._DEPENDENCY_PATTERNS.search(error_message))
 
     def _classify_by_exception_type(self, error_type: str) -> ErrorLayer:
         """Classify by Python exception type (deterministic)."""

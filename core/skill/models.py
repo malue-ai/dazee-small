@@ -113,6 +113,10 @@ class SkillEntry:
     requires_app: Optional[str] = None
     install_info: Optional[Dict[str, str]] = None
 
+    # Skill 级 env 覆盖（运行时注入，执行后自动回滚）
+    # 在 skills.yaml 中通过 env: {KEY: value} 配置，支持 Skill 独立 API Key
+    env_overrides: Dict[str, str] = field(default_factory=dict)
+
     # 运行时
     status_message: str = ""
     raw_config: Dict[str, Any] = field(default_factory=dict)

@@ -19,6 +19,7 @@ ToolExecutor - 工具执行器
 
 import asyncio
 import json
+import os
 from importlib import import_module
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
@@ -79,6 +80,7 @@ class ToolExecutor:
         enable_compaction: bool = True,
         enable_programmatic: bool = True,
         enable_streaming: bool = True,
+        skills_loader=None,
     ):
         """
         初始化工具执行器
@@ -89,11 +91,13 @@ class ToolExecutor:
             enable_compaction: 是否启用结果精简（默认 True）
             enable_programmatic: 是否启用程序化调用（原 InvocationSelector）
             enable_streaming: 是否启用流式调用（原 InvocationSelector）
+            skills_loader: SkillsLoader 实例，用于获取 Skill 级 env 覆盖配置
         """
         self._registry = registry
         self._context = tool_context or create_tool_context()
         self._tool_instances: Dict[str, Any] = {}
         self._tool_handlers: Dict[str, Callable] = {}
+        self._skills_loader = skills_loader  # 供 env 注入查询用
 
         # 调用策略配置（原 InvocationSelector）
         self.enable_programmatic = enable_programmatic
@@ -309,12 +313,17 @@ class ToolExecutor:
             return {"success": False, "error": f"工具 {tool_name} 未加载"}
 
         try:
-            # Execution timeout: prevents stuck tools from blocking the Agent
-            timeout_s = getattr(tool_instance, "execution_timeout", 60)
-            result = await asyncio.wait_for(
-                self._execute_tool(tool_name, tool_instance, tool_input, ctx),
-                timeout=timeout_s,
-            )
+            # Skill 级 env 注入：执行前临时覆盖环境变量，执行后自动回滚
+            env_revert = self._apply_skill_env(tool_name)
+            try:
+                timeout_s = getattr(tool_instance, "execution_timeout", 60)
+                result = await asyncio.wait_for(
+                    self._execute_tool(tool_name, tool_instance, tool_input, ctx),
+                    timeout=timeout_s,
+                )
+            finally:
+                env_revert()  # 无论成功/失败/超时，都回滚 env
+
             # Track usage for adaptive Skill ordering (async, non-blocking)
             self._record_usage(tool_name, result)
             return await self._maybe_compact(tool_name, effective_tool_id, result, skip_compaction)
@@ -349,6 +358,16 @@ class ToolExecutor:
 
             error_type = ToolErrorType.PERMANENT
             recovery = None
+
+            # Detect dependency-missing patterns from RuntimeError/ImportError
+            import re
+            if re.search(
+                r"not installed|No module named|pip install|ModuleNotFoundError",
+                error_str,
+                re.IGNORECASE,
+            ):
+                error_type = ToolErrorType.DEPENDENCY_MISSING
+                recovery = error_str
 
             # Classify by exception attributes if available (e.g. httpx responses)
             status_code = getattr(e, "status_code", None) or getattr(
@@ -406,8 +425,51 @@ class ToolExecutor:
             # Schedule async write without awaiting (non-blocking)
             import asyncio
             asyncio.ensure_future(tracker.record(tool_name, success))
-        except Exception:
-            pass  # Never let tracking failure affect tool execution
+        except Exception as e:
+            logger.debug(f"工具使用记录失败（不影响执行）: {e}")
+
+    def _apply_skill_env(self, tool_name: str):
+        """
+        注入 Skill 级 env 覆盖，返回回滚函数。
+
+        从 SkillsLoader 获取 tool_name 对应 Skill 的 env 配置，
+        临时写入 os.environ，返回一个 callable 供 finally 块调用来回滚。
+
+        使用方式：
+            revert = self._apply_skill_env("discord")
+            try:
+                ...
+            finally:
+                revert()
+        """
+        if not self._skills_loader:
+            return lambda: None
+
+        try:
+            overrides = self._skills_loader.get_env_overrides_for_tool(tool_name)
+        except Exception as e:
+            logger.debug(f"Skill env 加载失败 ({tool_name}): {e}")
+            return lambda: None
+
+        if not overrides:
+            return lambda: None
+
+        # 记录原始值（含不存在的 key），执行后精确恢复
+        originals: Dict[str, Optional[str]] = {}
+        for key, value in overrides.items():
+            originals[key] = os.environ.get(key)
+            os.environ[key] = value
+            logger.debug(f"[SkillEnv] {tool_name}: 注入 {key}=***")
+
+        def revert() -> None:
+            for key, original in originals.items():
+                if original is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = original
+            logger.debug(f"[SkillEnv] {tool_name}: 已回滚 {len(originals)} 个 env 变量")
+
+        return revert
 
     async def _execute_tool(
         self, tool_name: str, tool_instance: Any, tool_input: Dict[str, Any], context: ToolContext
@@ -700,7 +762,7 @@ class ToolExecutor:
 
 def create_tool_executor(
     registry=None,
-    tool_context: ToolContext = None,
+    tool_context: Optional[ToolContext] = None,
     enable_compaction: bool = True,
     enable_programmatic: bool = True,
     enable_streaming: bool = True,
