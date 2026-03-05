@@ -138,8 +138,30 @@ class BacktrackManager:
                 confidence=1.0,
             )
 
-        # 检查是否是基础设施层错误（不应该到这里）
+        # 检查是否是基础设施层错误
         if ctx.error.is_infrastructure_error():
+            # Environment errors (permission, dependency) need user action,
+            # not resilience retry. Escalate immediately.
+            from core.agent.backtrack.error_classifier import ErrorCategory
+            if ctx.error.category in (
+                ErrorCategory.PERMISSION_DENIED,
+                ErrorCategory.DEPENDENCY_MISSING,
+            ):
+                logger.info(
+                    f"🚨 环境层错误 ({ctx.error.category.value})，需要用户操作，升级处理"
+                )
+                return BacktrackResult(
+                    decision=BacktrackDecision.ESCALATE,
+                    backtrack_type=BacktrackType.NO_BACKTRACK,
+                    action={
+                        "notify_user": True,
+                        "error_category": ctx.error.category.value,
+                        "suggested_action": ctx.error.suggested_action,
+                    },
+                    reason=ctx.error.suggested_action or "需要用户操作才能继续",
+                    confidence=0.95,
+                )
+
             logger.info("📦 基础设施层错误，使用 resilience 机制处理")
             return BacktrackResult(
                 decision=BacktrackDecision.CONTINUE,
@@ -194,8 +216,26 @@ class BacktrackManager:
                 system=BACKTRACK_SYSTEM_PROMPT,
             )
 
-            # 解析响应
-            result = self._parse_llm_response(response.content)
+            if response is None:
+                logger.warning("⚠️ LLM 回溯决策返回 None response")
+                return self._rule_based_decide(ctx)
+
+            content = response.content
+            # Claude API returns content as list of blocks; extract text
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if hasattr(block, "text"):
+                        text_parts.append(block.text)
+                    elif isinstance(block, dict) and "text" in block:
+                        text_parts.append(block["text"])
+                content = "\n".join(text_parts)
+
+            if not content:
+                logger.warning("⚠️ LLM 回溯决策返回空 content")
+                return self._rule_based_decide(ctx)
+
+            result = self._parse_llm_response(content)
             return result
 
         except Exception as e:

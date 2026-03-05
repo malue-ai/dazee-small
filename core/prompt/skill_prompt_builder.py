@@ -75,19 +75,24 @@ class SkillPromptBuilder:
             from core.skill.usage_tracker import get_usage_tracker
             tracker = get_usage_tracker()
             skills = tracker.sort_skills(list(skills))
-        except Exception:
-            pass  # Cold start or import error: keep default order
+        except Exception as e:
+            logger.debug(f"Skill 自适应排序跳过: {e}")
 
         lines = ["<available_skills>"]
 
         for skill in skills:
             emoji_prefix = f"{skill.emoji} " if skill.emoji else ""
-            # 使用相对路径节省 token（绝对路径每个 skill 浪费 ~90 chars）
+            # 路径压缩节省 token（绝对路径每个 skill 浪费 ~90 chars）
+            # 优先级：相对路径（cwd 内）> ~/ 缩写（home 内）> 绝对路径（fallback）
             location = skill.location
             try:
                 location = Path(location).relative_to(Path.cwd())
             except (ValueError, TypeError):
-                pass  # 无法转相对路径时保留原值
+                try:
+                    home = Path.home()
+                    location = Path("~") / Path(location).relative_to(home)
+                except (ValueError, TypeError, RuntimeError):
+                    pass  # 无法压缩时保留绝对路径
 
             # backend_type=tool 的 Skill 标记工具名，告诉 LLM 直接调用
             if skill.backend_type == "tool" and skill.tool_name:

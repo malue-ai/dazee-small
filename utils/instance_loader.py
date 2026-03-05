@@ -1447,6 +1447,7 @@ async def create_agent_from_instance(
             if agent._tool_executor
             else True
         ),
+        skills_loader=getattr(agent, "_skills_loader", None),  # Skill 级 env 注入用
     )
 
     # 重新创建 tool_selector（如果存在）

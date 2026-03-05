@@ -953,6 +953,18 @@ export function useChat() {
           }
         }
         break
+
+      case 'cloud_progress':
+        try {
+          const delta = JSON.parse(deltaText)
+          if (delta.steps) (current as any).steps = delta.steps
+          if (delta.status) (current as any).status = delta.status
+          if (delta.elapsedMs !== undefined) (current as any).elapsedMs = delta.elapsedMs
+          if (delta.message) (current as any).message = delta.message
+        } catch {
+          // delta is not JSON, ignore
+        }
+        break
     }
   }
 

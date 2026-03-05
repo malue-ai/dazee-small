@@ -76,6 +76,25 @@ def _check_screen_recording_native() -> bool:
         return True
 
 
+def _request_screen_recording_native() -> bool:
+    """
+    Request macOS Screen Recording permission, triggering the system dialog.
+
+    CGRequestScreenCaptureAccess() triggers the macOS TCC dialog,
+    which adds the CALLING BINARY to the Screen Recording list in
+    System Preferences. Without this call, CGPreflight only does a
+    silent check and the sidecar binary never appears in the list.
+    """
+    try:
+        from Quartz import CGRequestScreenCaptureAccess
+        return bool(CGRequestScreenCaptureAccess())
+    except ImportError:
+        return False
+    except Exception as e:
+        logger.debug(f"CGRequestScreenCaptureAccess error: {e}")
+        return False
+
+
 def _check_accessibility_native() -> bool:
     """
     Check macOS Accessibility permission via native API.
@@ -135,11 +154,19 @@ async def _preflight_permission(
     prev = _permission_cache.get(perm_type)
 
     if prev != "denied_once":
-        # First denial → open System Preferences directly
         _permission_cache[perm_type] = "denied_once"
+
+        # Trigger CGRequestScreenCaptureAccess() so macOS adds the
+        # sidecar binary (xiaodazi-backend) to the Screen Recording
+        # list in System Preferences. Without this, only the silent
+        # CGPreflight check runs and the binary never appears in the
+        # permission UI, making it impossible for the user to grant.
+        if perm_type == "screen_recording":
+            await asyncio.to_thread(_request_screen_recording_native)
+
         await _open_system_preferences(node_manager, perm_type)
         logger.info(
-            f"权限未授予 ({perm_type}), 已自动打开系统设置"
+            f"权限未授予 ({perm_type}), 已触发授权对话框并打开系统设置"
         )
     else:
         # Already opened settings before, user hasn't granted yet
