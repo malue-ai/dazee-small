@@ -63,8 +63,8 @@ class ShellExecutor(BaseExecutor):
         "__PSLockdownPolicy",  # PowerShell Constrained Language Mode
     }
 
-    # 默认超时时间（秒）
-    DEFAULT_TIMEOUT: float = 30.0
+    # 默认超时时间（秒），仅在上层未传入 timeout 时兜底
+    DEFAULT_TIMEOUT: float = 60.0
 
     # 最大输出大小（字节）
     MAX_OUTPUT_BYTES: int = 200000
@@ -167,6 +167,14 @@ class ShellExecutor(BaseExecutor):
             清理后的环境变量
         """
         sanitized = dict(os.environ)
+
+        # 确保当前 Python 解释器的 bin 目录在 PATH 最前面，
+        # 使子进程的 python3 命中启动后端的同一个 Python（含虚拟环境包）
+        import sys
+        python_bin_dir = os.path.dirname(os.path.abspath(sys.executable))
+        current_path = sanitized.get("PATH", "")
+        if python_bin_dir not in current_path.split(os.pathsep):
+            sanitized["PATH"] = python_bin_dir + os.pathsep + current_path
 
         blocked_keys = self.BLOCKED_ENV_KEYS
         if _IS_WIN32:

@@ -187,7 +187,7 @@ class NodeManager:
         command: str,
         params: Dict[str, Any],
         node_id: str = "local",
-        timeout_ms: int = 30000,
+        timeout_ms: int = 60000,
     ) -> NodeInvokeResponse:
         """
         向指定节点发送命令
@@ -222,7 +222,7 @@ class NodeManager:
         command: List[str],
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
-        timeout_ms: int = 30000,
+        timeout_ms: int = 60000,
         node_id: str = "local",
     ) -> NodeInvokeResponse:
         """

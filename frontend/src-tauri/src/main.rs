@@ -284,7 +284,7 @@ async fn run_command(
     }
 
     let start = Instant::now();
-    let _timeout = timeout_ms.unwrap_or(30000);
+    let _timeout = timeout_ms.unwrap_or(60000);
 
     let mut cmd = SysCommand::new(&command[0]);
     if command.len() > 1 {
