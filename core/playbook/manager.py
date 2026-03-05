@@ -501,7 +501,8 @@ class PlaybookManager:
 
         self._entries[entry_id] = entry
         await self._save_entry(entry)
-        await self._sync_to_vector_store(entry)
+        # Approved-only indexing: new entries (DRAFT/PENDING) are NOT indexed.
+        # Vector sync happens in approve() when the user confirms the strategy.
 
         logger.info(f"📝 创建策略: {name} (id={entry_id})")
         return entry
@@ -617,11 +618,22 @@ class PlaybookManager:
 
     @staticmethod
     def _is_default_description(entry: "PlaybookEntry") -> bool:
-        """Check if description is a low-discriminability default template."""
+        """Check if description needs LLM refinement.
+
+        Triggers for:
+        - Missing description
+        - Known default templates
+        - Auto-extracted entries where description is just a truncated user query
+          (name is a prefix of description, meaning no meaningful summarization happened)
+        """
         if not entry.description:
             return True
         default_patterns = ["自动提取的策略", "自动生成的策略"]
-        return any(p in entry.description for p in default_patterns)
+        if any(p in entry.description for p in default_patterns):
+            return True
+        if entry.source == "auto" and entry.description.startswith(entry.name):
+            return True
+        return False
 
     async def _regenerate_description(
         self, entry: "PlaybookEntry"
@@ -654,7 +666,8 @@ class PlaybookManager:
             step_rewards=steps,
         )
         return await self._generate_description_with_llm(
-            fake_reward, entry.tool_sequence or []
+            fake_reward, entry.tool_sequence or [],
+            user_query_hint=entry.description or "",
         )
 
     async def reject(self, entry_id: str, reviewer: str, reason: str) -> bool:
@@ -668,6 +681,7 @@ class PlaybookManager:
         entry.review_notes = reason
         entry.updated_at = datetime.now().isoformat()
         await self._save_entry(entry)
+        await self._delete_from_vector_store(entry_id)
 
         logger.info(f"❌ 策略审核拒绝: {entry.name} (by {reviewer})")
         return True
@@ -688,6 +702,23 @@ class PlaybookManager:
 
         logger.info(f"🗑️ 策略已废弃: {entry.name}")
         return True
+
+    async def rebuild_vector_index(self) -> Dict[str, int]:
+        """Rebuild vector index: delete all vectors, re-index only APPROVED entries."""
+        store = self._get_vector_store()
+        all_records = store.list()[0]
+        cleared = len(all_records)
+        for record in all_records:
+            store.delete(record.id)
+
+        indexed = 0
+        for entry in self._entries.values():
+            if entry.status == PlaybookStatus.APPROVED:
+                await self._sync_to_vector_store(entry)
+                indexed += 1
+
+        logger.info(f"🔄 向量索引重建: 清除 {cleared} 条, 重建 {indexed} 条 (approved)")
+        return {"cleared": cleared, "indexed": indexed}
 
     # ==================== 策略提取 ====================
 
@@ -743,14 +774,21 @@ class PlaybookManager:
             "complexity_range": [4, 8],  # 默认范围
         }
 
-        # 构建执行策略
+        # Deduplicated tool list (preserves order of first occurrence)
+        seen_tools: set = set()
+        unique_suggested: List[str] = []
+        for t in (t["tool"] for t in tool_sequence):
+            if t not in seen_tools:
+                seen_tools.add(t)
+                unique_suggested.append(t)
+
         strategy = {
             "execution_strategy": (
                 session_reward.execution_strategy
                 if hasattr(session_reward, "execution_strategy")
                 else "rvr"
             ),
-            "suggested_tools": [t["tool"] for t in tool_sequence],
+            "suggested_tools": unique_suggested,
             "max_turns": len(session_reward.step_rewards),
         }
 
@@ -801,7 +839,8 @@ class PlaybookManager:
         return entry
 
     async def _generate_description_with_llm(
-        self, session_reward, tool_sequence: List[Dict]
+        self, session_reward, tool_sequence: List[Dict],
+        user_query_hint: str = "",
     ) -> tuple[str, str]:
         """
         使用 LLM 生成策略名称和描述。
@@ -813,16 +852,20 @@ class PlaybookManager:
 
         tools_str = ", ".join([t["tool"] for t in tool_sequence])
 
+        user_context_line = ""
+        if user_query_hint:
+            user_context_line = f"- 用户原始需求：{user_query_hint[:200]}\n"
+
         prompt = f"""根据以下会话执行信息，生成策略名称和描述。
 
 会话信息：
-- 使用的工具序列：{tools_str}
+{user_context_line}- 使用的工具序列：{tools_str}
 - 执行步骤数：{len(session_reward.step_rewards)}
 - 成功率：100%
 
 要求：
-1. 名称：10-20 字，说明这个策略做什么
-2. 描述：1-2 句话，说明什么场景、什么输入数据下使用这个策略。描述必须**具体**，能和不相关的任务区分开
+1. 名称：10-20 字，概括这个策略的任务类型
+2. 描述：1-2 句话，说明什么场景下使用。描述必须**具体**，能和不相关的任务区分开
 
 <examples>
 <example>
@@ -912,10 +955,16 @@ class PlaybookManager:
             if not isinstance(query_vector, list):
                 query_vector = query_vector.tolist() if hasattr(query_vector, "tolist") else list(query_vector)
 
+            total_vectors = store.count() if hasattr(store, "count") else 200
+            if total_vectors <= 200:
+                fetch_limit = max(total_vectors, 1)
+            else:
+                fetch_limit = max(top_k * 10, 100)
+
             search_results_raw = store.search(
                 query=query,
                 vectors=[query_vector],
-                limit=top_k * 3,
+                limit=fetch_limit,
             )
 
             logger.info(
