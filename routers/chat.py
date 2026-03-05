@@ -721,6 +721,27 @@ async def submit_intent_clarify(session_id: str, text: str = ""):
     )
 
 
+@router.post("/session/{session_id}/tool_loop_confirm", response_model=APIResponse[Dict])
+@handle_exceptions("同工具循环确认")
+async def submit_tool_loop_confirm(session_id: str, choice: str = "stop"):
+    """
+    用户提交同工具循环确认选择（V12.2 HITL）
+
+    当执行器检测到 LLM 反复调用同一工具无进展并发出 tool_loop_confirm 事件后，
+    前端调用此接口提交用户选择。
+
+    - choice="continue": 确认继续尝试
+    - choice="stop": 停止任务
+    """
+    logger.info(f"📨 同工具循环确认: session_id={session_id}, choice={choice}")
+    session_service.submit_tool_loop_confirm(session_id, choice)
+    return APIResponse(
+        code=200,
+        message=f"同工具循环确认: {choice}",
+        data={"session_id": session_id, "choice": choice},
+    )
+
+
 @router.get("/session/{session_id}/rollback/preview", response_model=APIResponse[Dict])
 @handle_exceptions("预览回滚变更")
 async def preview_rollback(session_id: str):

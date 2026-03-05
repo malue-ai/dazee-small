@@ -31,7 +31,6 @@ from logger import get_logger
 from .context import TaskContext
 from .registry import get_registered_task_names, get_task_registry
 from .service import BackgroundTaskService, get_background_task_service
-from .tasks.mem0_update import batch_update_all_memories
 
 logger = get_logger("background_tasks.scheduler")
 
@@ -194,6 +193,7 @@ class TaskScheduler:
             # 检查是否是批量任务
             if config.params.get("batch", False):
                 # 批量任务（如 mem0_update 批量更新所有用户）
+                from .tasks.mem0_update import batch_update_all_memories
                 result = await batch_update_all_memories(
                     since_hours=config.params.get("since_hours", 24),
                     max_concurrent=config.params.get("max_concurrent", 5),

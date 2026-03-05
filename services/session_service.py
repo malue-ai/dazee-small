@@ -102,6 +102,10 @@ class SessionService:
         self._intent_clarify_events: Dict[str, asyncio.Event] = {}
         self._intent_clarify_results: Dict[str, str] = {}
 
+        # V12.2: 同工具循环确认（用户选择 continue/stop）
+        self._tool_loop_confirm_events: Dict[str, asyncio.Event] = {}
+        self._tool_loop_confirm_results: Dict[str, str] = {}
+
     # ==================== Session 生命周期 ====================
 
     async def create_session(
@@ -442,6 +446,47 @@ class SessionService:
             ev.clear()
             self._intent_clarify_events.pop(session_id, None)
             self._intent_clarify_results.pop(session_id, None)
+
+    # ==================== V12.2: 同工具循环确认 ====================
+
+    def submit_tool_loop_confirm(self, session_id: str, choice: str) -> None:
+        """
+        User submits tool-loop choice (continue / stop).
+
+        Args:
+            session_id: Session ID
+            choice: "continue" / "stop"
+        """
+        self._tool_loop_confirm_results[session_id] = choice
+        ev = self._tool_loop_confirm_events.get(session_id)
+        if ev:
+            ev.set()
+            logger.info(
+                f"同工具循环确认已提交: session_id={session_id}, choice={choice}"
+            )
+
+    async def wait_tool_loop_confirm(
+        self, session_id: str, timeout: float = 300.0
+    ) -> str:
+        """
+        Wait for user tool-loop choice (executor awaits after yield).
+
+        Returns:
+            "continue" / "stop"; defaults to "stop" on timeout.
+        """
+        if session_id not in self._tool_loop_confirm_events:
+            self._tool_loop_confirm_events[session_id] = asyncio.Event()
+        ev = self._tool_loop_confirm_events[session_id]
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return self._tool_loop_confirm_results.get(session_id, "stop")
+        except asyncio.TimeoutError:
+            logger.warning(f"同工具循环确认超时（默认停止）: session_id={session_id}")
+            return "stop"
+        finally:
+            ev.clear()
+            self._tool_loop_confirm_events.pop(session_id, None)
+            self._tool_loop_confirm_results.pop(session_id, None)
 
     async def stop_session(self, session_id: str) -> Dict[str, Any]:
         """
