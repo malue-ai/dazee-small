@@ -101,8 +101,8 @@ class SqliteVecVectorStore(VectorStoreBase):
 
         if not db_path:
             raise ValueError(
-                "db_path is required. Use Mem0Config.db_path for "
-                "instance-scoped path."
+                "db_path is required. Use Mem0Config.get_shared_db_path() "
+                "for shared zenflux.db path."
             )
         self._db_path = db_path
 
