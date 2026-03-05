@@ -802,10 +802,12 @@ import {
   type ChannelTestResult,
 } from '@/api/gateway'
 import { useGuideStore } from '@/stores/guide'
+import { useAgentStore } from '@/stores/agent'
 import { openExternalUrl } from '@/api/tauri'
 
 const router = useRouter()
 const guideStore = useGuideStore()
+const agentStore = useAgentStore()
 
 // ==================== 状态 ====================
 
@@ -1565,7 +1567,12 @@ function handleBackToChat() {
   if (guideStore.isActive && guideStore.currentStep === 5) {
     guideStore.nextStep() // → step 6
   }
-  router.push('/')
+  const lastAgentId = agentStore.currentAgentId
+  if (lastAgentId) {
+    router.push({ name: 'agent', params: { agentId: lastAgentId } })
+  } else {
+    router.push('/')
+  }
 }
 
 // ==================== 引导系统交互协调 ====================

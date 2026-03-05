@@ -1,0 +1,86 @@
+{
+  "pipeline_id": "pipe_45ce09af309a",
+  "definition": {
+    "name": "集成测试",
+    "description": "",
+    "steps": [
+      {
+        "id": "1",
+        "name": "api_calling",
+        "step_type": "tool",
+        "skill": "",
+        "tool": "api_calling",
+        "code": "",
+        "params": {
+          "url": "https://example.com"
+        },
+        "depends_on": [],
+        "approval": {
+          "required": false,
+          "message": "",
+          "timeout_seconds": 3600
+        },
+        "timeout_seconds": 300,
+        "retry_max": 1,
+        "output_key": "step_1_result"
+      },
+      {
+        "id": "2",
+        "name": "api_calling",
+        "step_type": "tool",
+        "skill": "",
+        "tool": "api_calling",
+        "code": "",
+        "params": {},
+        "depends_on": [
+          "1"
+        ],
+        "approval": {
+          "required": false,
+          "message": "",
+          "timeout_seconds": 3600
+        },
+        "timeout_seconds": 300,
+        "retry_max": 1,
+        "output_key": "step_2_result"
+      }
+    ],
+    "metadata": {}
+  },
+  "status": "completed",
+  "step_executions": {
+    "1": {
+      "step_id": "1",
+      "status": "completed",
+      "result": "{\"success\": true, \"output\": \"executed api_calling\"}",
+      "error": null,
+      "started_at": "2026-03-05T21:00:22.238567",
+      "completed_at": "2026-03-05T21:00:22.238582",
+      "duration_ms": 0,
+      "retry_count": 0
+    },
+    "2": {
+      "step_id": "2",
+      "status": "completed",
+      "result": "{\"success\": true, \"output\": \"executed api_calling\"}",
+      "error": null,
+      "started_at": "2026-03-05T21:00:22.238675",
+      "completed_at": "2026-03-05T21:00:22.238686",
+      "duration_ms": 0,
+      "retry_count": 0
+    }
+  },
+  "context": {
+    "step_1_result": {
+      "success": true,
+      "output": "executed api_calling"
+    },
+    "step_2_result": {
+      "success": true,
+      "output": "executed api_calling"
+    }
+  },
+  "created_at": "2026-03-05T21:00:22.238493",
+  "updated_at": "2026-03-05T21:00:22.238752",
+  "resume_token": "3a2ca22ce6f44a999a52146bdfbc8ce7"
+}
