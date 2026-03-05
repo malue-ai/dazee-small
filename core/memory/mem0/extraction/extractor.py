@@ -11,6 +11,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+# 2. 第三方库
+from json_repair import repair_json
+
 # 3. 本地模块
 from core.llm import Message
 from logger import get_logger
@@ -371,16 +374,31 @@ class FragmentExtractor:
             return str(response)
 
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
-        """解析 LLM 响应"""
+        """解析 LLM 响应，使用 json_repair 处理 LLM 常见格式错误"""
+        text = response.strip()
+
+        json_start = text.find("{")
+        json_end = text.rfind("}") + 1
+        if json_start == -1 or json_end <= json_start:
+            logger.warning("[Extractor] 响应中未找到 JSON")
+            return {}
+
+        json_str = text[json_start:json_end]
+
         try:
-            # 尝试提取 JSON
-            json_start = response.find("{")
-            json_end = response.rfind("}") + 1
-            if json_start != -1 and json_end > json_start:
-                json_str = response[json_start:json_end]
-                return json.loads(json_str)
-        except json.JSONDecodeError as e:
-            logger.warning(f"[Extractor] JSON 解析失败: {e}")
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            result = repair_json(json_str, return_objects=True)
+            if isinstance(result, dict):
+                logger.info("[Extractor] JSON 修复成功 (json_repair)")
+                return result
+            logger.warning(f"[Extractor] json_repair 返回非 dict 类型: {type(result)}")
+        except Exception as e:
+            logger.warning(f"[Extractor] JSON 修复失败: {e}")
+
         return {}
 
     def _build_identity_hint(self, data: Optional[Dict]) -> Optional[IdentityHint]:

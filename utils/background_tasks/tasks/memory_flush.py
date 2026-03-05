@@ -244,6 +244,7 @@ async def _do_memory_flush(ctx: "TaskContext") -> None:
 
         mgr = get_instance_memory_manager(
             user_id=ctx.user_id,
+            instance_name=ctx.instance_name or None,
             mem0_enabled=mem_cfg.mem0_enabled,
             enabled=mem_cfg.enabled,
         )

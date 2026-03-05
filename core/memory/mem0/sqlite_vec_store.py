@@ -86,7 +86,7 @@ class SqliteVecVectorStore(VectorStoreBase):
 
     Args:
         collection_name: 集合名称（对应虚拟表名）
-        embedding_model_dims: 向量维度（默认 1536，OpenAI text-embedding-3-small）
+        embedding_model_dims: 向量维度（由实际 embedding 模型决定，如 GGUF=1024, OpenAI=1536）
         db_path: SQLite 数据库文件路径（默认 data/local_store/mem0_vectors.db）
     """
 

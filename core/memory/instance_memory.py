@@ -107,6 +107,7 @@ class InstanceMemoryManager:
 
         # Layer 2: FTS5 索引层（延迟初始化）
         self._fts_initialized = False
+        self._last_md_hash: str = ""
 
         # Layer 3: Mem0 智能层（延迟初始化，仅在启用时）
         self._mem0_pool = None
@@ -320,12 +321,19 @@ class InstanceMemoryManager:
             except Exception as e:
                 logger.warning(f"FTS5 写入失败（跳过）: {e}")
 
-        # Phase 3: Mem0 batch write (optional, best-effort)
+        # Phase 3: Mem0 batch write — 按 category 分组，每组一次 add()
+        # 保留 category 元数据，同组碎片拼接给 Mem0 做 fact extraction
         mem0_ok = False
         if self._mem0_enabled and valid:
+            from collections import defaultdict
+            by_cat: dict[str, list[str]] = defaultdict(list)
+            for m in valid:
+                by_cat[m["category"]].append(m["content"])
             try:
-                combined = "\n".join(m["content"] for m in valid)
-                mem0_ok = await self._mem0_add(combined, "general")
+                for cat, contents in by_cat.items():
+                    combined = "\n".join(contents)
+                    if await self._mem0_add(combined, cat):
+                        mem0_ok = True
             except Exception as e:
                 logger.warning(f"Mem0 批量写入失败（非致命）: {e}")
 
@@ -360,10 +368,13 @@ class InstanceMemoryManager:
             return
 
         # Extract memory fragments (uses LLM, independent of Mem0)
-        # Returns both the full FragmentMemory (10-dim) and long_term_memories list.
+        # Returns (FragmentMemory, long_term_memories) or (None, []) on failure.
         fragment, extracted = await self._extract_from_conversation(
             session_id, messages
         )
+
+        if not extracted:
+            return
 
         # Persist long_term_memories to MEMORY.md + FTS5
         await self.remember_batch(extracted)
@@ -413,8 +424,6 @@ class InstanceMemoryManager:
 
     # ==================== MEMORY.md → FTS5 sync ====================
 
-    _last_md_hash: str = ""
-
     async def _sync_markdown_to_fts5(self, md_content: str) -> None:
         """
         Opportunistic sync: re-index MEMORY.md to FTS5 when content changes.
@@ -436,27 +445,30 @@ class InstanceMemoryManager:
 
         self._last_md_hash = current_hash
 
-        # Parse entries and batch-index in a single session
+        # 全量重建：先清空 FTS5，再从 MEMORY.md 重新索引。
+        # 这确保用户在 MEMORY.md 中删除的条目也从 FTS5 中消失。
         try:
             entries = self._file_layer._parse_memory_entries(
                 md_content, "MEMORY.md"
             )
-            if not entries:
-                return
 
             await self._ensure_fts()
             if not self._fts_initialized:
                 return
 
-            import uuid
+            from sqlalchemy import text as sa_text
 
-            indexed = 0
             async with await self._get_fts_session() as session:
-                for entry in entries:
-                    # Skip template placeholders
+                await session.execute(
+                    sa_text(f"DELETE FROM {self._fts_config.table_name}")
+                )
+
+                indexed = 0
+                for entry in (entries or []):
                     if entry.content.startswith("（") and entry.content.endswith("）"):
                         continue
-                    entry_id = f"mem_{uuid.uuid4().hex[:12]}"
+                    content_hash = hashlib.md5(entry.content.encode()).hexdigest()[:12]
+                    entry_id = f"mem_{content_hash}"
                     category = self._section_to_category(entry.section)
                     section = _SECTION_MAP.get(category, "")
                     await self._fts.upsert(
@@ -573,6 +585,36 @@ class InstanceMemoryManager:
         """Strip HTML highlight tags from FTS5 snippets."""
         return re.sub(r"</?b>", "", text) if "<b>" in text else text
 
+    async def recall_by_category(
+        self, categories: List[str], limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """按 category 精确过滤 FTS5 条目（不走全文搜索）。"""
+        await self._ensure_fts()
+        if not self._fts_initialized:
+            return []
+
+        from sqlalchemy import text as sa_text
+
+        results: List[Dict[str, Any]] = []
+        async with await self._get_fts_session() as session:
+            for cat in categories:
+                rows = await session.execute(
+                    sa_text(
+                        f"SELECT content, category FROM {self._fts_config.table_name} "
+                        f"WHERE category = :cat LIMIT :lim"
+                    ),
+                    {"cat": cat, "lim": limit},
+                )
+                for row in rows:
+                    content = (row[0] or "").strip()
+                    if content:
+                        results.append({
+                            "content": content,
+                            "score": 1.0,
+                            "category": row[1] or cat,
+                        })
+        return results[:limit]
+
     async def _fts5_recall(
         self, query: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
@@ -599,8 +641,6 @@ class InstanceMemoryManager:
         except Exception as e:
             logger.warning(f"FTS5 搜索失败: {e}")
             return await self._file_layer_search(query, limit)
-
-        return []
 
     async def _fts5_index_entry(
         self, content: str, category: str
@@ -690,19 +730,33 @@ class InstanceMemoryManager:
             logger.warning(f"Mem0 初始化失败（智能层不可用）: {e}")
             self._mem0_enabled = False
 
+    _MEM0_RECALL_TIMEOUT = 30.0  # seconds; covers GGUF first-load (~16s) + search
+
     async def _mem0_recall(
         self, query: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """Mem0 语义搜索"""
+        """Mem0 语义搜索（线程池执行，避免阻塞事件循环）"""
         self._ensure_mem0()
         if not self._mem0_pool:
             return []
 
+        import asyncio
+        import functools
+
+        loop = asyncio.get_running_loop()
+
         try:
-            results = self._mem0_pool.search(
-                user_id=self._user_id,
-                query=query,
-                limit=limit,
+            results = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        self._mem0_pool.search,
+                        user_id=self._user_id,
+                        query=query,
+                        limit=limit,
+                    ),
+                ),
+                timeout=self._MEM0_RECALL_TIMEOUT,
             )
             return [
                 {
@@ -714,38 +768,60 @@ class InstanceMemoryManager:
                 }
                 for r in results
             ]
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Mem0 语义搜索超时 ({self._MEM0_RECALL_TIMEOUT}s)，跳过向量召回"
+            )
+            return []
         except Exception as e:
             logger.warning(f"Mem0 语义搜索失败: {e}")
             return []
 
+    _MEM0_ADD_TIMEOUT = 60.0  # seconds; add() involves LLM fact extraction
+
     async def _mem0_add(self, content: str, category: str) -> bool:
-        """Write to Mem0 vector store. Returns True on success."""
+        """Write to Mem0 vector store (线程池执行). Returns True on success."""
         self._ensure_mem0()
         if not self._mem0_pool:
             return False
 
+        import asyncio
+        import functools
+
+        loop = asyncio.get_running_loop()
+        mem0_category = _CATEGORY_MAP.get(category, "other")
+
         try:
-            mem0_category = _CATEGORY_MAP.get(category, "other")
-            result = self._mem0_pool.add(
-                user_id=self._user_id,
-                messages=[{"role": "user", "content": content}],
-                metadata={
-                    "category": mem0_category,
-                    "memory_type": "explicit",
-                    "source": "instance_remember",
-                },
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        self._mem0_pool.add,
+                        user_id=self._user_id,
+                        messages=[{"role": "user", "content": content}],
+                        metadata={
+                            "category": mem0_category,
+                            "memory_type": "explicit",
+                            "source": "instance_remember",
+                        },
+                    ),
+                ),
+                timeout=self._MEM0_ADD_TIMEOUT,
             )
             results_list = result.get("results", [])
             if not results_list:
-                # Mem0 returns empty when content is deduplicated or too
-                # short to be meaningful.  Not a real error — FTS5 still
-                # stores it.  Log at DEBUG to reduce noise.
                 logger.debug(
                     f"Mem0 向量去重跳过: 返回空结果, "
                     f"content={content[:50]}, category={category}"
                 )
                 return False
             return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Mem0 写入超时 ({self._MEM0_ADD_TIMEOUT}s), "
+                f"content={content[:50]}, category={category}"
+            )
+            return False
         except Exception as e:
             logger.error(
                 f"Mem0 写入异常: {e}, "
@@ -846,8 +922,8 @@ class InstanceMemoryManager:
             return fragment, extracted
 
         except Exception as e:
-            logger.warning(f"记忆提取失败（非致命）: {e}")
-            return []
+            logger.warning(f"记忆提取失败（非致命）: {e}", exc_info=True)
+            return None, []
 
     # ==================== 工具方法 ====================
 
@@ -932,3 +1008,13 @@ def get_instance_memory_manager(
     )
     _manager_cache[cache_key] = mgr
     return mgr
+
+
+def reset_memory_manager_cache() -> None:
+    """清空 InstanceMemoryManager 缓存。
+
+    语义搜索模式切换后，旧 manager 持有旧的 _mem0_pool 引用，
+    需清空以确保下次获取时重建（连接到新的向量库）。
+    仅释放内存引用，不删除磁盘文件。
+    """
+    _manager_cache.clear()

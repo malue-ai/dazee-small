@@ -217,8 +217,10 @@ class UserMemoryInjector(BaseInjector):
             from utils.memory_config import load_memory_config
             mem_cfg = await load_memory_config()
 
+            inst = getattr(context.prompt_cache, "instance_name", None)
             mgr = get_instance_memory_manager(
                 user_id=context.user_id or "default",
+                instance_name=inst,
                 mem0_enabled=False,  # Only need file layer for injection
                 enabled=mem_cfg.enabled,
             )
@@ -312,11 +314,11 @@ class UserMemoryInjector(BaseInjector):
         self, user_id: str, categories: list[str], limit: int = 5
     ) -> list[str]:
         """
-        Recall memories by category from InstanceMemoryManager FTS5 index.
+        Recall memories by category via FTS5 category column exact match.
 
-        Unlike semantic search, this uses exact category match —
-        guarantees style memories are always recalled even when
-        semantic distance is too large (fixes G1 "写健身房文章" case).
+        Uses InstanceMemoryManager.recall_by_category() which does SQL WHERE
+        on the 'category' extra column — 'style' matches category='style'
+        directly, not as a keyword in Chinese content.
         """
         if not user_id:
             return []
@@ -327,15 +329,12 @@ class UserMemoryInjector(BaseInjector):
             mgr = get_instance_memory_manager(
                 user_id=user_id, mem0_enabled=False, enabled=True
             )
+            items = await mgr.recall_by_category(categories, limit=limit)
             results = []
-            for cat in categories:
-                items = await mgr.recall(query=cat, limit=limit)
-                for item in items:
-                    content = (
-                        item.get("content", "") if isinstance(item, dict) else str(item)
-                    )
-                    if content.strip() and content not in results:
-                        results.append(content.strip())
+            for item in items:
+                content = item.get("content", "").strip()
+                if content and content not in results:
+                    results.append(content)
             return results[:limit]
         except Exception as e:
             logger.debug(f"Category recall from FTS5 failed: {e}")
