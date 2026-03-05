@@ -172,15 +172,14 @@ class Mem0MemoryPool:
             )
 
             collection_name = self.config.collection_name
+            db_path = Mem0Config.get_shared_db_path()
 
             # 1. 选择 Embedder — 严格按用户在前端选择的 mode 决定
             #
             # config/semantic_search.yaml → mode: disabled | local | cloud
             # 不同 embedding 模型的向量空间不兼容（维度、语义空间均不同），
-            # 每个模型有独立的向量库文件，切换模型时旧库原样保留。
-            from utils.app_paths import get_instance_store_dir
+            # 各模型通过 collection_name + embedding_tag 隔离表名，共享 zenflux.db。
             mode = self._read_semantic_search_mode()
-            store_dir = get_instance_store_dir(self.config.instance_name)
 
             if mode == "disabled":
                 raise RuntimeError(
@@ -199,24 +198,7 @@ class Mem0MemoryPool:
                 actual_dims = embedding_model.provider.dimensions
                 gguf_model = os.getenv("GGUF_MODEL", "bge-m3-q4_k_m")
                 gguf_tag = gguf_model.replace(".gguf", "").lower()
-                db_path = str(store_dir / f"mem0_vectors_{gguf_tag}.db")
-
-                # 一次性迁移：旧的 mem0_vectors.db → 新的模型隔离路径
-                legacy_db = store_dir / "mem0_vectors.db"
-                if legacy_db.is_file() and not os.path.isfile(db_path):
-                    import shutil
-                    shutil.move(str(legacy_db), db_path)
-                    for suffix in ("-shm", "-wal"):
-                        wal_file = store_dir / f"mem0_vectors.db{suffix}"
-                        if wal_file.is_file():
-                            shutil.move(
-                                str(wal_file),
-                                str(store_dir / f"mem0_vectors_{gguf_tag}.db{suffix}"),
-                            )
-                    logger.info(
-                        f"[Mem0Pool] 向量库迁移: mem0_vectors.db → "
-                        f"mem0_vectors_{gguf_tag}.db"
-                    )
+                vec_collection_name = f"{collection_name}_{gguf_tag}"
 
                 logger.info(
                     f"[Mem0Pool] Embedding: 本地 GGUF "
@@ -227,7 +209,7 @@ class Mem0MemoryPool:
                 embedding_config = self.config.embedder.to_dict()
                 actual_dims = self.config.embedding_model_dims
                 cloud_tag = self.config.embedding_tag
-                db_path = str(store_dir / f"mem0_vectors_{cloud_tag}.db")
+                vec_collection_name = f"{collection_name}_{cloud_tag}"
                 embedding_model = EmbedderFactory.create(
                     self.config.embedder.provider,
                     embedding_config,
@@ -240,9 +222,9 @@ class Mem0MemoryPool:
                     f"db={db_path})"
                 )
 
-            # 2. 创建 sqlite-vec 向量存储 — 每个 embedding 模型独立库
+            # 2. 创建 sqlite-vec 向量存储 — 共享 zenflux.db，表名按 collection+tag 隔离
             vector_store = SqliteVecVectorStore(
-                collection_name=collection_name,
+                collection_name=vec_collection_name,
                 embedding_model_dims=actual_dims,
                 db_path=db_path,
             )
@@ -252,8 +234,8 @@ class Mem0MemoryPool:
                 self.config.llm.provider, self.config.llm.to_dict()
             )
 
-            # 4. 创建 SQLite 历史管理器 — instance-scoped
-            db = SQLiteManager(self.config.history_db_name)
+            # 4. 创建 SQLite 历史管理器 — 共享 zenflux.db
+            db = SQLiteManager(Mem0Config.get_shared_db_path())
 
             # Enable WAL mode + busy_timeout on Mem0's history DB.
             # SQLiteManager defaults to DELETE journal mode, which causes

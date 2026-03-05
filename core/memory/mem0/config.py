@@ -347,30 +347,12 @@ class Mem0Config:
         model = model.replace("/", "_").replace(".", "_").replace(" ", "_")
         return model
 
-    @property
-    def db_path(self) -> str:
-        """Instance-scoped, model-scoped vector DB path.
+    @staticmethod
+    def get_shared_db_path() -> str:
+        """Shared zenflux.db path for all vector stores and history."""
+        from utils.app_paths import get_shared_db_dir
 
-        不同 embedding 模型的向量空间不兼容，各自独立存储。
-        例如:
-          - mem0_vectors_bge-m3-q4_k_m.db  (本地 GGUF, 1024 维)
-          - mem0_vectors_text-embedding-3-small.db  (OpenAI, 1536 维)
-        """
-        from utils.app_paths import get_instance_store_dir
-
-        return str(
-            get_instance_store_dir(self.instance_name)
-            / f"mem0_vectors_{self.embedding_tag}.db"
-        )
-
-    @property
-    def history_db_name(self) -> str:
-        """Instance-scoped history DB path (absolute)."""
-        from utils.app_paths import get_instance_store_dir
-
-        return str(
-            get_instance_store_dir(self.instance_name) / "mem0_history.db"
-        )
+        return str(get_shared_db_dir() / "zenflux.db")
 
     @classmethod
     def from_env(cls) -> "Mem0Config":
