@@ -171,8 +171,19 @@ async def init_local_database(engine: AsyncEngine):
                 tokenize='unicode61'
             )
         """))
+        # memory FTS5 (previously in separate memory_fts.db)
+        await conn.execute(text("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                entry_id UNINDEXED,
+                section,
+                content,
+                category UNINDEXED,
+                source UNINDEXED,
+                tokenize='unicode61 remove_diacritics 2'
+            )
+        """))
 
-    logger.info("SQLite 数据库初始化完成（含 FTS5）")
+    logger.info("SQLite 数据库初始化完成（含 FTS5 + 统一表）")
 
 
 async def init_vector_extension(engine: AsyncEngine) -> bool:
