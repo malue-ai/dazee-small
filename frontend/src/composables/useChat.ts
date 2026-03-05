@@ -805,11 +805,15 @@ export function useChat() {
       msg.content += `\n\n> 任务已转为后台执行（ID: ${taskId}），完成后会通知你。\n> 你可以在[后台任务](/background-tasks)页面查看进度。`
     }
 
-    // HITL 超时/关闭事件：后端 HITL 工具超时后发送，前端关闭弹窗
     if (delta.type === 'hitl') {
       try {
         const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
-        if (hitlData && (hitlData.timed_out || hitlData.status === 'timed_out')) {
+        if (hitlData && hitlData.status === 'pending') {
+          const request = normalizeHITLRequestFromHitlData(hitlData)
+          if (request && !hitl.showModal.value) {
+            hitl.show(request)
+          }
+        } else if (hitlData && (hitlData.timed_out || hitlData.status === 'timed_out')) {
           hitl.hide()
         }
       } catch {
