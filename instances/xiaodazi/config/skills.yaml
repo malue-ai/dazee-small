@@ -46,8 +46,8 @@ skill_groups:
     description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
     skills: [translator, locale-aware-formatter, multi-lang-ocr]
   research:
-    description: "通用网络搜索（DuckDuckGo/Brave/Tavily）、网页内容提取、学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研、高性能网页爬取(Crawl4AI)、本地 RAG 知识检索、个人知识库"
-    skills: [ddg-search, brave-search, jina-reader, tavily, raglite, knowledge-base, literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research, web-scraper]
+    description: "智能网络搜索（自动选择 Tavily/Exa/Jina）、网页内容提取、学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控、多步自主深度调研、高性能网页爬取(Crawl4AI)、本地 RAG 知识检索、个人知识库"
+    skills: [web-search, jina-reader, raglite, knowledge-base, literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher, deep-research, web-scraper]
   meeting:
     description: "会议记录分析、提取行动项、参与度评估"
     skills: [meeting-insights-analyzer, meeting-notes-to-action-items]
@@ -196,7 +196,7 @@ skills:
       - { name: privacy-auditor,         backend_type: local, skill_source: instance, description: "隐私审计：扫描敏感文件、检查权限、风险报告" }
 
       # --- 搜索 ---
-      - { name: ddg-search,              backend_type: local, skill_source: instance, description: "DuckDuckGo 网络搜索（隐私友好，无需 API Key）" }
+      - { name: web-search,              backend_type: tool, tool_name: web_search, skill_source: library, description: "智能网络搜索（自动选择 Tavily/Exa/Jina，内置降级）" }
       - { name: jina-reader,             backend_type: local, skill_source: instance, description: "网页内容提取为 Markdown（免费，无需 API Key）" }
 
       # --- 飞书 ---
@@ -267,7 +267,7 @@ skills:
 
     cloud_api:
       # --- 云端 Agent 委托 ---
-      - { name: cloud-agent, backend_type: tool, skill_source: library, description: "云端 Agent 委托执行（隔离沙箱/项目发布到公网/24/7 持续运行/长时间深度调研）" }
+      - { name: cloud-agent, backend_type: tool, tool_name: cloud_agent, skill_source: library, description: "云端 Agent 委托执行（隔离沙箱/项目发布到公网/24/7 持续运行/长时间深度调研）" }
 
       # --- Claude Computer Use（终极 UI 自动化：截屏+视觉理解+坐标操作） ---
       - { name: claude-computer-use, backend_type: local, skill_source: instance, description: "Claude Computer Use - 截屏+视觉理解操作任意桌面应用（坐标点击/滚动/拖拽/键盘）" }
@@ -302,9 +302,7 @@ skills:
       - { name: slidespeak-editor,    backend_type: local, skill_source: library, description: "SlideSpeak API 编辑已有 PPT 形状内容" }
       - { name: slidespeak-slide-editor, backend_type: local, skill_source: library, description: "SlideSpeak API 插入/删除/重生成幻灯片" }
       - { name: sag,                 backend_type: local, skill_source: library, description: "ElevenLabs 文字转语音（需 ELEVENLABS_API_KEY）" }
-      - { name: brave-search,       backend_type: local, skill_source: instance, description: "Brave 高质量网络搜索（需 BRAVE_API_KEY）" }
       - { name: todoist,            backend_type: local, skill_source: library,  description: "Todoist 跨平台待办管理（需 TODOIST_API_TOKEN）" }
-      - { name: tavily,             backend_type: local, skill_source: library,  description: "Tavily AI 优化搜索（需 TAVILY_API_KEY）" }
 
   # ==================== macOS 专属 ====================
 
