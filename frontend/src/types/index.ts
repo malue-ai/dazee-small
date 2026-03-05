@@ -101,6 +101,20 @@ export type {
   SkillUninstallRequest
 } from './skills'
 
+// 从 playbook.ts 导出 Playbook 策略库相关类型
+export type {
+  PlaybookStatus,
+  PlaybookSource,
+  PlaybookTrigger,
+  PlaybookStrategy,
+  PlaybookToolStep,
+  PlaybookQualityMetrics,
+  PlaybookEntry,
+  PlaybookListResponse,
+  PlaybookCreateRequest,
+  PlaybookUpdateRequest
+} from './playbook'
+
 // 从 agent.ts 导出 Agent（项目）相关类型
 export type {
   AgentStatus,

@@ -15,6 +15,7 @@ This closes the "learn from success" loop:
 
 import asyncio
 import json
+import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from logger import get_logger
@@ -102,6 +103,32 @@ def _get_items_from_result(result: Any) -> list:
     return []
 
 
+_USER_CONTEXT_RE = re.compile(
+    r"\n*\[User Context\]\s*\n(?:- [^\n]+\n?)*",
+    re.IGNORECASE,
+)
+
+_FOLLOW_UP_PATTERNS = frozenset([
+    "好了", "好的", "可以了", "完成了", "确认", "确定",
+    "继续", "继续执行", "授权完了", "是的", "对的",
+    "ok", "yes", "done", "方案1", "方案2", "我选",
+])
+
+
+def _strip_user_context(text: str) -> str:
+    """Strip injected [User Context] metadata block from user message."""
+    return _USER_CONTEXT_RE.sub("", text).strip()
+
+
+def _is_follow_up(user_message: str) -> bool:
+    """Detect follow-up / confirmation messages (deterministic, <1ms)."""
+    clean = _strip_user_context(user_message)
+    if len(clean) <= 20:
+        normalized = clean.lower().rstrip("。.！!？?~")
+        return normalized in _FOLLOW_UP_PATTERNS
+    return False
+
+
 def _should_skip(ctx: "TaskContext") -> str:
     """
     Quick pre-filter: skip sessions unlikely to yield useful strategies.
@@ -115,6 +142,9 @@ def _should_skip(ctx: "TaskContext") -> str:
 
     if len(ctx.user_message) < _MIN_USER_CHARS:
         return f"user message too short ({len(ctx.user_message)} chars)"
+
+    if _is_follow_up(ctx.user_message):
+        return "follow-up message, not a task description"
 
     return ""
 
@@ -206,6 +236,11 @@ async def playbook_extraction_task(
             logger.debug("Playbook extraction skipped: no tool calls in session")
             return
 
+        unique_tools = set(tool_calls)
+        if len(unique_tools) < 2 and len(tool_calls) < 3:
+            logger.debug("Playbook extraction skipped: insufficient tool diversity")
+            return
+
         # Build a lightweight SessionReward (without full RewardAttribution)
         from dataclasses import dataclass, field
 
@@ -246,7 +281,7 @@ async def playbook_extraction_task(
         entry = await manager.extract_from_session(
             session_reward,
             use_llm=False,
-            user_query=ctx.user_message,  # Preserve semantic info for Mem0 matching
+            user_query=_strip_user_context(ctx.user_message),
         )
 
         if entry:

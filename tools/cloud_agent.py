@@ -20,7 +20,12 @@ class CloudAgentTool(BaseTool):
     """将任务委托给云端 Agent 执行"""
 
     name = "cloud_agent"
-    description = "将任务委托给云端 Agent 执行，适用于深度调研、沙箱代码执行、持续运行等本地不擅长的场景"
+    description = (
+        "将任务委托给云端 Agent 执行。"
+        "用户提到「云端智能体」「云端」「cloud agent」或需要深度调研、沙箱执行、项目发布到公网时，必须直接调用本工具。"
+        "调用方式：cloud_agent(task='任务描述')。"
+        "禁止通过 nodes 或 api_calling 间接调用，必须直接调用本工具。"
+    )
     execution_timeout = 600
     input_schema = {
         "type": "object",
@@ -52,9 +57,16 @@ class CloudAgentTool(BaseTool):
     async def execute(
         self, params: Dict[str, Any], context: Optional[ToolContext] = None
     ) -> Dict[str, Any]:
-        task = params.get("task", "").strip()
+        # 兼容 LLM 有时使用 prompt / query / message 作为参数名
+        task = (
+            params.get("task")
+            or params.get("prompt")
+            or params.get("query")
+            or params.get("message")
+            or ""
+        ).strip()
         if not task:
-            return {"success": False, "error": "task 参数不能为空"}
+            return {"success": False, "error": "task 参数不能为空（也可使用 prompt/query/message）"}
 
         extra_context = params.get("context", "")
         message = f"{task}\n\n{extra_context}".strip() if extra_context else task

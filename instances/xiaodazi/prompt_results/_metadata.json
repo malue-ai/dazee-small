@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-03-05T12:11:25.962072",
+  "source_hashes": {
+    "prompt.md": "3757fff5dd05e04e31a52862bf66e9be",
+    "config.yaml": "e61b6860aad33a93f4c9cdf032771986",
+    "skills.yaml": "a9a9dcff299b7589537b6a9dee3a6f7d"
+  },
+  "result_hashes": {
+    "agent_schema": "4dd7bc332dfd3977dccfc9fd310fbc47",
+    "intent_prompt": "7109021afe7e50f8db879f9b1271153a",
+    "simple_prompt": "39acbe00b4ad1925a57562bf4ee7038e",
+    "medium_prompt": "f073476a3b4df0823ce1693241d40e2f",
+    "complex_prompt": "c77b546de13b3ce847dadb18a5cacded"
+  },
+  "manually_edited": []
+}
