@@ -332,11 +332,17 @@ async def get_instance_config(
     传 category 返回该品类的 ``{key: value}``。
     """
     try:
-        from infra.local_store.instance_config_store import get_all, get_by_category
-        if category:
-            data = get_by_category(instance_id, category)
-        else:
-            data = get_all(instance_id)
+        from infra.local_store.engine import get_local_session_factory
+        from infra.local_store import instance_config_store
+
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            if category:
+                data = await instance_config_store.get_by_category(
+                    session, instance_id, category
+                )
+            else:
+                data = await instance_config_store.get_all(session, instance_id)
         return {"success": True, "data": data}
     except Exception as e:
         logger.exception("get_instance_config 失败")
@@ -353,21 +359,25 @@ async def put_instance_config(body: InstanceConfigBody) -> Dict[str, Any]:
     try:
         import os as _os
 
-        from infra.local_store.instance_config_store import VALID_CATEGORIES, upsert
+        from infra.local_store.engine import get_local_session_factory
+        from infra.local_store import instance_config_store
 
-        if body.category not in VALID_CATEGORIES:
+        if body.category not in instance_config_store.VALID_CATEGORIES:
             return {
                 "success": False,
-                "error": f"无效品类 '{body.category}'，支持: {', '.join(sorted(VALID_CATEGORIES))}",
+                "error": f"无效品类 '{body.category}'，支持: {', '.join(sorted(instance_config_store.VALID_CATEGORIES))}",
             }
-        upsert(
-            instance_id=body.instance_id,
-            category=body.category,
-            key=body.key,
-            value=body.value,
-            skill_name=body.skill_name,
-            source="settings_page",
-        )
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            await instance_config_store.upsert(
+                session,
+                body.instance_id,
+                body.category,
+                body.key,
+                body.value,
+                skill_name=body.skill_name,
+                source="settings_page",
+            )
         if body.category == "credential" and body.value:
             _os.environ[body.key] = body.value
         return {"success": True, "message": f"已保存 {body.category}/{body.key}"}

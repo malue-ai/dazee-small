@@ -780,13 +780,14 @@ async def load_instance_prompt(instance_name: str) -> str:
         return await f.read()
 
 
-def load_instance_env_from_config(instance_name: str) -> None:
+async def load_instance_env_from_config(instance_name: str) -> None:
     """
     从实例目录加载环境变量到 os.environ
 
     加载顺序（后加载的覆盖先加载的）：
     1. 实例目录下的 .env 文件（通过 python-dotenv）
     2. 实例 config.yaml 的 env_vars 段（优先级更高）
+    3. instance_config_store 的 credential 品类（DB 持久化）
 
     Args:
         instance_name: 实例名称
@@ -830,14 +831,22 @@ def load_instance_env_from_config(instance_name: str) -> None:
 
     # Step 3: 从 instance_config_store 注入 credential 品类到 os.environ
     try:
-        from infra.local_store.instance_config_store import get_by_category, migrate_from_instance_env_db
-        migrate_from_instance_env_db()
-        credentials = get_by_category(instance_name, "credential")
+        from infra.local_store.engine import get_local_session_factory
+        from infra.local_store import instance_config_store
+
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            credentials = await instance_config_store.get_by_category(
+                session, instance_name, "credential"
+            )
+
+        for key, value in credentials.items():
+            if value:
+                os.environ[key] = value
         if credentials:
-            for k, v in credentials.items():
-                if v:
-                    os.environ[k] = v
-            logger.info(f"从 instance_config_store 注入实例 {instance_name} 的 {len(credentials)} 个 credential")
+            logger.info(
+                f"从 instance_config_store 注入实例 {instance_name} 的 {len(credentials)} 个 credential"
+            )
     except Exception as e:
         logger.debug("加载实例 config_store 跳过: %s", e)
 
@@ -1058,7 +1067,7 @@ async def create_agent_from_instance(
         logger.info("🔄 强制刷新缓存模式")
 
     # 1. 加载实例环境变量（从 config.yaml 的 env_vars 段）
-    load_instance_env_from_config(instance_name)
+    await load_instance_env_from_config(instance_name)
 
     # 2. 加载实例配置
     config = await load_instance_config(instance_name)

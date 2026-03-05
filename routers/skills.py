@@ -1047,21 +1047,25 @@ async def configure_skill(request: SkillConfigureRequest):
         )
 
     try:
-        from infra.local_store.instance_config_store import upsert
+        from infra.local_store.engine import get_local_session_factory
+        from infra.local_store import instance_config_store
 
         instance_id = request.agent_id if request.agent_id and request.agent_id != "global" else os.getenv("AGENT_INSTANCE", "default")
 
-        for key, value in request.env_vars.items():
-            if value:
-                upsert(
-                    instance_id=instance_id,
-                    category="credential",
-                    key=key,
-                    value=value,
-                    skill_name=request.skill_name,
-                    source="skill_configure",
-                )
-                os.environ[key] = value
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            for key, value in request.env_vars.items():
+                if value:
+                    await instance_config_store.upsert(
+                        session,
+                        instance_id,
+                        "credential",
+                        key,
+                        value,
+                        skill_name=request.skill_name,
+                        source="skill_configure",
+                    )
+                    os.environ[key] = value
 
         logger.info(
             f"配置 Skill credential: {request.skill_name}, "

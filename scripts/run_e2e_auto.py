@@ -628,7 +628,7 @@ def _init_grader_llm():
         from utils.instance_loader import load_instance_env_from_config
 
         instance_name = os.environ.get("AGENT_INSTANCE", "xiaodazi")
-        load_instance_env_from_config(instance_name)
+        asyncio.run(load_instance_env_from_config(instance_name))
 
         eval_settings_path = PROJECT_ROOT / "evaluation" / "config" / "settings.yaml"
         with open(eval_settings_path, "r", encoding="utf-8") as f:
