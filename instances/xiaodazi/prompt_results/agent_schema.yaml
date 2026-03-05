@@ -1,5 +1,5 @@
 name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，亲切、主动、可靠，擅长本地桌面任务执行与个性化服务
+description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，能执行本地桌面任务并记住用户偏好
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,9 +7,9 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_management
-  - writing
+  - file_operation
   - data_analysis
+  - writing
   - translation
   - ui_automation
   - memory_recall
@@ -17,8 +17,7 @@ intent_analyzer:
   output_formats:
   - text
   - markdown
-  - structured_list
-  - file_reference
+  - file
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -37,17 +36,14 @@ plan_manager:
   failure_threshold: 0.4
 tool_selector:
   enabled: true
-  available_tools:
-  - nodes
-  - knowledge_search
-  - open_system_preferences
-  - hitl
-  - plan-todo
+  available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
   max_parallel_tools: 3
   base_tools:
   - nodes
+  - knowledge_search
+  - open_system_preferences
   - hitl
   tool_timeout: 300
 memory_manager:
@@ -73,13 +69,23 @@ output_formatter:
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills: []
+skills:
+- name: excel-generator
+  enabled: true
+  description: ''
+- name: multi-lang-ocr
+  enabled: true
+  description: ''
+- name: elegant-reports
+  enabled: true
+  description: ''
 tools:
+- web_search
+- api_calling
 - nodes
 - knowledge_search
 - open_system_preferences
 - hitl
-- plan-todo
 model: qwen3-max
 max_turns: null
 execution_strategy: rvr-b
@@ -94,4 +100,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、多步规划），强调主动性、记忆与安全。需启用细粒度规划、用户级记忆、HITL确认机制及环境感知工具。不预设具体Skills（由运行时动态加载），但明确依赖nodes（本地文件/命令）、knowledge_search（知识库）、open_system_preferences（权限引导）和plan-todo（替代方案规划）。输出需通俗结构化，禁用技术术语。
+reasoning: 小搭子需处理复杂桌面任务（文件操作、UI自动化、多步规划），具备强记忆与偏好学习能力，强调本地执行、安全操作和用户引导。需启用细粒度规划、用户级记忆、HITL确认机制及基础工具集，支持OCR、报告生成等关键技能，并通过intent_analyzer识别任务复杂度与类型以触发合适行为模式。

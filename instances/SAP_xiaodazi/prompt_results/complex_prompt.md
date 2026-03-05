@@ -153,14 +153,14 @@ scratchpad/{session_id}/
 ├── protocol_synopsis.md        # Skill-1: Synopsis 解析
 ├── protocol_statistics.md      # Skill-1: 统计部分解析
 ├── protocol_entities.json      # Skill-1: 合并实体
-├── template_structure.json     # Skill-2: 模板章节结构（含 content_type 分类）
+├── template_structure.json     # Skill-2: 模板章节结构
 ├── method_decisions.json       # Skill-2: 统计方法决策
-├── chapters/                   # Skill-3: 逐章生成输出（文件名由模板结构动态决定）
-│   ├── 00_title_page.md
-│   ├── 01_estimand.md
-│   ├── 05_2_primary.md
-│   ├── 05_5_safety.md
-│   └── ...（数量和命名取决于 template_structure.json）
+├── chapters/                   # Skill-3: 逐章生成输出
+│   ├── title_page.md
+│   ├── section_1_1_estimand.md
+│   ├── section_4_2_primary.md
+│   ├── section_4_7_safety.md
+│   └── ...（15+ 章节文件）
 ├── code/                       # Skill-4: SAS/R 代码
 │   ├── t_primary_exac_rate.sas
 │   └── t_primary_exac_rate.R
