@@ -611,6 +611,16 @@ class SqliteVecVectorStore(VectorStoreBase):
             logger.error(f"[SqliteVec] 获取失败: {e}")
             return None
 
+    def count(self) -> int:
+        """Return the total number of entries in the vector store."""
+        try:
+            cursor = self._conn.execute(
+                f"SELECT COUNT(*) FROM [{self.collection_name}_meta]"
+            )
+            return cursor.fetchone()[0]
+        except Exception:
+            return 0
+
     def list(
         self, filters: Optional[Dict] = None, limit: Optional[int] = None
     ) -> list:

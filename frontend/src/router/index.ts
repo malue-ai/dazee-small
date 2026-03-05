@@ -51,6 +51,12 @@ const routes = [
     component: () => import('@/views/tasks/BackgroundTasksView.vue'),
     meta: { layout: 'dashboard' }
   },
+  {
+    path: '/playbook',
+    name: 'playbook',
+    component: () => import('@/views/playbook/PlaybookView.vue'),
+    meta: { layout: 'dashboard' }
+  },
   // ==================== 新建项目 ====================
   {
     path: '/create-project',

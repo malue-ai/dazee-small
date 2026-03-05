@@ -56,6 +56,27 @@ class PlaybookListResponse(BaseModel):
     stats: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PlaybookCreateRequest(BaseModel):
+    """手动创建策略请求"""
+
+    name: str = Field(..., min_length=1, description="策略名称")
+    description: str = Field(..., min_length=1, description="策略描述")
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    strategy: Dict[str, Any] = Field(default_factory=dict)
+    tool_sequence: List[Dict[str, Any]] = Field(default_factory=list)
+    quality_metrics: Dict[str, float] = Field(default_factory=dict)
+
+
+class PlaybookUpdateRequest(BaseModel):
+    """编辑策略请求（所有字段可选）"""
+
+    name: Optional[str] = None
+    description: Optional[str] = None
+    trigger: Optional[Dict[str, Any]] = None
+    strategy: Optional[Dict[str, Any]] = None
+    tool_sequence: Optional[List[Dict[str, Any]]] = None
+
+
 class PlaybookActionRequest(BaseModel):
     """策略操作请求（approve / reject / dismiss / deprecate）"""
 
@@ -90,6 +111,30 @@ def _entry_to_response(entry) -> PlaybookEntryResponse:
 
 
 # ==================== 路由 ====================
+
+
+@router.post("", response_model=PlaybookEntryResponse, status_code=201)
+async def create_playbook(request: PlaybookCreateRequest):
+    """手动创建策略（source=manual，初始状态 PENDING_REVIEW）"""
+    manager = await _get_manager()
+    entry = await manager.create(
+        name=request.name,
+        description=request.description,
+        trigger=request.trigger,
+        strategy=request.strategy,
+        tool_sequence=request.tool_sequence,
+        quality_metrics=request.quality_metrics,
+        source="manual",
+    )
+    return _entry_to_response(entry)
+
+
+@router.post("/rebuild-index")
+async def rebuild_index():
+    """重建向量索引：清除全部向量，仅重建 APPROVED 条目的索引"""
+    manager = await _get_manager()
+    result = await manager.rebuild_vector_index()
+    return {"success": True, **result}
 
 
 @router.get("", response_model=PlaybookListResponse)
@@ -226,6 +271,25 @@ async def playbook_action(playbook_id: str, request: PlaybookActionRequest):
             status_code=400,
             detail=f"不支持的操作: {action}，支持: approve / reject / dismiss / deprecate",
         )
+
+
+@router.put("/{playbook_id}", response_model=PlaybookEntryResponse)
+async def update_playbook(playbook_id: str, request: PlaybookUpdateRequest):
+    """编辑策略（仅更新提供的字段）"""
+    manager = await _get_manager()
+    entry = manager.get(playbook_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"策略 {playbook_id} 不存在")
+
+    updates = {k: v for k, v in request.model_dump().items() if v is not None}
+    if not updates:
+        return _entry_to_response(entry)
+
+    updated = await manager.update(playbook_id, **updates)
+    if not updated:
+        raise HTTPException(status_code=500, detail="更新失败")
+
+    return _entry_to_response(updated)
 
 
 @router.delete("/{playbook_id}")
