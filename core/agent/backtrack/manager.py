@@ -26,6 +26,7 @@ from core.agent.backtrack.error_classifier import (
     ErrorLayer,
     get_error_classifier,
 )
+from core.llm import Message
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -189,7 +190,7 @@ class BacktrackManager:
             )
 
             response = await self.llm_service.create_message_async(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[Message(role="user", content=prompt)],
                 system=BACKTRACK_SYSTEM_PROMPT,
             )
 

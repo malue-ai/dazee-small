@@ -524,6 +524,12 @@ class RuntimeContext:
     _tool_call_signatures: List[str] = field(default_factory=list)
     _consecutive_duplicate_count: int = 0
 
+    # === 同工具循环检测（参数不同但同一工具反复调用）===
+    _recent_tool_names: List[str] = field(default_factory=list)
+    tool_loop_detected: bool = False
+    _tool_loop_tool_name: Optional[str] = None  # 循环调用的工具名
+    _tool_loop_confirmed: bool = False  # 用户已确认继续，本轮不再触发
+
     # === 回溯状态（V12 回溯↔终止联动）===
     total_backtracks: int = 0  # 累计回溯次数
     backtracks_exhausted: bool = False  # 回溯是否已耗尽
@@ -638,7 +644,7 @@ class RuntimeContext:
     # === 工具调用轨迹（去重检测）===
 
     def record_tool_call(self, tool_name: str, tool_input: dict) -> None:
-        """Record a tool call signature for deduplication."""
+        """Record a tool call signature for deduplication and loop detection."""
         import hashlib
         import json as _json
 
@@ -655,11 +661,46 @@ class RuntimeContext:
         if len(self._tool_call_signatures) > 50:
             self._tool_call_signatures = self._tool_call_signatures[-20:]
 
+        self._recent_tool_names.append(tool_name)
+        if len(self._recent_tool_names) > 20:
+            self._recent_tool_names = self._recent_tool_names[-20:]
+
     def detect_repeated_call(self, threshold: int = 3) -> bool:
         """
         Check if the same (tool_name, params) was called consecutively >= threshold times.
         """
         return self._consecutive_duplicate_count >= threshold - 1
+
+    def detect_tool_loop(self, window: int = 8, min_same: int = 6) -> bool:
+        """
+        Detect if the agent is stuck calling the same tool repeatedly with
+        different parameters (LLM micro-adjusts params each time, bypassing
+        exact-match dedup).
+
+        Returns True if >= min_same out of the last `window` tool calls target
+        the same tool name. Skips detection if user already confirmed continuation.
+        """
+        if self._tool_loop_confirmed:
+            return False
+        if len(self._recent_tool_names) < window:
+            return False
+
+        recent = self._recent_tool_names[-window:]
+        from collections import Counter
+        counts = Counter(recent)
+        dominant_tool, dominant_count = counts.most_common(1)[0]
+        if dominant_count >= min_same:
+            self.tool_loop_detected = True
+            self._tool_loop_tool_name = dominant_tool
+            return True
+        return False
+
+    def confirm_tool_loop_continue(self) -> None:
+        """User chose to continue after tool loop warning; reset detection state."""
+        self.tool_loop_detected = False
+        self._tool_loop_tool_name = None
+        self._tool_loop_confirmed = True
+        self._recent_tool_names.clear()
 
     # === 状态重置方法 ===
 
@@ -686,6 +727,11 @@ class RuntimeContext:
         # 工具轨迹重置
         self._tool_call_signatures = []
         self._consecutive_duplicate_count = 0
+        # 同工具循环检测重置
+        self._recent_tool_names = []
+        self.tool_loop_detected = False
+        self._tool_loop_tool_name = None
+        self._tool_loop_confirmed = False
         # V12 回溯状态重置
         self.total_backtracks = 0
         self.backtracks_exhausted = False
