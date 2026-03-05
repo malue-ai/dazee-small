@@ -396,12 +396,21 @@ class IntentAnalyzer:
                     logger.info(f"  [{i+1}] {msg['role']}: {preview}")
 
             # Call LLM with tool_choice to force structured output
-            response = await self.llm.create_message_async(
-                messages=llm_messages,
-                system=system_blocks,
-                tools=[_INTENT_TOOL],
-                tool_choice={"type": "tool", "name": _INTENT_TOOL_NAME},
-            )
+            # 意图识别是轻量调用，30 秒硬超时防止网络挂起阻塞整个请求
+            _INTENT_TIMEOUT = 45
+            try:
+                response = await asyncio.wait_for(
+                    self.llm.create_message_async(
+                        messages=llm_messages,
+                        system=system_blocks,
+                        tools=[_INTENT_TOOL],
+                        tool_choice={"type": "tool", "name": _INTENT_TOOL_NAME},
+                    ),
+                    timeout=_INTENT_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"[意图识别] LLM 调用超时 ({_INTENT_TIMEOUT}s)，使用保守默认值")
+                return self._get_conservative_default()
 
             # 记录计费
             if tracker:

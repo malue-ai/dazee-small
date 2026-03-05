@@ -189,6 +189,7 @@ class Agent:
         self._wait_backtrack_confirm_async: Optional[Any] = None
         self._wait_cost_confirm_async: Optional[Any] = None
         self._wait_intent_clarify_async: Optional[Any] = None
+        self._wait_tool_loop_confirm_async: Optional[Any] = None
 
         executor_name = executor.name if executor else "None"
         logger.info(f"✅ Agent 初始化完成: executor={executor_name}")
@@ -457,6 +458,9 @@ class Agent:
                 ),
                 "wait_intent_clarify_async": getattr(
                     self, "_wait_intent_clarify_async", None
+                ),
+                "wait_tool_loop_confirm_async": getattr(
+                    self, "_wait_tool_loop_confirm_async", None
                 ),
                 "state_manager": state_mgr_ref,
                 "event_manager": getattr(self, "event_manager", None),

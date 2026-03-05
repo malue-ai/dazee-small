@@ -40,6 +40,7 @@ class FinishReason(str, Enum):
     # 错误恢复
     CONSECUTIVE_FAILURES = "consecutive_failures"  # 连续失败
     BACKTRACK_EXHAUSTED = "backtrack_exhausted"  # 回溯耗尽
+    TOOL_CALL_LOOP = "tool_call_loop"  # 同工具循环调用（参数微调但无进展）
 
     # 交互
     HITL_CONFIRM = "hitl_confirm"  # HITL 危险操作确认

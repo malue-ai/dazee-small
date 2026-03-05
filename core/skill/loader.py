@@ -147,13 +147,25 @@ class SkillsLoader:
         # 打印加载摘要
         self._log_summary()
 
-        # 检查 Skill 间依赖关系（纯日志，不阻断）
-        self._validate_dependencies()
-
-        # 检查 Skill 中引用的工具是否存在于 Registry
-        self._validate_tool_references()
+        # 诊断校验（纯日志，不阻断启动）放到后台避免拖慢启动
+        # _validate_dependencies: 重读所有 SKILL.md frontmatter
+        # _validate_tool_references: 重建 registry + 重读所有 SKILL.md
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon(self._run_deferred_validations)
+        except RuntimeError:
+            self._run_deferred_validations()
 
         return self._entries
+
+    def _run_deferred_validations(self) -> None:
+        """延迟执行诊断校验（不阻塞启动关键路径）"""
+        try:
+            self._validate_dependencies()
+            self._validate_tool_references()
+        except Exception as e:
+            logger.debug(f"诊断校验异常（不影响功能）: {e}")
 
     def refresh_skill_status(self, name: str) -> Optional[SkillEntry]:
         """
@@ -284,10 +296,7 @@ class SkillsLoader:
         if entry.skill_md_content is not None:
             return entry.skill_md_content
 
-        # backend_type=tool 无 SKILL.md
-        if entry.backend_type == BackendType.TOOL:
-            return None
-
+        # backend_type=tool 且有 SKILL.md 时仍加载（如 cloud-agent 需要注入使用指南）
         if not entry.skill_path:
             return None
 
@@ -344,8 +353,8 @@ class SkillsLoader:
             e for e in self._entries
             if e.enabled
             and e.status in _INJECTABLE_STATUSES
-            and e.backend_type != BackendType.TOOL
             and e.skill_path
+            and (e.backend_type != BackendType.TOOL or self._has_skill_md(e))
         ]
 
         # V12.0: 按 SkillGroupRegistry 过滤（重召回原则）
@@ -411,6 +420,8 @@ class SkillsLoader:
                     emoji=emoji,
                     quickstart=quickstart,
                     parameters=parameters,
+                    backend_type="tool" if entry.backend_type == BackendType.TOOL else "",
+                    tool_name=entry.tool_name or "",
                 )
             )
 
@@ -560,6 +571,13 @@ class SkillsLoader:
 
         return list(merged.values())
 
+    @staticmethod
+    def _has_skill_md(entry: SkillEntry) -> bool:
+        """backend_type=tool 的 Skill 是否有 SKILL.md（如 cloud-agent）"""
+        if not entry.skill_path:
+            return False
+        return (Path(entry.skill_path) / "SKILL.md").exists()
+
     def _resolve_skill_path(self, entry: SkillEntry) -> Optional[str]:
         """
         解析 Skill 的 SKILL.md 目录路径
@@ -572,10 +590,6 @@ class SkillsLoader:
         Returns:
             目录路径字符串，或 None
         """
-        # backend_type=tool 不需要 SKILL.md
-        if entry.backend_type == BackendType.TOOL:
-            return None
-
         # 1. 工作区目录（最高优先级）
         if self._workspace_dir:
             workspace_path = self._workspace_dir / entry.name
@@ -705,6 +719,8 @@ class SkillsLoader:
         Check if a macOS system authorization is already granted.
 
         Uses native macOS APIs for silent checks — never triggers a dialog.
+        Pre-checks package availability via find_spec to avoid slow imports
+        when pyobjc is not installed.
 
         Args:
             auth_type: Authorization type from skills.yaml (e.g. "accessibility",
@@ -714,9 +730,13 @@ class SkillsLoader:
             True if granted, False if denied or unknown.
         """
         if platform.system() != "Darwin":
-            return True  # Non-macOS: skip auth check
+            return True
+
+        import importlib.util
 
         if auth_type == "accessibility":
+            if importlib.util.find_spec("objc") is None:
+                return False
             try:
                 import objc
                 bundle = objc.loadBundle(
@@ -733,15 +753,14 @@ class SkillsLoader:
                 return False
 
         if auth_type == "screen_recording":
+            if importlib.util.find_spec("Quartz") is None:
+                return False
             try:
                 from Quartz import CGPreflightScreenCaptureAccess
                 return bool(CGPreflightScreenCaptureAccess())
             except Exception:
                 return False
 
-        # For other auth types (reminders, calendar, etc.),
-        # we can't easily pre-check — treat as needing auth.
-        # The Agent will handle the dialog when the skill is actually used.
         return False
 
     def _check_app_installed(self, app_name: str, config: Dict[str, Any]) -> bool:
@@ -772,19 +791,23 @@ class SkillsLoader:
         """
         检查 Python 包是否已安装
 
+        使用 importlib.metadata.distribution() 按 pip 分发名查询，
+        不执行任何模块代码（< 1ms/包），避免重量级包在 import 时
+        初始化模型/浏览器等导致启动挂起。
+
         Args:
-            packages: 包名列表
+            packages: pip 分发名列表（如 Pillow, python-docx）
 
         Returns:
             缺失的包名列表
         """
+        import importlib.metadata
+
         missing = []
         for pkg in packages:
-            # 标准化包名（pip install name 和 import name 可能不同）
-            import_name = pkg.replace("-", "_").lower()
             try:
-                __import__(import_name)
-            except ImportError:
+                importlib.metadata.distribution(pkg)
+            except importlib.metadata.PackageNotFoundError:
                 missing.append(pkg)
         return missing
 

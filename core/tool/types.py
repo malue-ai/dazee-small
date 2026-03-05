@@ -466,6 +466,7 @@ def create_tool_context(
     session_id: str = "",
     conversation_id: str = "",
     user_id: str = "default_user",
+    instance_id: str = "",
     memory: Optional["WorkingMemory"] = None,
     event_manager: Optional["EventManager"] = None,
     apis_config: Optional[List[Dict[str, Any]]] = None,
@@ -478,6 +479,7 @@ def create_tool_context(
         session_id: 会话 ID
         conversation_id: 对话 ID
         user_id: 用户 ID
+        instance_id: 实例名称（如 xiaodazi），用于读取实例级配置
         memory: 工作记忆
         event_manager: 事件管理器
         apis_config: API 配置列表
@@ -486,10 +488,14 @@ def create_tool_context(
     Returns:
         ToolContext 实例
     """
+    if not instance_id:
+        import os
+        instance_id = os.environ.get("AGENT_INSTANCE", "")
     return ToolContext(
         session_id=session_id,
         conversation_id=conversation_id,
         user_id=user_id,
+        instance_id=instance_id,
         memory=memory,
         event_manager=event_manager,
         apis_config=apis_config,
