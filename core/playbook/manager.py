@@ -11,8 +11,8 @@ V10.1 重构：独立向量库，Playbook 向量与用户记忆物理隔离
 - 策略检索和匹配（两层：task_type 预筛 + 独立向量库语义搜索）
 
 向量存储架构：
-- Playbook 使用独立的 playbook_vectors.db（SqliteVecVectorStore）
-- 与用户记忆 mem0_vectors.db 物理隔离，KNN 搜索不受用户记忆数量影响
+- Playbook 使用共享 zenflux.db 中的 playbook_vec_{instance} 表（SqliteVecVectorStore）
+- 通过 collection 名隔离实例，KNN 搜索不受用户记忆数量影响
 - Embedding 复用全局 GGUF 单例（GGUFEmbeddingProvider），零额外内存
 """
 
@@ -26,7 +26,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from logger import get_logger
-from utils.app_paths import get_instance_playbooks_dir, get_instance_playbook_vectors_path
+from utils.app_paths import get_instance_playbooks_dir
 
 logger = get_logger(__name__)
 
@@ -234,7 +234,7 @@ class PlaybookManager:
         # 延迟初始化的存储后端（JSON 文件）
         self._storage = None
 
-        # 延迟初始化的向量存储（独立 playbook_vectors.db）
+        # 延迟初始化的向量存储（共享 zenflux.db，playbook_vec_{instance} 表）
         self._vector_store = None
         self._embedding_model = None
 
@@ -280,23 +280,25 @@ class PlaybookManager:
         """
         获取 Playbook 专用的向量存储（延迟初始化）。
 
-        使用独立的 playbook_vectors.db，与用户记忆 mem0_vectors.db 物理隔离。
-        sqlite-vec KNN 查询不支持 WHERE 预过滤，共享表会导致 playbook
-        向量被大量用户记忆挤出结果集。独立表确保 KNN 100% 命中 playbook。
+        使用共享 zenflux.db，通过 playbook_vec_{instance} 表名隔离实例。
+        sqlite-vec KNN 查询不支持 WHERE 预过滤，独立 collection 确保
+        各实例 playbook 向量互不干扰。
         """
         if self._vector_store is None:
+            from core.memory.mem0.config import Mem0Config
             from core.memory.mem0.sqlite_vec_store import SqliteVecVectorStore
 
             embedding = self._get_embedding_model()
             dims = embedding.config.embedding_dims if hasattr(embedding, "config") else 1024
 
-            db_path = str(get_instance_playbook_vectors_path(self._instance_name))
+            db_path = Mem0Config.get_shared_db_path()
+            collection_name = f"playbook_vec_{self._instance_name}"
             self._vector_store = SqliteVecVectorStore(
-                collection_name="playbook_vectors",
+                collection_name=collection_name,
                 embedding_model_dims=dims,
                 db_path=db_path,
             )
-            logger.info(f"✅ Playbook 独立向量库初始化: {db_path} (dims={dims})")
+            logger.info(f"✅ Playbook 向量库初始化: {db_path} collection={collection_name} (dims={dims})")
         return self._vector_store
 
     def _get_embedding_model(self):
