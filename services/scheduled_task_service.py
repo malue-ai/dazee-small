@@ -35,11 +35,13 @@ async def list_tasks(
     from infra.local_store.crud.scheduled_task import count_user_tasks, list_user_tasks
 
     workspace = await get_workspace(_get_instance_name())
+    instance_name = _get_instance_name()
     offset = (page - 1) * page_size
 
     async with workspace.session() as session:
         tasks = await list_user_tasks(
-            session, user_id, status=status, limit=page_size, offset=offset
+            session, user_id, status=status, limit=page_size, offset=offset,
+            instance_id=instance_name,
         )
         total = await count_user_tasks(session, user_id, status=status)
 
@@ -196,6 +198,7 @@ def _task_to_dict(task) -> Dict:
     return {
         "id": task.id,
         "user_id": task.user_id,
+        "instance_id": task.instance_id,
         "title": task.title,
         "description": task.description,
         "trigger_type": task.trigger_type,
