@@ -910,13 +910,134 @@ capabilities:
     required: [action]
 
 
+# ========== 网络搜索 ==========
 
+- name: web_search
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  state_category: searching
+  implementation:
+    module: tools.web_search
+    class: WebSearchTool
+  capabilities:
+    - web_search
+    - news_search
+    - information_retrieval
+  priority: 70
+  cost:
+    time: fast
+    money: variable
+  constraints:
+    requires_api: false
+    requires_network: true
+  metadata:
+    description: |
+      搜索互联网获取最新信息、新闻、资料。
+      自动选择最佳搜索源（Tavily/Exa/Jina），无需指定。
+      用户说"搜一下""查查""最新消息"时使用此工具。
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 搜索查询
+      max_results:
+        type: integer
+        description: 最大结果数（默认 5）
+      search_depth:
+        type: string
+        description: basic（快速）或 advanced（深度）
+      time_range:
+        type: string
+        description: 时间范围 day/week/month/any
+    required: [query]
 
+# ========== 云端 Agent 委托 ==========
 
+- name: cloud_agent
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  state_category: executing
+  implementation:
+    module: tools.cloud_agent
+    class: CloudAgentTool
+  capabilities:
+    - cloud_delegation
+    - sandbox_execution
+    - persistent_task
+    - deep_research
+  priority: 30
+  cost:
+    time: variable
+    money: free
+  constraints:
+    requires_api: false
+    requires_network: true
+  metadata:
+    description: |
+      将任务委托给云端 Agent 执行。云端拥有隔离代码沙箱、项目构建发布到公网、24/7 持续运行等本地不具备的能力。
+      当用户明确要求调用云端智能体，或任务需要沙箱执行/持续运行/长时间深度调研时使用。
+      参数只需传 task（任务描述），不需要 url/method/api_name 等 HTTP 参数。
+  input_schema:
+    type: object
+    properties:
+      task:
+        type: string
+        description: 委托给云端的任务描述
+      context:
+        type: string
+        description: 相关上下文信息（可选）
+    required:
+      - task
 
+# ========== 复合网络搜索 ==========
 
-
-
+- name: web_search
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  state_category: executing
+  implementation:
+    module: tools.web_search
+    class: WebSearchTool
+  capabilities:
+    - web_search
+    - news_search
+    - information_retrieval
+  priority: 20
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_network: true
+  metadata:
+    description: |
+      本地搜索互联网获取最新信息（Tavily/Exa，需本地配置 API Key）。
+      适合快速搜索、简单查询。用户说「搜一下」「查查」「最新消息」时使用。
+      如果本地未配置搜索 Key 或需要深度调研，应改用 cloud_agent 工具。
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 搜索查询
+      max_results:
+        type: integer
+        description: 最大结果数（默认 5）
+      search_depth:
+        type: string
+        description: basic（快速）或 advanced（深度）
+      time_range:
+        type: string
+        description: 时间范围 day/week/month/any
+    required:
+      - query
 
 # ========== 内置代码执行 ==========
 

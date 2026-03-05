@@ -184,6 +184,14 @@ class APICallingTool(BaseTool):
         api_name = params.get("api_name")
         parameters = params.get("parameters")
 
+        # LLM 有时将 parameters 序列化为 JSON 字符串而非 dict
+        if isinstance(parameters, str):
+            try:
+                import json as _json
+                parameters = _json.loads(parameters)
+            except (ValueError, TypeError):
+                parameters = {"raw_input": parameters}
+
         if not api_name:
             return {"error": "必须提供 api_name 参数"}
 
