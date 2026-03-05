@@ -1,14 +1,11 @@
 ---
 name: cloud-agent
 description: 将任务委托给云端 Agent 执行。云端拥有隔离代码沙箱、项目构建发布到公网、24/7 持续运行等本地不具备的能力。适用于需要沙箱执行、应用发布、不受开机限制的长任务。支持带文件委托。
-quickstart: |
-  cloud_agent(task="你要委托给云端的任务描述")
 metadata:
   xiaodazi:
     dependency_level: cloud_api
     os: [common]
     backend_type: tool
-    tool_name: cloud_agent
     user_facing: true
 ---
 
