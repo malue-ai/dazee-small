@@ -195,6 +195,9 @@ class LocalScheduledTask(LocalBase):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="default", index=True
+    )
 
     # 任务基本信息
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="未命名任务")
@@ -242,6 +245,7 @@ class LocalScheduledTask(LocalBase):
     __table_args__ = (
         Index("idx_scheduled_task_user_status", "user_id", "status"),
         Index("idx_scheduled_task_next_run", "next_run_at", "status"),
+        Index("idx_scheduled_task_instance", "instance_id", "status"),
     )
 
     @property

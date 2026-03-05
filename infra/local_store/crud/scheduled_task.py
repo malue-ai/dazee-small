@@ -39,6 +39,7 @@ async def create_scheduled_task(
     description: Optional[str] = None,
     conversation_id: Optional[str] = None,
     task_id: Optional[str] = None,
+    instance_id: Optional[str] = None,
 ) -> LocalScheduledTask:
     """
     创建定时任务
@@ -55,11 +56,14 @@ async def create_scheduled_task(
         description: 任务描述
         conversation_id: 关联的会话 ID
         task_id: 自定义任务 ID（可选）
+        instance_id: 实例 ID（用于多实例隔离）
 
     Returns:
         创建的任务对象
     """
+    import os
     task_id = task_id or f"task_{uuid.uuid4().hex[:12]}"
+    effective_instance_id = instance_id or os.getenv("AGENT_INSTANCE", "default")
 
     # 计算下次执行时间
     next_run_at = _calculate_next_run(trigger_type, run_at, cron_expr, interval_seconds)
@@ -67,6 +71,7 @@ async def create_scheduled_task(
     task = LocalScheduledTask(
         id=task_id,
         user_id=user_id,
+        instance_id=effective_instance_id,
         title=title,
         description=description,
         trigger_type=trigger_type,
@@ -145,6 +150,7 @@ async def list_user_tasks(
     status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    instance_id: Optional[str] = None,
 ) -> List[LocalScheduledTask]:
     """
     获取用户的任务列表
@@ -155,12 +161,15 @@ async def list_user_tasks(
         status: 状态过滤（可选）
         limit: 返回数量
         offset: 偏移量
+        instance_id: 实例 ID 过滤（可选）
 
     Returns:
         任务列表
     """
     query = select(LocalScheduledTask).where(LocalScheduledTask.user_id == user_id)
 
+    if instance_id:
+        query = query.where(LocalScheduledTask.instance_id == instance_id)
     if status:
         query = query.where(LocalScheduledTask.status == status)
 
@@ -171,7 +180,10 @@ async def list_user_tasks(
 
 
 async def get_pending_tasks(
-    session: AsyncSession, before: Optional[datetime] = None, limit: int = 100
+    session: AsyncSession,
+    before: Optional[datetime] = None,
+    limit: int = 100,
+    instance_id: Optional[str] = None,
 ) -> List[LocalScheduledTask]:
     """
     获取待执行的任务（用于调度器轮询）
@@ -180,21 +192,24 @@ async def get_pending_tasks(
         session: 数据库会话
         before: 截止时间（默认当前时间）
         limit: 返回数量
+        instance_id: 实例 ID 过滤（可选）
 
     Returns:
         待执行的任务列表
     """
     before = before or datetime.now()
 
+    conditions = [
+        LocalScheduledTask.status == "active",
+        LocalScheduledTask.next_run_at <= before,
+        LocalScheduledTask.next_run_at.isnot(None),
+    ]
+    if instance_id:
+        conditions.append(LocalScheduledTask.instance_id == instance_id)
+
     result = await session.execute(
         select(LocalScheduledTask)
-        .where(
-            and_(
-                LocalScheduledTask.status == "active",
-                LocalScheduledTask.next_run_at <= before,
-                LocalScheduledTask.next_run_at.isnot(None),
-            )
-        )
+        .where(and_(*conditions))
         .order_by(LocalScheduledTask.next_run_at)
         .limit(limit)
     )

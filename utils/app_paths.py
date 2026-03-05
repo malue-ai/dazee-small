@@ -214,8 +214,15 @@ def get_instance_data_dir(instance_name: str) -> Path:
     return d
 
 
+def get_shared_db_dir() -> Path:
+    """Shared database directory for the global engine (zenflux.db)."""
+    d = get_user_data_dir() / "data" / "db"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_instance_db_dir(instance_name: str) -> Path:
-    """Instance-scoped database directory (instance.db, knowledge FTS5)."""
+    """Instance-scoped database directory (legacy, used by migration only)."""
     d = get_instance_data_dir(instance_name) / "db"
     d.mkdir(parents=True, exist_ok=True)
     return d

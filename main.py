@@ -73,6 +73,7 @@ from routers import (
 from infra.resilience.config import apply_resilience_config
 from core.tool.registry import get_capability_registry
 from infra.local_store import close_all_workspaces
+from infra.local_store.engine import close_local_engine
 
 print("[xiaodazi] All modules imported.", flush=True)
 
@@ -108,11 +109,17 @@ async def _init_resilience_config() -> None:
 
 
 async def _init_local_store() -> None:
-    """初始化本地存储（SQLite）"""
+    """初始化本地存储（SQLite 共享引擎 + 旧实例数据迁移）"""
     print("💾 初始化本地存储...")
     try:
-        from infra.local_store import get_workspace
-        print("✅ 本地存储就绪（懒初始化模式）")
+        from infra.local_store.engine import get_local_engine
+        await get_local_engine()
+
+        from scripts.migrate_to_shared_db import auto_migrate
+        if auto_migrate():
+            print("📦 已完成旧实例数据迁移")
+
+        print("✅ 本地存储就绪（共享引擎模式）")
     except Exception as e:
         print(f"❌ 本地存储初始化失败: {e}", flush=True)
 
@@ -435,6 +442,7 @@ async def lifespan(app: FastAPI):
     await _stop_user_task_scheduler(user_task_scheduler)  # 停止用户任务调度器
     await _stop_scheduler(scheduler)
     await close_all_workspaces()
+    await close_local_engine()
     
     print("👋 xiaodazi API 已关闭")
 

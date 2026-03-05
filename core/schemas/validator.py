@@ -545,7 +545,7 @@ class AgentSchema(BaseModel):
             "text-",  # OpenAI embedding 等（少数场景会经此校验）
         ]
         if not any(v.startswith(p) for p in valid_prefixes):
-            logger.warning("未知模型，可能不受支持", extra={"model": v})
+            logger.warning(f"未知模型 '{v}'，可能不受支持", extra={"model": v})
         return v
 
     # ============================================================
