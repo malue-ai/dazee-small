@@ -257,7 +257,14 @@ def get_instance_playbooks_dir(instance_name: str) -> Path:
 
 
 def get_instance_playbook_vectors_path(instance_name: str) -> Path:
-    """Instance-scoped playbook vector DB path (independent from user memory vectors)."""
+    """DEPRECATED: Playbook vectors now stored in zenflux.db."""
+    import warnings
+    warnings.warn(
+        "get_instance_playbook_vectors_path is deprecated. "
+        "Playbook vectors are now in zenflux.db.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return get_instance_store_dir(instance_name) / "playbook_vectors.db"
 
 

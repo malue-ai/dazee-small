@@ -109,7 +109,7 @@ async def _init_resilience_config() -> None:
 
 
 async def _init_local_store() -> None:
-    """初始化本地存储（SQLite 共享引擎 + 旧实例数据迁移）"""
+    """初始化本地存储（SQLite 统一引擎 + 数据迁移）"""
     print("💾 初始化本地存储...")
     try:
         from infra.local_store.engine import get_local_engine
@@ -119,7 +119,11 @@ async def _init_local_store() -> None:
         if auto_migrate():
             print("📦 已完成旧实例数据迁移")
 
-        print("✅ 本地存储就绪（共享引擎模式）")
+        from scripts.migrate_to_unified_db import auto_migrate_to_unified_db
+        if auto_migrate_to_unified_db():
+            print("📦 已完成数据库统一迁移")
+
+        print("✅ 本地存储就绪（统一引擎模式）")
     except Exception as e:
         print(f"❌ 本地存储初始化失败: {e}", flush=True)
 
