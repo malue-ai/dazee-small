@@ -34,6 +34,7 @@ numpy>=1.26.0
 
 # JSON 解析（宽松模式）
 json5>=0.9.0
+json-repair>=0.44.0
 
 
 # Mem0 记忆系统

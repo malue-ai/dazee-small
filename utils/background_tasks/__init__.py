@@ -26,17 +26,11 @@
 2. 使用 @background_task("task_name") 装饰器标记任务函数
 """
 
-# 再导入 tasks（触发自动注册）
-from . import tasks
-
-# 最后导入 service 和 context
 from .context import (
     Mem0BatchUpdateResult,
     Mem0UpdateResult,
     TaskContext,
 )
-
-# 先导入 registry（装饰器）
 from .registry import (
     background_task,
     get_registered_task_names,
@@ -50,12 +44,6 @@ from .scheduler import (
 from .service import (
     BackgroundTaskService,
     get_background_task_service,
-)
-
-# 导出任务函数（供外部直接调用）
-from .tasks.mem0_update import (
-    batch_update_all_memories,
-    update_user_memories,
 )
 
 __all__ = [
@@ -74,7 +62,4 @@ __all__ = [
     "TaskScheduler",
     "get_scheduler",
     "ScheduledTaskConfig",
-    # Task Functions（直接调用）
-    "update_user_memories",
-    "batch_update_all_memories",
 ]

@@ -46,7 +46,9 @@ def background_task(name: str):
 
 
 def get_task_registry() -> Dict[str, Callable]:
-    """获取任务注册表"""
+    """获取任务注册表（首次调用时自动导入所有任务模块）"""
+    from .tasks import ensure_tasks_imported
+    ensure_tasks_imported()
     return _TASK_REGISTRY
 
 
