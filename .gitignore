@@ -128,5 +128,8 @@ keys/
 *.AppImage
 *.deb
 
+# 实例缓存（运行时生成，不应提交）
+instances/*/prompt_results/
+
 # Test
 test/
