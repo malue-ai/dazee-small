@@ -146,8 +146,8 @@ class EmbedderConfig:
                     self.model = candidate["model"]
                 self.dims = candidate["dims"]
                 self.base_url = _resolve_base_url(candidate["env_key"])
-                _logger.info(
-                    f"Embedding 自动检测: {candidate['name']} "
+                _logger.debug(
+                    f"Embedding 云端候选: {candidate['name']} "
                     f"(model={self.model}, dims={self.dims}, "
                     f"base_url={self.base_url or 'default'})"
                 )
@@ -341,11 +341,27 @@ class Mem0Config:
             self.embedding_model_dims = self.embedder.dims
 
     @property
+    def embedding_tag(self) -> str:
+        """Embedding 模型标识，用于隔离不同模型的向量库。"""
+        model = (self.embedder.model or "unknown").lower()
+        model = model.replace("/", "_").replace(".", "_").replace(" ", "_")
+        return model
+
+    @property
     def db_path(self) -> str:
-        """Instance-scoped vector DB path."""
+        """Instance-scoped, model-scoped vector DB path.
+
+        不同 embedding 模型的向量空间不兼容，各自独立存储。
+        例如:
+          - mem0_vectors_bge-m3-q4_k_m.db  (本地 GGUF, 1024 维)
+          - mem0_vectors_text-embedding-3-small.db  (OpenAI, 1536 维)
+        """
         from utils.app_paths import get_instance_store_dir
 
-        return str(get_instance_store_dir(self.instance_name) / "mem0_vectors.db")
+        return str(
+            get_instance_store_dir(self.instance_name)
+            / f"mem0_vectors_{self.embedding_tag}.db"
+        )
 
     @property
     def history_db_name(self) -> str:

@@ -17,6 +17,7 @@
 # 标准库
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -1396,6 +1397,7 @@ class ChatService:
             user_message=user_text,
             assistant_response=assistant_text,
             is_new_conversation=is_new_conversation,
+            instance_name=os.getenv("AGENT_INSTANCE", ""),
             event_manager=events,
             conversation_service=self.conversation_service,
             metadata={},
@@ -1785,6 +1787,11 @@ class ChatService:
             # V12: 意图澄清等待（执行器 yield intent_clarify_request 后 await 此函数）
             agent._wait_intent_clarify_async = (
                 lambda s=session_id: self.session_service.wait_intent_clarify(s)
+            )
+
+            # V12.2: 同工具循环确认等待（执行器 yield tool_loop_confirm 后 await 此函数）
+            agent._wait_tool_loop_confirm_async = (
+                lambda s=session_id: self.session_service.wait_tool_loop_confirm(s)
             )
 
             _assistant_text_for_tasks = ""

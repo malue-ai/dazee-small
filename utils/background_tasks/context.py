@@ -26,10 +26,10 @@ class TaskContext:
     user_message: str  # 用户消息文本
     assistant_response: str = ""  # 助手回复文本
     is_new_conversation: bool = False
+    instance_name: str = ""  # 实例名称（记忆隔离用）
     event_manager: Optional[Any] = None
     conversation_service: Optional[Any] = None
 
-    # 🆕 扩展字段（未来可能需要）
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

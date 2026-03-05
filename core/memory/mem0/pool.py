@@ -100,11 +100,30 @@ class Mem0MemoryPool:
         return self._memory
 
     @staticmethod
+    def _read_semantic_search_mode() -> str:
+        """读取用户在前端设置的语义搜索模式。"""
+        from pathlib import Path
+
+        import yaml
+
+        config_path = Path(__file__).resolve().parents[3] / "config" / "semantic_search.yaml"
+        if not config_path.is_file():
+            return "disabled"
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            mode = cfg.get("semantic_search", {}).get("mode", "disabled")
+            logger.info(f"[Mem0Pool] 语义搜索模式: {mode}")
+            return mode
+        except Exception as e:
+            logger.warning(f"[Mem0Pool] 读取 semantic_search.yaml 失败: {e}")
+            return "disabled"
+
+    @staticmethod
     def _create_local_embedder():
         """
-        Create a Mem0-compatible adapter wrapping our local GGUF embedding provider.
-
-        Returns the adapter if GGUF model is available, None otherwise.
+        创建本地 GGUF embedder 适配器。
+        可用则返回适配器，不可用则返回 None（与云端二选一，非 fallback）。
         """
         try:
             from core.knowledge.embeddings import (
@@ -116,17 +135,17 @@ class Mem0MemoryPool:
             model_filename = os.getenv("GGUF_MODEL", DEFAULT_GGUF_FILE)
             model_path = get_models_dir() / model_filename
             if not model_path.exists():
-                logger.info("[Mem0Pool] 本地 GGUF 模型不存在，回退到云端 embedder")
+                logger.info("[Mem0Pool] 本地 GGUF 模型不存在")
                 return None
 
             provider = GGUFEmbeddingProvider()
             logger.info("[Mem0Pool] 使用本地 GGUF embedding (BGE-M3, 1024 维)")
             return _GGUFEmbedderAdapter(provider)
         except ImportError:
-            logger.debug("[Mem0Pool] llama-cpp-python 未安装，回退到云端 embedder")
+            logger.warning("[Mem0Pool] llama-cpp-python 未安装")
             return None
         except Exception as e:
-            logger.warning(f"[Mem0Pool] 本地 embedder 初始化失败: {e}，回退到云端")
+            logger.warning(f"[Mem0Pool] 本地 embedder 初始化失败: {e}")
             return None
 
     def _create_memory(self) -> Any:
@@ -154,35 +173,78 @@ class Mem0MemoryPool:
 
             collection_name = self.config.collection_name
 
-            # 1. 创建 Embedder（优先使用本地 GGUF，离线可用）
-            #    必须在创建向量存储之前，以确定实际的向量维度
-            embedding_config = self.config.embedder.to_dict()
-            embedding_model = self._create_local_embedder()
+            # 1. 选择 Embedder — 严格按用户在前端选择的 mode 决定
+            #
+            # config/semantic_search.yaml → mode: disabled | local | cloud
+            # 不同 embedding 模型的向量空间不兼容（维度、语义空间均不同），
+            # 每个模型有独立的向量库文件，切换模型时旧库原样保留。
+            from utils.app_paths import get_instance_store_dir
+            mode = self._read_semantic_search_mode()
+            store_dir = get_instance_store_dir(self.config.instance_name)
 
-            if embedding_model is not None:
-                # 本地 GGUF embedder 可用 — 使用其实际维度
-                actual_dims = embedding_model.provider.dimensions
-                if actual_dims != self.config.embedding_model_dims:
-                    logger.info(
-                        f"[Mem0Pool] 向量维度调整: "
-                        f"config={self.config.embedding_model_dims} → "
-                        f"local_gguf={actual_dims}"
+            if mode == "disabled":
+                raise RuntimeError(
+                    "[Mem0Pool] 用户已关闭语义搜索（mode=disabled），"
+                    "Mem0 向量记忆不启用"
+                )
+
+            if mode == "local":
+                embedding_model = self._create_local_embedder()
+                if embedding_model is None:
+                    raise RuntimeError(
+                        "[Mem0Pool] 用户选择了本地模型（mode=local），但本地 "
+                        "GGUF embedder 不可用。请确保 llama-cpp-python 已安装且 "
+                        "GGUF 模型文件存在。"
                     )
-            else:
-                # Fallback: 使用 Mem0 原生 EmbedderFactory（如 OpenAI）
+                actual_dims = embedding_model.provider.dimensions
+                gguf_model = os.getenv("GGUF_MODEL", "bge-m3-q4_k_m")
+                gguf_tag = gguf_model.replace(".gguf", "").lower()
+                db_path = str(store_dir / f"mem0_vectors_{gguf_tag}.db")
+
+                # 一次性迁移：旧的 mem0_vectors.db → 新的模型隔离路径
+                legacy_db = store_dir / "mem0_vectors.db"
+                if legacy_db.is_file() and not os.path.isfile(db_path):
+                    import shutil
+                    shutil.move(str(legacy_db), db_path)
+                    for suffix in ("-shm", "-wal"):
+                        wal_file = store_dir / f"mem0_vectors.db{suffix}"
+                        if wal_file.is_file():
+                            shutil.move(
+                                str(wal_file),
+                                str(store_dir / f"mem0_vectors_{gguf_tag}.db{suffix}"),
+                            )
+                    logger.info(
+                        f"[Mem0Pool] 向量库迁移: mem0_vectors.db → "
+                        f"mem0_vectors_{gguf_tag}.db"
+                    )
+
+                logger.info(
+                    f"[Mem0Pool] Embedding: 本地 GGUF "
+                    f"(dims={actual_dims}, db={db_path})"
+                )
+
+            else:  # mode == "cloud"
+                embedding_config = self.config.embedder.to_dict()
                 actual_dims = self.config.embedding_model_dims
+                cloud_tag = self.config.embedding_tag
+                db_path = str(store_dir / f"mem0_vectors_{cloud_tag}.db")
                 embedding_model = EmbedderFactory.create(
                     self.config.embedder.provider,
                     embedding_config,
                     {"collection_name": collection_name,
                      "embedding_model_dims": actual_dims},
                 )
+                logger.info(
+                    f"[Mem0Pool] Embedding: 云端 {self.config.embedder.provider} "
+                    f"(model={self.config.embedder.model}, dims={actual_dims}, "
+                    f"db={db_path})"
+                )
 
-            # 2. 创建 sqlite-vec 向量存储 — 使用实际 embedder 的维度
+            # 2. 创建 sqlite-vec 向量存储 — 每个 embedding 模型独立库
             vector_store = SqliteVecVectorStore(
                 collection_name=collection_name,
                 embedding_model_dims=actual_dims,
-                db_path=self.config.db_path,
+                db_path=db_path,
             )
 
             # 3. 创建 LLM
@@ -218,7 +280,7 @@ class Mem0MemoryPool:
                 ),
                 embedder=EmbedderConfig(
                     provider=self.config.embedder.provider,
-                    config=embedding_config,
+                    config=self.config.embedder.to_dict(),
                 ),
                 llm=LlmConfig(
                     provider=self.config.llm.provider,
