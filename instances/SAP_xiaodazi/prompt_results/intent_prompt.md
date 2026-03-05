@@ -5,229 +5,224 @@
 ## 输出格式
 
 ```json
-{{
+{
   "complexity": "simple|medium|complex",
   "skip_memory": true|false,
   "is_follow_up": true|false,
   "wants_to_stop": true|false,
-  "wants_rollback": true|false,
-  "relevant_skill_groups": ["group1", "group2"],
-  "required_tools": []
-}}
+  "relevant_skill_groups": ["group1", "group2"]
+}
 ```
-
-**所有字段必填**，不要省略。
-
----
 
 ## complexity（复杂度）
 
-- **simple**: 单步骤，可直接回答或单次工具调用
-  - 例: 天气查询、简单翻译、打开一个应用、概念问答、简单计算、设置定时任务/提醒
+- **simple**：单步骤操作，无需跨阶段协调，直接调用单一技能或返回预设信息。  
+  示例：  
+  - “查看进度”  
+  - “跳过代码生成”  
+  - “重新生成 Section 4.2”
 
-- **medium**: 2-4 步骤，需少量规划或多次工具调用
-  - 例: 写一篇文章、分析一个 Excel、搜索并总结、整理指定文件夹
+- **medium**：涉及 2–4 个步骤，需在已有上下文基础上执行局部流程（如重生成章节+重组装+重合规检查），或确认少量参数后启动子流程。  
+  示例：  
+  - “修改主要终点的统计方法”（需编辑章节 → 重跑 Skill-5/6）  
+  - “只生成主要终点”（过滤章节生成 + 组装 + 合规）  
+  - “继续”（检测断点 → 恢复部分流程）
 
-- **complex**: 5+ 步骤，需完整规划，可能涉及多工具协作或 UI 操作链
-  - 例: 调研竞品写对比报告、在应用中完成多步操作流程、整理文件夹并生成分类清单
-
----
+- **complex**：触发完整端到端 DAG 流程（6 阶段），或从零开始解析 Protocol + 模板并生成全套交付物。  
+  示例：  
+  - “生成 SAP”  
+  - “开始”  
+  - 上传 Protocol 和模板后说“请帮我完成整个 SAP”
 
 ## skip_memory（跳过记忆检索）
 
-- **true**: 客观事实查询，无需个性化（如天气、翻译、计算）
-- **false**: 可能需要用户偏好/历史（如写作风格、常用路径、称呼）
-
-**默认: false**（不确定时检索记忆，安全保守）
-
----
+设为 `true` 当且仅当请求完全不依赖历史会话或 scratchpad 状态（如首次上传文件、明确要求“重新开始”）。其他情况（包括“继续”“查看进度”“修改内容”）均需访问 scratchpad，应设为 `false`。
 
 ## is_follow_up（是否为追问）
 
-- **true**: 用户在已有对话基础上追问、补充、修改，依赖前序上下文
-  - 例: "继续"、"然后呢"、"把第二段改短一点"、"用表格展示"
-- **false**: 全新请求，不依赖前序对话
-
-**默认: false**
-
----
+设为 `true` 当用户请求明显依赖前一轮 AI 输出（如确认参数、回应进度报告、对占位符或高亮内容提出修改）。  
+示例：  
+- “开始”（在收到参数确认消息后）→ `true`  
+- “使用 Phase III”（在 AI 询问试验阶段后）→ `true`  
+- “好的，继续” → `true`
 
 ## wants_to_stop（用户是否希望停止/取消）
 
-- **true**: 用户明确表示停止、取消、不做了
-- **false**: 正常任务请求或追问
+设为 `true` 当用户明确表达终止、取消、放弃当前任务（如“取消”“不用了”“停止生成”）。模糊表达（如“等等”“稍后”）不视为停止。
 
-**默认: false**
+## relevant_skill_groups（需要哪些技能分组）
 
----
+从 Agent 能力推导出以下技能分组：
 
-## wants_rollback（用户是否要求恢复/撤销）
-
-- **true**: 用户**当前这条消息**明确要求恢复、撤销、回退之前的文件操作
-  - 例: "帮我恢复一下"、"撤销刚才的修改"、"把文件还原回去"
-- **false**: 其他一切情况，包括：
-  - 致谢/确认: "OK 感谢"、"好的"、"收到"、"谢谢"
-  - 追问: "还有别的吗"、"继续"
-  - 新请求: 任何不涉及恢复/撤销的新任务
-  - 已完成的回滚后续: 用户说"好的"确认回滚结果
-
-**关键判断**：只看**当前消息**是否包含恢复/撤销的动作请求。即使上文讨论过回滚，如果当前消息只是致谢或确认，也必须为 false。
-
-**默认: false**
-
----
-
-## relevant_skill_groups（需要哪些技能分组）⚠️ 最重要
-
-**核心原则：宁多勿漏。漏选 = 该能力完全不可用；多选仅多加载少量提示词，代价极低。**
-
-### 决策两步法
-1. **拆动作**：这个请求包含几个动作？（如 "搜论文写综述" = 搜索 + 写作 = 2 个动作）
-2. **逐个匹配**：每个动作独立匹配分组，**全部选上**，不要合并
-
-最多选 **6** 个分组（0-6），纯聊天/问答填 []。
-
-### 可选分组
-{skill_groups_description}
-
-### ⚠️ 常见需要多选的信号
-- 提到**写/总结/报告/润色/改写** → 加上 writing
-- 提到**文件/PDF/Word/格式转换/归档** → 加上 file_operation
-- 提到**搜索/调研/论文/网页/爬取** → 加上 research
-- 提到**数据/分析/Excel/表格/图表** → 加上 data_analysis
-- 提到**应用操作/打开App/截图/UI自动化** → 加上 app_automation
-- 提到**邮件/日历/笔记/提醒/消息/待办** → 加上 productivity
-- 提到**翻译/多语言** → 加上 translation
-- 提到**视频/音频/语音/TTS/转录** → 加上 media
-- **纯聊天/闲聊/问答/计算/打招呼** → []（不需要任何 skill）
-
----
-
-## required_tools（需要的动态工具）
-
-根据用户请求判断是否需要以下动态工具（可多选，通常为空）：
-
-- **browser**: 需要打开网页、浏览器自动化、网页操作
-  - 例: "帮我在浏览器里打开某个网站并填写表单"
-- **audio_processing**: 需要语音转文字、文字转语音、音频处理
-  - 例: "把这段录音转成文字"、"用语音读出来"
-- **code_execution**: 需要在安全沙箱中执行代码
-  - 例: "运行这段 Python 代码"、"帮我算一下这组数据"
-
-**大多数请求不需要动态工具**，填 []。
-核心工具（文件操作、搜索、截图、命令执行等）始终可用，不需要在此列出。
-
----
+- **document_parsing**：Protocol/SAP 模板解析、实体抽取、分段读取（对应 Skill-1 & Skill-2）  
+- **sap_authoring**：SAP 章节内容生成、Estimand 框架写作、占位符处理（Skill-3）  
+- **code_generation**：SAS/R 统计代码生成与映射（Skill-4）  
+- **document_assembly**：Markdown → Word/PDF 组装、目录更新（Skill-5）  
+- **compliance_checking**：CDISC 合规性审核、一致性检查（Skill-6）  
+- **workflow_control**：进度查询、断点恢复、流程跳过/重启（跨阶段控制逻辑）
 
 ## Few-Shot 示例
 
-<!-- 基础场景：覆盖各布尔字段组合 -->
-
 <example>
-<query>Python 是什么？</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
+<input>生成 SAP</input>
+<output>
+{
+  "complexity": "complex",
+  "skip_memory": true,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["document_parsing", "sap_authoring", "code_generation", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>把这段话翻译成英文</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["translation"], "required_tools": []}}</output>
+<input>开始</input>
+<output>
+{
+  "complexity": "complex",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["document_parsing", "sap_authoring", "code_generation", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>把第二段改短一点</query>
-<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"], "required_tools": []}}</output>
+<input>查看进度</input>
+<output>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["workflow_control"]
+}
+</output>
 </example>
 
 <example>
-<query>算了不做了</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": true, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
+<input>跳过代码生成</input>
+<output>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["workflow_control"]
+}
+</output>
 </example>
 
 <example>
-<query>帮我恢复一下刚才删的文件</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": true, "relevant_skill_groups": ["file_operation"], "required_tools": []}}</output>
+<input>只生成主要终点</input>
+<output>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["sap_authoring", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>OK 感谢</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": [], "required_tools": []}}</output>
+<input>重新生成 Section 5.1</input>
+<output>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["sap_authoring", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>截个图给我看看桌面</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"], "required_tools": []}}</output>
+<input>继续</input>
+<output>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["workflow_control", "sap_authoring", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>5分钟后提醒我喝水</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["productivity"], "required_tools": []}}</output>
+<input>修改样本量计算部分，使用 Farrington-Manning 方法</input>
+<output>
+{
+  "complexity": "medium",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["sap_authoring", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>帮我写一篇关于咖啡文化的文章</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"], "required_tools": []}}</output>
+<input>不用做了，取消吧</input>
+<output>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": false,
+  "wants_to_stop": true,
+  "relevant_skill_groups": ["workflow_control"]
+}
+</output>
 </example>
 
 <example>
-<query>帮我整理下载文件夹，按类型分类</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"], "required_tools": []}}</output>
-</example>
-
-<!-- 动态工具：仅需浏览器/语音/沙箱时才填 -->
-
-<example>
-<query>帮我在浏览器里登录公司内网，点击考勤页面</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"], "required_tools": ["browser"]}}</output>
-</example>
-
-<example>
-<query>把这段会议录音转成文字摘要</query>
-<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media", "writing"], "required_tools": ["audio_processing"]}}</output>
+<input>Phase II</input>
+<output>
+{
+  "complexity": "simple",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["workflow_control"]
+}
+</output>
 </example>
 
 <example>
-<query>运行这段 Python 代码看看输出什么</query>
-<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["code"], "required_tools": ["code_execution"]}}</output>
-</example>
-
-<!-- 多动作 → 必须多选 ⚠️ -->
-
-<example>
-<query>分析这个 Excel 数据，找出销售趋势，写一段总结</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["data_analysis", "writing"], "required_tools": []}}</output>
-</example>
-
-<example>
-<query>把这张图片上的英文 OCR 出来翻译成中文</query>
-<output>{{"complexity": "medium", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation", "translation"], "required_tools": []}}</output>
+<input>重新开始</input>
+<output>
+{
+  "complexity": "complex",
+  "skip_memory": true,
+  "is_follow_up": false,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["document_parsing", "sap_authoring", "code_generation", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
 
 <example>
-<query>读一下这个 PDF 合同，提取关键条款，整理成 Word 文档</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "file_operation", "writing"], "required_tools": []}}</output>
+<input>好的，用默认值开始</input>
+<output>
+{
+  "complexity": "complex",
+  "skip_memory": false,
+  "is_follow_up": true,
+  "wants_to_stop": false,
+  "relevant_skill_groups": ["document_parsing", "sap_authoring", "code_generation", "document_assembly", "compliance_checking"]
+}
+</output>
 </example>
-
-<example>
-<query>帮我分析这份会议记录，提取行动项，发邮件给参会人</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["meeting", "productivity"], "required_tools": []}}</output>
-</example>
-
-<example>
-<query>帮我把这个视频转成文字，翻译成英文，写一篇博客发布</query>
-<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["media", "translation", "writing", "content_creation"], "required_tools": ["audio_processing"]}}</output>
-</example>
-
----
 
 ## 重要说明
 
-- 只输出 JSON，不要解释
-- 不确定 skip_memory 时选 false（保守）
-- 不确定 is_follow_up 时选 false（保守）
-- 不确定 wants_rollback 时选 false（保守，只有明确恢复/撤销请求才为 true）
-- **relevant_skill_groups 经常需要多选**（上面示例中近半数是多选）。多选是为了保证召回率：漏选一个分组 = 该能力完全不可用，而多选仅多加载少量提示词，代价极低
-- 拆分用户请求中的每个动作，分别匹配分组
-- **不确定某个分组是否需要时 → 选上**（多选无害，漏选致命）
-- **required_tools 大多数情况为空 []**。只有明确需要浏览器自动化、语音处理、代码沙箱执行时才填
-
-现在分析用户的请求，只输出 JSON：
+- 所有布尔字段默认为 `false`，除非有明确证据支持设为 `true`。  
+- `relevant_skill_groups` 宁多勿漏，只要可能涉及即包含。  
+- 复杂度判断以实际执行的 Skill 步骤数为准，而非用户语句长度。  
+- “继续”“恢复”等指令因需检测多个 scratchpad 文件状态，视为 medium。  
+- 任何涉及内容修改、重生成、重组装的操作，均需包含 `document_assembly` 和 `compliance_checking`。
