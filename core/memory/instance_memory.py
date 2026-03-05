@@ -504,32 +504,20 @@ class InstanceMemoryManager:
 
     _FTS_MAX_RETRIES = 3
 
-    # Class-level cache: reuse SQLite engine across instances with the same DB path
-    _fts_engine_cache: dict = {}
-
     async def _ensure_fts(self) -> None:
-        """
-        Lazy-init FTS5 index table with retry.
-
-        Uses a DEDICATED engine (memory_fts.db) separate from the main
-        zenflux.db to avoid lock contention and silent degradation.
-        """
+        """Lazy-init FTS5 search using main engine (zenflux.db)."""
         if self._fts_initialized:
             return
 
-        # Retry on transient failures (DB locked, I/O contention)
         if not hasattr(self, "_fts_retry_count"):
             self._fts_retry_count = 0
 
         if self._fts_retry_count >= self._FTS_MAX_RETRIES:
-            return  # Exhausted retries, stay degraded
+            return
 
         try:
-            from infra.local_store.engine import create_local_engine
-            from infra.local_store.generic_fts import (
-                FTS5TableConfig,
-                GenericFTS5,
-            )
+            from infra.local_store.engine import get_local_session_factory
+            from infra.local_store.generic_fts import FTS5TableConfig, GenericFTS5
 
             self._fts = GenericFTS5()
             self._fts_config = FTS5TableConfig(
@@ -540,29 +528,9 @@ class InstanceMemoryManager:
                 extra_columns=["category", "source"],
             )
 
-            # Dedicated DB for memory FTS5 — uses instance store directory
-            # self._base_dir is already instance-scoped
-            # Put FTS5 in sibling "store/" directory
-            #
-            # NullPool: 避免 aiosqlite + QueuePool(size=1) 在 async
-            # 上下文切换时连接未归还导致的死锁。
-            # SQLite WAL 模式保证并发读写安全。
-            # 参考: https://www.sqlite.org/wal.html
-            fts_db_dir = str(self._base_dir.parent / "store")
-            cache_key = f"{fts_db_dir}:memory_fts.db"
-            engine = InstanceMemoryManager._fts_engine_cache.get(cache_key)
-            if engine is None:
-                engine = create_local_engine(
-                    db_dir=fts_db_dir, db_name="memory_fts.db",
-                    use_null_pool=True,
-                )
-                InstanceMemoryManager._fts_engine_cache[cache_key] = engine
-            self._fts_engine = engine
-            self._fts_session_factory = None  # lazy
-
-            await self._fts.ensure_table(engine, self._fts_config)
+            self._fts_session_factory = await get_local_session_factory()
             self._fts_initialized = True
-            logger.info("记忆 FTS5 索引表已就绪: memory_fts.db")
+            logger.info("记忆 FTS5 索引已就绪（使用主引擎）")
         except Exception as e:
             self._fts_retry_count += 1
             remaining = self._FTS_MAX_RETRIES - self._fts_retry_count
@@ -572,12 +540,7 @@ class InstanceMemoryManager:
             )
 
     async def _get_fts_session(self):
-        """Get a session for the dedicated FTS5 engine."""
-        if self._fts_session_factory is None:
-            from sqlalchemy.ext.asyncio import async_sessionmaker
-            self._fts_session_factory = async_sessionmaker(
-                self._fts_engine, expire_on_commit=False
-            )
+        """Get a session from the main engine for FTS5 operations."""
         return self._fts_session_factory()
 
     @staticmethod
