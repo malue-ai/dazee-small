@@ -44,7 +44,7 @@ metadata:
 - 用户说「帮我读取这篇文章」「抓取这个网页」
 - 用户说「收集最近的新闻」「整理行业资讯」
 - 批量抓取搜索结果中的网页完整内容
-- 作为 `deep-research` 的内容获取层
+- 可作为深度调研流程的内容获取层
 
 ## 技术栈
 
@@ -184,7 +184,7 @@ result.error_message            # 错误信息
 ### 场景 1: 收集一周新闻
 
 ```python
-# Step 1: 通过 api_calling 调用 Jina Search 获取 URL（参考 ddg-search skill）
+# Step 1: 通过 api_calling 调用 Jina Search 获取 URL（通过搜索类 Skill 获取 URL）
 results = await api_calling(url="https://s.jina.ai/AI行业新闻 最近一周", method="GET", headers={"Accept": "application/json"})
 urls = [r["url"] for r in results]
 

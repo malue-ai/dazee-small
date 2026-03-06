@@ -275,10 +275,17 @@ def _resolve_llm_profiles(
     template = provider_templates.get(provider_name)
     if not template:
         available = ", ".join(provider_templates.keys()) if provider_templates else "(empty)"
-        raise ValueError(
-            f"Provider '{provider_name}' not found in provider_templates. "
-            f"Available: {available}"
+        logger.warning(
+            f"⚠️ Provider '{provider_name}' 不在 provider_templates 中 "
+            f"(可用: {available})，profiles 将跳过 tier 解析"
         )
+        # 软着陆：strip tier hints，保留 profiles 的显式 provider/model 字段
+        resolved: Dict[str, Dict[str, Any]] = {}
+        for name, params in raw_profiles.items():
+            params = dict(params)
+            params.pop("tier", None)
+            resolved[name] = params
+        return resolved
 
     resolved: Dict[str, Dict[str, Any]] = {}
     for name, params in raw_profiles.items():
@@ -1436,11 +1443,14 @@ async def create_agent_from_instance(
 
     agent.capability_registry = filtered_registry
 
-    # 重新创建 tool_executor
+    # 重新创建 tool_executor（保留 instance_id 用于 cloud_agent 等依赖实例配置的工具）
+    _prev_instance_id = getattr(agent._tool_executor, "tool_context", None) and agent._tool_executor.tool_context.instance_id or ""
     agent._tool_executor = create_tool_executor(
         registry=filtered_registry,
         tool_context=create_tool_context(
-            event_manager=agent.event_manager, apis_config=getattr(agent, "apis_config", None)
+            event_manager=agent.event_manager,
+            apis_config=getattr(agent, "apis_config", None),
+            instance_id=_prev_instance_id,
         ),
         enable_compaction=(
             getattr(agent._tool_executor, "enable_compaction", True)

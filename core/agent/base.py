@@ -866,11 +866,13 @@ class Agent:
             if bg_mgr is not None:
                 extra["background_task_manager"] = bg_mgr
 
-        # 创建独立的 ToolExecutor（并发安全）
+        # 创建独立的 ToolExecutor（并发安全，保留 instance_id）
+        _instance_id = getattr(self._tool_executor, "tool_context", None) and self._tool_executor.tool_context.instance_id or ""
         tool_context = create_tool_context(
             event_manager=event_manager,
             workspace_dir=workspace_dir or getattr(self, "workspace_dir", None),
             apis_config=getattr(self, "apis_config", []),
+            instance_id=_instance_id,
             **extra,
         )
         tool_executor = create_tool_executor(

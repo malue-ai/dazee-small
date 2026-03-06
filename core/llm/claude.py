@@ -235,6 +235,15 @@ class ClaudeLLMService(BaseLLMService):
         self._context_editing_config = {}
         self._remove_beta("context-management-2025-06-27")
 
+    def enable_extended_context(self) -> None:
+        """启用 1M 扩展上下文窗口（需 Usage Tier 4+, beta）"""
+        self._add_beta("context-1m-2025-08-07")
+        logger.info("已启用 Claude 1M 扩展上下文 (beta: context-1m-2025-08-07)")
+
+    def disable_extended_context(self) -> None:
+        """禁用 1M 扩展上下文窗口"""
+        self._remove_beta("context-1m-2025-08-07")
+
     def enable_programmatic_tool_calling(self) -> None:
         """启用 Programmatic Tool Calling 模式"""
         self._programmatic_mode = True

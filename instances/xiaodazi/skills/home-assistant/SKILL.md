@@ -21,7 +21,7 @@ metadata:
 - 用户说「我要睡觉了」→ 触发 "晚安" 场景（关灯、锁门、降温）
 - 用户说「帮我设个自动化：每天早上 7 点开窗帘」
 - 结合 `pomodoro`：番茄钟结束时调亮灯光提醒休息
-- 结合 `daily-briefing`：早间简报时自动调节室内环境
+- 结合每日简报类 Skill（如已启用）：早间简报时自动调节室内环境
 
 ## 前置条件
 
@@ -141,7 +141,7 @@ curl -s "$HOMEASSISTANT_URL/api/states/sensor.outdoor_temperature" \
 | 组合 | 效果 |
 |------|------|
 | home-assistant + pomodoro | 番茄钟开始→调暗灯光营造专注环境；结束→调亮提醒休息 |
-| home-assistant + daily-briefing | 早间简报时自动开灯、调温、播报天气 |
+| home-assistant + 每日简报类 Skill（如已启用） | 早间简报时自动开灯、调温、播报天气 |
 | home-assistant + reminder | 提醒事项触发时闪烁灯光辅助提醒 |
 | home-assistant + scheduled-tasks | 定时自动化：每晚 11 点关灯锁门 |
 

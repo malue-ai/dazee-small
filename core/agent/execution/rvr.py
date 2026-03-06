@@ -293,6 +293,8 @@ class RVRExecutor(BaseExecutor):
             f"⚠️ Turn {turn + 1}: 上下文长度警告: 估算 {estimated_tokens:,} tokens > 安全阈值 {safe_threshold:,}"
         )
 
+        # --- 渐进式压缩（Progressive Compaction） ---
+        # Level 1: 标准裁剪（保留 tool_results + 首尾消息）
         trimmed_messages, trim_stats = trim_by_token_budget(
             messages=messages_for_estimate,
             token_budget=safe_threshold,
@@ -304,15 +306,31 @@ class RVRExecutor(BaseExecutor):
         trimmed_tokens = trim_stats.estimated_tokens
 
         logger.info(
-            f"✂️ 历史消息已裁剪: {len(messages_for_estimate)} → {len(trimmed_messages)} 条消息, "
+            f"✂️ L1 标准裁剪: {len(messages_for_estimate)} → {len(trimmed_messages)} 条消息, "
             f"token 估算: {estimated_tokens:,} → {trimmed_tokens:,}"
         )
 
+        # Level 2: 中度压缩（丢弃中间 tool_results，保留更少的首尾消息）
         if trimmed_tokens > safe_threshold:
-            logger.warning(f"⚠️ 裁剪后仍超过阈值，进行激进裁剪...")
+            moderate_budget = int(safe_threshold * 0.85)
+            trimmed_messages, moderate_stats = trim_by_token_budget(
+                messages=trimmed_messages,
+                token_budget=moderate_budget,
+                preserve_first_messages=3,
+                preserve_last_messages=8,
+                preserve_tool_results=False,
+                system_prompt=system_prompt_text,
+            )
+            trimmed_tokens = moderate_stats.estimated_tokens
+            logger.info(
+                f"✂️ L2 中度压缩: → {len(trimmed_messages)} 条消息, "
+                f"token 估算: → {trimmed_tokens:,}"
+            )
 
+        # Level 3: 激进裁剪（最小保留集）
+        if trimmed_tokens > safe_threshold:
             aggressive_budget = int(safe_threshold * 0.6)
-            aggressively_trimmed, aggressive_stats = trim_by_token_budget(
+            trimmed_messages, aggressive_stats = trim_by_token_budget(
                 messages=trimmed_messages,
                 token_budget=aggressive_budget,
                 preserve_first_messages=2,
@@ -320,14 +338,10 @@ class RVRExecutor(BaseExecutor):
                 preserve_tool_results=False,
                 system_prompt=system_prompt_text,
             )
-            aggressive_tokens = aggressive_stats.estimated_tokens
-
             logger.info(
-                f"✂️ 激进裁剪: {len(trimmed_messages)} → {len(aggressively_trimmed)} 条消息, "
-                f"token 估算: {trimmed_tokens:,} → {aggressive_tokens:,}"
+                f"✂️ L3 激进裁剪: → {len(trimmed_messages)} 条消息, "
+                f"token 估算: {trimmed_tokens:,} → {aggressive_stats.estimated_tokens:,}"
             )
-
-            return dict_list_to_messages(aggressively_trimmed)
 
         return dict_list_to_messages(trimmed_messages)
 
@@ -481,6 +495,7 @@ class RVRExecutor(BaseExecutor):
         tool_context = ToolExecutionContext(
             session_id=session_id,
             conversation_id=conversation_id,
+            instance_id=getattr(tool_executor.tool_context, "instance_id", None) if tool_executor else None,
             tool_executor=tool_executor,
             broadcaster=broadcaster,
             event_manager=event_manager,
@@ -701,15 +716,17 @@ class RVRExecutor(BaseExecutor):
 
         # 提取 system_prompt 文本并计算安全阈值
         system_prompt_text = self._extract_system_prompt_text(system_prompt)
-        token_budget = (
-            getattr(context.context_strategy, "token_budget", 180000)
-            if context.context_strategy
-            else 180000
-        )
-        # Proactive trimming: trigger at 70% of budget (not 94%)
-        # Old: budget - 10K = 170K for 180K → too late, context explodes first
-        # New: budget * 0.7 = 126K → trim early, prevent runaway accumulation
-        safe_threshold = int(token_budget * 0.7)
+        cs = context.context_strategy
+        token_budget = getattr(cs, "token_budget", 180000) if cs else 180000
+
+        # 动态阈值：若支持窗口扩展且未扩展，留出 HITL 缓冲空间（85%）
+        # 已扩展或不支持扩展时使用标准 70% 主动裁剪
+        expandable = getattr(cs, "max_expandable_budget", None) if cs else None
+        is_expanded = getattr(cs, "is_expanded", False) if cs else False
+        if expandable and not is_expanded:
+            safe_threshold = int(token_budget * 0.85)
+        else:
+            safe_threshold = int(token_budget * 0.70)
 
         # 进入循环前检查并裁剪上下文
         llm_messages = self._trim_messages_if_needed(

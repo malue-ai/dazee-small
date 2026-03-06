@@ -1168,12 +1168,27 @@ class RVRBExecutor(RVRExecutor):
                     if usage_tracker:
                         _current_cost = usage_tracker.estimate_cost()
 
+                    # 估算当前 token 总量用于窗口扩展检测
+                    _current_tokens = 0
+                    _window_manager = (context.extra or {}).get("window_manager")
+                    if _window_manager:
+                        from core.llm.base import count_request_tokens
+                        try:
+                            _current_tokens = count_request_tokens(
+                                llm_messages,
+                                self._extract_system_prompt_text(system_prompt),
+                            )
+                        except Exception:
+                            pass
+
                     decision = cfg.terminator.evaluate(
                         ctx,
                         last_stop_reason=last_reason,
                         stop_requested=_stop_requested,
                         pending_tool_names=None,
                         current_cost_usd=_current_cost,
+                        window_manager=_window_manager,
+                        current_tokens=_current_tokens,
                     )
 
                     if decision.should_stop:
@@ -1420,6 +1435,59 @@ class RVRBExecutor(RVRExecutor):
                             ctx.stop_reason = "cost_limit_no_confirm"
                             break
 
+                    # === 4.7 上下文窗口扩展确认 ===
+                    elif (
+                        decision.action == TerminationAction.ASK_USER
+                        and decision.finish_reason == FinishReason.CONTEXT_WINDOW_EXPANSION
+                    ):
+                        _exp_info = decision.metadata.get("expansion_info")
+                        if _exp_info:
+                            _cur_k = _exp_info.current_tokens // 1000
+                            _bud_k = _exp_info.current_budget // 1000
+                            _exp_k = _exp_info.expanded_budget // 1000
+                            _pct = int(_exp_info.usage_ratio * 100)
+                            _std_p = _exp_info.standard_input_price or 0
+                            _ext_p = _exp_info.extended_input_price or 0
+                            _ratio = f"{_ext_p/_std_p:.0f}x" if _std_p else ""
+
+                            _msg = (
+                                f"上下文已使用 {_cur_k}K / {_bud_k}K ({_pct}%)，即将达到窗口上限。\n"
+                                f"可扩展到 {_exp_k}K，超过 {_bud_k}K 的部分按 {_ratio} 价格计费"
+                                f"（输入 ${_ext_p}/M tokens）。\n"
+                                f"Prompt 缓存在扩展区间仍然有效，可节省约 90% 输入成本。"
+                            )
+                            yield {
+                                "type": "context_expansion_confirm",
+                                "data": {
+                                    "turn": ctx.current_turn,
+                                    "current_tokens": _exp_info.current_tokens,
+                                    "current_budget": _exp_info.current_budget,
+                                    "expanded_budget": _exp_info.expanded_budget,
+                                    "usage_ratio": _exp_info.usage_ratio,
+                                    "standard_price": _std_p,
+                                    "extended_price": _ext_p,
+                                    "message": _msg,
+                                    "options": [
+                                        {"id": "expand", "label": f"扩展到 {_exp_k}K"},
+                                        {"id": "optimize", "label": "不扩展，启动上下文优化"},
+                                    ],
+                                },
+                            }
+                            _exp_wait = (context.extra or {}).get(
+                                "wait_context_expansion_async"
+                            )
+                            if callable(_exp_wait):
+                                _exp_choice = await _call_async(_exp_wait)
+                                if _exp_choice == "expand":
+                                    _window_manager.apply_expansion(llm_service=llm)
+                                    logger.info(f"用户同意扩展: {_bud_k}K → {_exp_k}K")
+                                else:
+                                    _window_manager.decline_expansion()
+                                    logger.info("用户拒绝扩展，启动上下文压缩")
+                            else:
+                                _window_manager.decline_expansion()
+                                logger.warning("无 wait 函数，默认不扩展")
+
                     # === V12.1: 费用预警（非阻塞，仅通知前端）===
                     # 当 terminator 标记 _cost_warned 且 decision 正常继续时，发送提示
                     if (
@@ -1567,6 +1635,7 @@ class RVRBExecutor(RVRExecutor):
         tool_context = ToolExecutionContext(
             session_id=session_id,
             conversation_id=conversation_id,
+            instance_id=getattr(tool_executor.tool_context, "instance_id", None) if tool_executor else None,
             tool_executor=tool_executor,
             broadcaster=broadcaster,
             event_manager=event_manager,
@@ -1752,6 +1821,7 @@ class RVRBExecutor(RVRExecutor):
         tool_context = ToolExecutionContext(
             session_id=session_id,
             conversation_id=conversation_id,
+            instance_id=getattr(tool_executor.tool_context, "instance_id", None) if tool_executor else None,
             tool_executor=tool_executor,
             broadcaster=broadcaster,
             event_manager=event_manager,

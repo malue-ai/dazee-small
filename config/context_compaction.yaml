@@ -113,3 +113,10 @@ failure_summary:
   max_input_chars: 12000
   max_summary_chars: 1200
   max_block_chars: 1000
+
+# 上下文窗口扩展配置
+context_window_expansion:
+  enabled: true
+  hitl_threshold: 0.90          # 90% 时触发 HITL
+  compaction_after_decline: true # 拒绝扩展后立即启动压缩
+  post_expansion_trim_ratio: 0.70  # 扩展后 70% 时裁剪
