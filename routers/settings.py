@@ -378,6 +378,7 @@ async def put_instance_config(body: InstanceConfigBody) -> Dict[str, Any]:
                 skill_name=body.skill_name,
                 source="settings_page",
             )
+            await session.commit()
         if body.category == "credential" and body.value:
             _os.environ[body.key] = body.value
         return {"success": True, "message": f"已保存 {body.category}/{body.key}"}
