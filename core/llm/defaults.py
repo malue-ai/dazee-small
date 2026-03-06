@@ -15,7 +15,7 @@ hardcoded model IDs across the codebase.
 
 DEFAULT_MODELS = {
     "claude": "claude-sonnet-4-6",
-    "openai": "gpt-4o",
+    "openai": "gpt-5.4",
     "gemini": "gemini-pro",
     "qwen": "qwen3-max",
     "deepseek": "deepseek-reasoner",

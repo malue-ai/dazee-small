@@ -227,6 +227,25 @@ class AdaptiveTerminator(BaseTerminator):
                     f"${current_cost_usd:.4f} (阈值 ${alert.warn_threshold:.2f})"
                 )
 
+        # === 4.7 上下文窗口扩展 ===
+        window_manager = kwargs.get("window_manager")
+        current_tokens = kwargs.get("current_tokens", 0)
+        if window_manager and current_tokens > 0:
+            expansion_info = window_manager.check_expansion_needed(current_tokens)
+            if expansion_info:
+                window_manager.fill_pricing_info(expansion_info)
+                logger.info(
+                    f"终止决策: 上下文窗口扩展 HITL "
+                    f"({expansion_info.current_tokens:,} / {expansion_info.current_budget:,})"
+                )
+                return TerminationDecision(
+                    should_stop=False,
+                    reason="context_window_expansion",
+                    finish_reason=FinishReason.CONTEXT_WINDOW_EXPANSION,
+                    action=TerminationAction.ASK_USER,
+                    metadata={"expansion_info": expansion_info},
+                )
+
         # === 5. 安全兜底：最大时长 ===
         duration = ctx.duration_seconds
         if duration >= self.config.max_duration_seconds:

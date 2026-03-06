@@ -7,13 +7,13 @@
 #
 # 模型分配：
 #
-#   ┌──────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────────────┐
-#   │ 角色     │ qwen             │ claude           │ deepseek         │ glm              │ minimax                  │
-#   ├──────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────────────┤
-#   │ 主 Agent │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │ kimi-k2.5                │
-#   │ heavy    │ qwen3-max        │ claude-sonnet-4-6│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │ kimi-k2.5                │
-#   │ light    │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.5-highspeed   │ kimi-k2-turbo-preview    │
-#   └──────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────────────┘
+#   ┌──────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────────────┬──────────────────────────┬──────────────────────────┐
+#   │ 角色     │ openai           │ qwen             │ claude           │ deepseek         │ glm              │ minimax                  │ kimi                     │
+#   ├──────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────────────┼──────────────────────────┤
+#   │ 主 Agent │ gpt-5.4          │ qwen3-max        │ claude-opus-4-6  │ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │ kimi-k2.5                │
+#   │ heavy    │ gpt-5.4          │ qwen3-max        │ claude-sonnet-4-6│ deepseek-reasoner│ glm-5            │ MiniMax-M2.5             │ kimi-k2.5                │
+#   │ light    │ gpt-4o-mini      │ qwen-plus        │ claude-haiku-4-5 │ deepseek-chat    │ glm-4.5-flash    │ MiniMax-M2.5-highspeed   │ kimi-k2-turbo-preview    │
+#   └──────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────────────┴──────────────────────────┘
 #
 
 # ==================== Provider 模板 ====================
@@ -22,6 +22,26 @@
 #
 
 provider_templates:
+  openai:
+    agent_model: "gpt-5.4-2026-03-05"
+    agent_llm:
+      max_tokens: 65536
+      enable_thinking: true
+      thinking_budget: 10000
+      enable_caching: false
+    heavy:
+      provider: "openai"
+      model: "gpt-5.4-2026-03-05"
+      api_key_env: "OPENAI_API_KEY"
+    light:
+      provider: "openai"
+      model: "gpt-4o-mini"
+      api_key_env: "OPENAI_API_KEY"
+    context_window_policy:
+      default_window: 200000
+      extended_window: null
+      expansion_hitl: false
+
   qwen:
     agent_model: "qwen3-max"           # 默认主 Agent
     agent_llm:
@@ -40,6 +60,10 @@ provider_templates:
       model: "qwen-plus"
       api_key_env: "DASHSCOPE_API_KEY"
       region: "singapore"
+    context_window_policy:
+      default_window: 258048
+      extended_window: null
+      expansion_hitl: false
 
   claude:
     agent_model: "claude-sonnet-4-6"   # 主 Agent：Sonnet 4.6（Benchmark 全流程验证）
@@ -58,6 +82,12 @@ provider_templates:
       provider: "claude"
       model: "claude-haiku-4-5-20251001"
       api_key_env: "ANTHROPIC_API_KEY"
+    context_window_policy:
+      default_window: 200000
+      extended_window: 1000000
+      expansion_hitl: true
+      expansion_threshold: 0.90
+      beta_header: "context-1m-2025-08-07"
 
   deepseek:
     agent_model: "deepseek-reasoner"            # 主 Agent：思考模式（V3.2），对标 Sonnet/Qwen3-max
@@ -82,6 +112,10 @@ provider_templates:
       model: "deepseek-chat"
       # [V4 Ready] model: "deepseek-v4"
       api_key_env: "DEEPSEEK_API_KEY"
+    context_window_policy:
+      default_window: 128000
+      extended_window: null
+      expansion_hitl: false
 
   glm:
     agent_model: "glm-5"                        # 主 Agent：GLM-5 旗舰（200K 上下文，128K 输出，Coding/Agent SOTA）
@@ -99,6 +133,10 @@ provider_templates:
       provider: "glm"
       model: "glm-4.5-flash"
       api_key_env: "ZHIPUAI_API_KEY"
+    context_window_policy:
+      default_window: 200000
+      extended_window: null
+      expansion_hitl: false
 
   minimax:
     agent_model: "MiniMax-M2.5"                 # 主 Agent：MiniMax M2.5 旗舰（Anthropic API 兼容）
@@ -115,6 +153,10 @@ provider_templates:
       provider: "minimax"
       model: "MiniMax-M2.5-highspeed"
       api_key_env: "MINIMAX_API_KEY"
+    context_window_policy:
+      default_window: 204800
+      extended_window: null
+      expansion_hitl: false
 
   kimi:
     agent_model: "kimi-k2.5"                    # 主 Agent：Kimi K2.5 多模态旗舰（256K 上下文，视觉+思考）
@@ -131,6 +173,10 @@ provider_templates:
       provider: "kimi"
       model: "kimi-k2-turbo-preview"
       api_key_env: "MOONSHOT_API_KEY"
+    context_window_policy:
+      default_window: 262144
+      extended_window: null
+      expansion_hitl: false
 
 # ==================== 各调用点配置 ====================
 #

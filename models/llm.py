@@ -60,6 +60,10 @@ class ModelPricingResponse(BaseModel):
     output_per_million: Optional[float] = None
     cache_read_per_million: Optional[float] = None
     cache_write_per_million: Optional[float] = None
+    long_context_threshold: Optional[int] = Field(None, description="长上下文阶梯计价阈值（input tokens）")
+    long_context_input_per_million: Optional[float] = Field(None, description="长上下文输入 $/M tokens")
+    long_context_output_per_million: Optional[float] = Field(None, description="长上下文输出 $/M tokens")
+    long_context_cache_read_per_million: Optional[float] = Field(None, description="长上下文缓存读取 $/M tokens")
     is_free: bool = False
 
 

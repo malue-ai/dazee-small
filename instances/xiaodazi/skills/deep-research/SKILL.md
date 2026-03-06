@@ -22,7 +22,7 @@ metadata:
 
 ## 执行方式
 
-使用 `web-scraper` (Crawl4AI) 快速获取完整网页内容，大幅缩短调研时间。
+使用爬虫类 Skill（如 Crawl4AI）快速获取完整网页内容，大幅缩短调研时间。
 
 ### 调研流程
 
@@ -35,7 +35,7 @@ Step 2: 制定调研计划
 
 Step 3: 批量搜索 + 内容抓取 (核心)
   ↓ 3.1 调用 web_search 工具获取相关 URL 列表 (自动选择 Tavily/Exa/Jina)
-  ↓ 3.2 web-scraper (Crawl4AI) 并发抓取完整内容
+  ↓ 3.2 爬虫类 Skill (Crawl4AI) 并发抓取完整内容
   ↓     Playwright 浏览器引擎 → 突破反爬
   ↓     PruningContentFilter → 去除噪声
   ↓     自动输出干净 Markdown

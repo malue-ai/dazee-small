@@ -75,30 +75,32 @@ class ContextStrategy:
     L2: 历史消息裁剪（纯 token 驱动，服务层自动执行）
     L3: QoS 成本控制（后端静默）
 
-    配置来源优先级：
-    1. 实例配置 config.yaml 中的 context_management 字段
-    2. 框架默认值
+    token_budget 由模型能力驱动（model.max_input_tokens），QoS 仅用于费用告警基准。
+    若模型支持扩展窗口（如 Claude 200K→1M），通过 HITL 询问用户后动态扩展。
     """
 
     # L1: Memory Tool 指导
-    # 可在实例 config.yaml 中配置：context_management.enable_memory_guidance
-    enable_memory_guidance: bool = True  # 是否在 Prompt 中添加 Memory 使用指导
+    enable_memory_guidance: bool = True
 
     # L2: 历史消息压缩（双阈值机制）
-    # 可在实例 config.yaml 中配置：context_management.enable_history_trimming
-    enable_history_trimming: bool = True  # 是否启用历史消息压缩
-    preserve_first_messages: int = 4  # 始终保留开头 N 条消息（任务上下文）
-    preserve_last_messages: int = 10  # 尽量保留最近 N 条消息（当前上下文）
-    preserve_tool_results: bool = True  # 保留中间的 tool_result（含重要数据）
+    enable_history_trimming: bool = True
+    preserve_first_messages: int = 4
+    preserve_last_messages: int = 10
+    preserve_tool_results: bool = True
 
-    # 🆕 双阈值压缩机制
-    pre_run_threshold: float = 0.80  # 80% 阈值 - 运行前预检查（Agent 启动前）
-    runtime_threshold: float = 0.92  # 92% 阈值 - 运行中实时检查（Agent 执行中）
+    pre_run_threshold: float = 0.80
+    runtime_threshold: float = 0.92
 
-    # L3: QoS 成本控制
+    # L3: QoS（仅用于费用告警基准，不控制 token_budget）
     qos_level: QoSLevel = QoSLevel.PRO
+    warning_threshold: float = 0.8
+
+    # 上下文窗口（模型能力驱动）
     token_budget: int = 200_000
-    warning_threshold: float = 0.8  # 80% 时后端日志警告（用户无感知）
+    max_expandable_budget: Optional[int] = None
+    expansion_hitl_threshold: float = 0.90
+    is_expanded: bool = False
+    model_name: Optional[str] = None
 
 
 @dataclass
@@ -121,24 +123,44 @@ class TrimStats:
     compressed_message_count: int = 0  # 被压缩为摘要的消息数量
 
 
-def get_context_strategy(qos_level: QoSLevel = QoSLevel.PRO) -> ContextStrategy:
+def get_context_strategy(
+    qos_level: QoSLevel = QoSLevel.PRO,
+    *,
+    model_name: Optional[str] = None,
+) -> ContextStrategy:
     """
-    获取上下文管理策略
+    获取上下文管理策略（模型能力驱动）
 
-    配置来源：
-    1. 环境变量 QOS_LEVEL（控制 QoS 等级）
-    2. 框架配置 config/context_compaction.yaml
-
-    注意：不从实例配置读取，运营人员无需配置此项
+    token_budget 优先从 ModelRegistry 的 max_input_tokens 获取，
+    QoS 仅用于费用告警基准。若模型支持扩展窗口（max_extended_input_tokens），
+    记录到 max_expandable_budget 供 ContextWindowManager 使用。
 
     Args:
-        qos_level: QoS 等级（默认 PRO）
+        qos_level: QoS 等级（仅用于费用告警基准）
+        model_name: 模型名称（如 "claude-opus-4-6"），用于查询模型能力
 
     Returns:
         ContextStrategy 实例
     """
+    budget = QOS_TOKEN_BUDGETS.get(qos_level, 200_000)
+    expandable: Optional[int] = None
+
+    if model_name:
+        try:
+            from core.llm.model_registry import ModelRegistry
+
+            model_cfg = ModelRegistry.get(model_name)
+            if model_cfg and model_cfg.capabilities.max_input_tokens:
+                budget = model_cfg.capabilities.max_input_tokens
+                expandable = model_cfg.capabilities.max_extended_input_tokens
+        except Exception:
+            logger.debug(f"ModelRegistry 查询失败 ({model_name})，使用 QoS 预算")
+
     return ContextStrategy(
-        qos_level=qos_level, token_budget=QOS_TOKEN_BUDGETS.get(qos_level, 200_000)
+        qos_level=qos_level,
+        token_budget=budget,
+        max_expandable_budget=expandable,
+        model_name=model_name,
     )
 
 
@@ -166,6 +188,7 @@ For complex or multi-step tasks:
 2. **State Management**
    - Periodically save your current state and next steps
    - This ensures continuity if the conversation is long
+   - **Before major milestones**, proactively save a checkpoint of your progress
 
 3. **Work Autonomously**
    - Complete tasks fully without stopping early
@@ -175,7 +198,12 @@ For complex or multi-step tasks:
 4. **Preserve Critical Context**
    - File paths, configurations, and user preferences
    - Error patterns and solutions found
-   - Progress markers for multi-file operations"""
+   - Progress markers for multi-file operations
+
+5. **Context Window Awareness**
+   - If the system indicates context is running low, save key state immediately
+   - Summarize completed sub-tasks concisely (one sentence per completed step)
+   - Prioritize retaining decision rationale over intermediate calculations"""
 
 
 def _has_tool_result(msg: Dict[str, Any]) -> bool:

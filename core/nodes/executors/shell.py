@@ -51,6 +51,13 @@ class ShellExecutor(BaseExecutor):
         "LD_PRELOAD",
     }
 
+    # PyInstaller frozen binary 额外清理的环境变量
+    _PYINSTALLER_ENV_KEYS: Set[str] = {
+        "_MEIPASS", "_MEIPASS2", "_PYI_ARCHIVE_FILE",
+        "_PYI_SPLASH_IPC",
+    }
+    _PYINSTALLER_ENV_PREFIXES: List[str] = ["_PYI_", "_MEI"]
+
     # 阻止的环境变量前缀
     BLOCKED_ENV_PREFIXES: List[str] = [
         "DYLD_",  # macOS 动态链接器
@@ -168,13 +175,27 @@ class ShellExecutor(BaseExecutor):
         """
         sanitized = dict(os.environ)
 
-        # 确保当前 Python 解释器的 bin 目录在 PATH 最前面，
-        # 使子进程的 python3 命中启动后端的同一个 Python（含虚拟环境包）
         import sys
-        python_bin_dir = os.path.dirname(os.path.abspath(sys.executable))
-        current_path = sanitized.get("PATH", "")
-        if python_bin_dir not in current_path.split(os.pathsep):
-            sanitized["PATH"] = python_bin_dir + os.pathsep + current_path
+        is_frozen = getattr(sys, "frozen", False)
+
+        if is_frozen:
+            # PyInstaller frozen binary: 清理 PyInstaller 注入的环境变量，
+            # 防止子进程的 Python 加载到 _internal/ 中的 .pyc（版本不匹配会 bad magic number）
+            for key in list(sanitized.keys()):
+                if key in self._PYINSTALLER_ENV_KEYS:
+                    del sanitized[key]
+                    continue
+                for prefix in self._PYINSTALLER_ENV_PREFIXES:
+                    if key.startswith(prefix):
+                        del sanitized[key]
+                        break
+        else:
+            # 常规场景（venv / 系统 Python）：将解释器 bin 目录放在 PATH 最前面，
+            # 使子进程的 python3 命中启动后端的同一个 Python（含虚拟环境包）
+            python_bin_dir = os.path.dirname(os.path.abspath(sys.executable))
+            current_path = sanitized.get("PATH", "")
+            if python_bin_dir not in current_path.split(os.pathsep):
+                sanitized["PATH"] = python_bin_dir + os.pathsep + current_path
 
         blocked_keys = self.BLOCKED_ENV_KEYS
         if _IS_WIN32:

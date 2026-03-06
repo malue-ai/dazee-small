@@ -77,6 +77,21 @@ export function useChat() {
   const showLongRunConfirmModal = ref(false)
   const longRunConfirmData = ref<{ turn: number; message: string } | null>(null)
 
+  /** V12: 上下文窗口扩展确认弹窗 */
+  const showContextExpansionConfirmModal = ref(false)
+  const contextExpansionConfirmData = ref<{
+    turn: number
+    current_tokens: number
+    current_budget: number
+    expanded_budget: number
+    usage_ratio: number
+    standard_price: number
+    extended_price: number
+    message: string
+    options: { id: string; label: string }[]
+  } | null>(null)
+  const contextExpansionConfirmLoading = ref(false)
+
   // Register playbook suggestion handler eagerly when useChat is created.
   // ChatView currently does not call initialize(), so registering only there
   // can miss WebSocket-pushed playbook_suggestion events.
@@ -485,6 +500,45 @@ export function useChat() {
   }
 
   /**
+   * V12: 确认上下文扩展（选择 expand 或 optimize）
+   */
+  async function confirmContextExpansion(choice: 'expand' | 'optimize'): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    if (!sessionId) return
+
+    contextExpansionConfirmLoading.value = true
+    try {
+      await sessionApi.submitContextExpansionConfirm(sessionId, choice)
+      showContextExpansionConfirmModal.value = false
+      contextExpansionConfirmData.value = null
+    } catch (e) {
+      console.error('❌ 上下文扩展确认失败:', e)
+    } finally {
+      contextExpansionConfirmLoading.value = false
+    }
+  }
+
+  /**
+   * V12: 关闭上下文扩展确认弹窗（默认不扩展）
+   */
+  async function dismissContextExpansion(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    showContextExpansionConfirmModal.value = false
+    contextExpansionConfirmData.value = null
+    if (sessionId) {
+      try {
+        await sessionApi.submitContextExpansionConfirm(sessionId, 'optimize')
+      } catch {
+        // 关闭时提交 optimize，忽略失败
+      }
+    }
+  }
+
+  /**
    * V11: 关闭长任务确认弹窗
    */
   async function dismissLongRunConfirm(): Promise<void> {
@@ -657,6 +711,10 @@ export function useChat() {
        if (hitl.showModal.value) {
          hitl.hide()
        }
+       if (showContextExpansionConfirmModal.value) {
+         showContextExpansionConfirmModal.value = false
+         contextExpansionConfirmData.value = null
+       }
 
        // 用户不在当前会话时，推送全局通知
        if (convId !== conversationStore.currentId && type !== 'error') {
@@ -722,6 +780,22 @@ export function useChat() {
         message: data?.message ?? '任务已执行较多轮次，是否继续？'
       }
       showLongRunConfirmModal.value = true
+    }
+
+    // V12: 上下文窗口扩展确认
+    if (type === 'context_expansion_confirm') {
+      contextExpansionConfirmData.value = {
+        turn: data?.turn ?? 0,
+        current_tokens: data?.current_tokens ?? 0,
+        current_budget: data?.current_budget ?? 0,
+        expanded_budget: data?.expanded_budget ?? 0,
+        usage_ratio: data?.usage_ratio ?? 0,
+        standard_price: data?.standard_price ?? 0,
+        extended_price: data?.extended_price ?? 0,
+        message: data?.message ?? '上下文即将达到窗口上限，是否扩展？',
+        options: Array.isArray(data?.options) ? data.options : []
+      }
+      showContextExpansionConfirmModal.value = true
     }
 
     // Playbook 策略建议（内联卡片，非弹窗）
@@ -1186,6 +1260,13 @@ export function useChat() {
     confirmLongRunContinue,
     confirmLongRunBackground,
     dismissLongRunConfirm,
+
+    // V12: 上下文窗口扩展确认
+    showContextExpansionConfirmModal,
+    contextExpansionConfirmData,
+    contextExpansionConfirmLoading,
+    confirmContextExpansion,
+    dismissContextExpansion,
 
     // 连接状态
     connectionStatus,

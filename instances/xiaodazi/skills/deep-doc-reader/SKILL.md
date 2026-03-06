@@ -30,7 +30,7 @@ metadata:
 文档相关请求
   ├── 文件在哪？找某个文件 → 用 local-search
   ├── 简单摘要/概述 → 用 summarize
-  ├── 编辑 PDF 内容 → 用 nano-pdf
+  ├── 编辑 PDF 内容 → 用 PDF 读取类 Skill
   ├── 创建 Word/Excel → 用 word-processor / excel-analyzer
   └── 长文档深度问答（以下场景）→ 用 deep-doc-reader ✅
        ├── PDF 超过 20 页

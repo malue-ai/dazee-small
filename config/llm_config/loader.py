@@ -43,6 +43,11 @@ def set_instance_profiles(profiles: Dict[str, Dict[str, Any]]) -> None:
     )
 
 
+def get_current_profiles() -> Dict[str, Dict[str, Any]]:
+    """返回当前全局 profiles 的浅拷贝（用于 save/restore 防雪崩）"""
+    return dict(_profiles)
+
+
 def clear_instance_profiles() -> None:
     """清除已注入的 profiles（用于测试或实例重载）"""
     global _profiles
@@ -128,6 +133,7 @@ async def reload_config():
 
 __all__ = [
     "get_llm_profile",
+    "get_current_profiles",
     "set_instance_profiles",
     "clear_instance_profiles",
     "list_profiles",

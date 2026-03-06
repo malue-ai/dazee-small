@@ -43,10 +43,31 @@ OPENAI_AUDIO_MODELS = {
     "gpt-4o-audio-preview-2024-12-17",
 }
 
+# 支持 reasoning_effort 参数的模型前缀
+_REASONING_EFFORT_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
 
 def _is_audio_model(model: str) -> bool:
     """Check if the model supports audio input/output."""
     return any(m in model for m in OPENAI_AUDIO_MODELS)
+
+
+def _supports_reasoning_effort(model: str) -> bool:
+    """Check if the model supports the reasoning_effort parameter."""
+    return any(model.startswith(p) for p in _REASONING_EFFORT_PREFIXES)
+
+
+def _thinking_budget_to_effort(budget: int) -> str:
+    """Map ZenFlux thinking_budget to OpenAI reasoning_effort level."""
+    if budget <= 0:
+        return "none"
+    if budget <= 3000:
+        return "low"
+    if budget <= 8000:
+        return "medium"
+    if budget <= 20000:
+        return "high"
+    return "xhigh"
 
 
 # ============================================================
@@ -257,13 +278,23 @@ class OpenAILLMService(BaseLLMService):
         openai_messages = converted["messages"]
 
         # 构建请求参数
-        request_params = {
+        request_params: Dict[str, Any] = {
             "model": self.config.model,
             "messages": openai_messages,
             "temperature": kwargs.get("temperature", self.config.temperature),
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "stream": False,
         }
+
+        # Reasoning effort (GPT-5.x / o-series)
+        if _supports_reasoning_effort(self.config.model):
+            effort = kwargs.get("reasoning_effort")
+            if effort:
+                request_params["reasoning_effort"] = effort
+            elif self.config.enable_thinking:
+                request_params["reasoning_effort"] = _thinking_budget_to_effort(
+                    self.config.thinking_budget
+                )
 
         # 音频模型参数
         if _is_audio_model(self.config.model):
@@ -361,7 +392,7 @@ class OpenAILLMService(BaseLLMService):
         openai_messages = converted["messages"]
 
         # 构建请求参数
-        request_params = {
+        request_params: Dict[str, Any] = {
             "model": self.config.model,
             "messages": openai_messages,
             "temperature": kwargs.get("temperature", self.config.temperature),
@@ -369,6 +400,16 @@ class OpenAILLMService(BaseLLMService):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+
+        # Reasoning effort (GPT-5.x / o-series)
+        if _supports_reasoning_effort(self.config.model):
+            effort = kwargs.get("reasoning_effort")
+            if effort:
+                request_params["reasoning_effort"] = effort
+            elif self.config.enable_thinking:
+                request_params["reasoning_effort"] = _thinking_budget_to_effort(
+                    self.config.thinking_budget
+                )
 
         # 音频模型参数
         if _is_audio_model(self.config.model):
@@ -391,7 +432,6 @@ class OpenAILLMService(BaseLLMService):
                 )
                 request_params["messages"].insert(0, {"role": "system", "content": system_text})
             else:
-                # 字符串格式
                 request_params["messages"].insert(0, {"role": "system", "content": str(system)})
 
         # Tools

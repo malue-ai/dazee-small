@@ -24,7 +24,7 @@ metadata:
 ### 输入方式
 
 1. **用户提供文本**：直接粘贴论文摘要或全文
-2. **用户提供文件**：PDF/Word 文件路径（配合 nano-pdf 读取）
+2. **用户提供文件**：PDF/Word 文件路径（配合 PDF 读取类 Skill）
 3. **用户提供论文标题/ID**：配合 paper-search / arxiv-search 获取
 
 ### 分析流程
