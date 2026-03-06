@@ -48,6 +48,7 @@
   },
   "overrides": {
     "lodash": ">=4.17.23",
-    "lodash-es": ">=4.17.23"
+    "lodash-es": ">=4.17.23",
+    "dompurify": ">=3.3.2"
   }
 }
