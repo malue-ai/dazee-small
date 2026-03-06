@@ -268,100 +268,6 @@ class OpenAILLMService(BaseLLMService):
         return str(system)
 
     # ============================================================
-    # Chat Completions → Responses API 消息格式转换
-    # ============================================================
-
-    @staticmethod
-    def _chat_messages_to_responses_input(
-        messages: List[Dict[str, Any]],
-    ) -> tuple:
-        """Convert Chat Completions messages to Responses API input + instructions.
-
-        Maps system/developer → instructions, user/assistant/tool → input items.
-        Converts Chat content parts (text/image_url) to Responses format (input_text/input_image).
-
-        Returns:
-            (instructions: str, input_items: list)
-        """
-        instructions = ""
-        items: List[Dict[str, Any]] = []
-
-        for msg in messages:
-            role = msg.get("role", "")
-
-            if role in ("system", "developer"):
-                text = msg.get("content", "")
-                if text:
-                    instructions = (instructions + "\n" + text).strip() if instructions else text
-
-            elif role == "user":
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    content = OpenAILLMService._convert_content_to_responses(content)
-                items.append({"role": "user", "content": content})
-
-            elif role == "assistant":
-                content = msg.get("content")
-                if content:
-                    if isinstance(content, str):
-                        items.append({"role": "assistant", "content": content})
-                    elif isinstance(content, list):
-                        text = "\n".join(
-                            p.get("text", "") for p in content
-                            if isinstance(p, dict) and p.get("type") == "text" and p.get("text")
-                        )
-                        if text:
-                            items.append({"role": "assistant", "content": text})
-
-                for tc in msg.get("tool_calls", []):
-                    func = tc.get("function", {})
-                    items.append({
-                        "type": "function_call",
-                        "call_id": tc.get("id", ""),
-                        "name": func.get("name", ""),
-                        "arguments": func.get("arguments", "{}"),
-                    })
-
-            elif role == "tool":
-                items.append({
-                    "type": "function_call_output",
-                    "call_id": msg.get("tool_call_id", ""),
-                    "output": msg.get("content", ""),
-                })
-
-        return instructions, items
-
-    @staticmethod
-    def _convert_content_to_responses(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Convert Chat Completions content parts to Responses API format.
-
-        Chat: text/image_url → Responses: input_text/input_image
-        """
-        result = []
-        for part in parts:
-            ptype = part.get("type", "")
-
-            if ptype == "text":
-                result.append({"type": "input_text", "text": part.get("text", "")})
-
-            elif ptype == "image_url":
-                url = ""
-                img = part.get("image_url")
-                if isinstance(img, dict):
-                    url = img.get("url", "")
-                elif isinstance(img, str):
-                    url = img
-                result.append({"type": "input_image", "image_url": url})
-
-            elif ptype == "input_audio":
-                result.append(part)
-
-            else:
-                result.append({"type": "input_text", "text": str(part)})
-
-        return result
-
-    # ============================================================
     # 核心 API — 路由入口
     # ============================================================
 
@@ -382,12 +288,13 @@ class OpenAILLMService(BaseLLMService):
         is_probe: bool = False,
         **kwargs,
     ) -> LLMResponse:
-        converted = self._adaptor.convert_messages_to_provider(messages)
-        openai_messages = converted["messages"]
-
         if self._use_responses_api():
-            return await self._create_via_responses(openai_messages, system, tools, is_probe, **kwargs)
-        return await self._create_via_chat(openai_messages, system, tools, is_probe, **kwargs)
+            sys_text = self._extract_system_text(system)
+            converted = self._adaptor.convert_messages_for_responses(messages, sys_text)
+            return await self._create_via_responses(converted, tools, is_probe, **kwargs)
+
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        return await self._create_via_chat(converted["messages"], system, tools, is_probe, **kwargs)
 
     async def create_message_stream(
         self,
@@ -399,17 +306,17 @@ class OpenAILLMService(BaseLLMService):
         on_tool_call: Optional[Callable[[Dict], None]] = None,
         **kwargs,
     ) -> AsyncIterator[LLMResponse]:
-        converted = self._adaptor.convert_messages_to_provider(messages)
-        openai_messages = converted["messages"]
-
         if self._use_responses_api():
+            sys_text = self._extract_system_text(system)
+            converted = self._adaptor.convert_messages_for_responses(messages, sys_text)
             async for resp in self._stream_via_responses(
-                openai_messages, system, tools, on_thinking, on_content, on_tool_call, **kwargs
+                converted, tools, on_thinking, on_content, on_tool_call, **kwargs
             ):
                 yield resp
         else:
+            chat_converted = self._adaptor.convert_messages_to_provider(messages)
             async for resp in self._stream_via_chat(
-                openai_messages, system, tools, on_thinking, on_content, on_tool_call, **kwargs
+                chat_converted["messages"], system, tools, on_thinking, on_content, on_tool_call, **kwargs
             ):
                 yield resp
 
@@ -646,13 +553,10 @@ class OpenAILLMService(BaseLLMService):
     # ============================================================
 
     async def _create_via_responses(
-        self, openai_messages, system, tools, is_probe, **kwargs,
+        self, converted: Dict[str, Any], tools, is_probe, **kwargs,
     ) -> LLMResponse:
-        sys_text = self._extract_system_text(system)
-        if sys_text:
-            openai_messages.insert(0, {"role": "developer", "content": sys_text})
-
-        instructions, input_items = self._chat_messages_to_responses_input(openai_messages)
+        instructions = converted.get("instructions", "")
+        input_items = converted.get("input", [])
         _max = kwargs.get("max_tokens", self.config.max_tokens)
 
         request_params: Dict[str, Any] = {
@@ -698,14 +602,11 @@ class OpenAILLMService(BaseLLMService):
         return self._parse_responses_output(response)
 
     async def _stream_via_responses(
-        self, openai_messages, system, tools,
+        self, converted: Dict[str, Any], tools,
         on_thinking, on_content, on_tool_call, **kwargs,
     ) -> AsyncIterator[LLMResponse]:
-        sys_text = self._extract_system_text(system)
-        if sys_text:
-            openai_messages.insert(0, {"role": "developer", "content": sys_text})
-
-        instructions, input_items = self._chat_messages_to_responses_input(openai_messages)
+        instructions = converted.get("instructions", "")
+        input_items = converted.get("input", [])
         _max = kwargs.get("max_tokens", self.config.max_tokens)
 
         request_params: Dict[str, Any] = {
