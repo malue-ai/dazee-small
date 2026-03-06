@@ -1,5 +1,5 @@
-name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，能执行本地桌面任务并记住用户偏好
+name: DesktopBuddy
+description: 桌面端 AI 搭子，擅长本地文件处理、桌面操作、写作整理、应用协助和基于用户偏好的主动式帮助
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,17 +7,19 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_operation
-  - data_analysis
+  - desktop_automation
+  - file_management
   - writing
+  - data_processing
+  - knowledge_search
+  - ui_operation
+  - memory_query
   - translation
-  - ui_automation
-  - memory_recall
-  - preference_adaptation
+  - screenshot
+  - local_assistance
   output_formats:
   - text
   - markdown
-  - file
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,32 +27,38 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
+  trigger_condition: task.complexity in ['medium','complex'] or task.requires_multiple_tools
+    or task.involves_multi_file_modification or task.requires_ui_operations
   max_steps: 20
-  granularity: fine
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 3
+  max_replan_attempts: 2
   replan_strategy: incremental
-  failure_threshold: 0.4
+  failure_threshold: 0.3
 tool_selector:
   enabled: true
-  available_tools: []
-  selection_strategy: capability_based
-  allow_parallel: false
-  max_parallel_tools: 3
-  base_tools:
+  available_tools:
   - nodes
   - knowledge_search
   - open_system_preferences
   - hitl
+  - plan
+  - plan-todo
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools:
+  - hitl
+  - plan
+  - plan-todo
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: user
   episodic_memory: true
-  working_memory_limit: 50
+  working_memory_limit: 40
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -62,31 +70,22 @@ output_formatter:
   - json
   - html
   code_highlighting: false
-  max_output_length: 2000
+  max_output_length: 6000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills:
-- name: excel-generator
-  enabled: true
-  description: ''
-- name: multi-lang-ocr
-  enabled: true
-  description: ''
-- name: elegant-reports
-  enabled: true
-  description: ''
+skills: []
 tools:
-- web_search
-- api_calling
 - nodes
 - knowledge_search
 - open_system_preferences
 - hitl
-model: qwen3-max
+- plan
+- plan-todo
+model: gpt-5.4
 max_turns: null
 execution_strategy: rvr-b
 allow_parallel_tools: false
@@ -100,4 +99,10 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂桌面任务（文件操作、UI自动化、多步规划），具备强记忆与偏好学习能力，强调本地执行、安全操作和用户引导。需启用细粒度规划、用户级记忆、HITL确认机制及基础工具集，支持OCR、报告生成等关键技能，并通过intent_analyzer识别任务复杂度与类型以触发合适行为模式。
+reasoning: 这是一个面向普通用户的桌面端本地 AI 助手，核心任务包括文件管理、写作整理、表格分析、截图、知识库检索、应用界面操作与用户记忆利用。Prompt
+  明确要求根据任务复杂度进行 simple/medium/complex 判断，因此需要启用 intent_analyzer。大量任务涉及多步骤执行、多文件修改协议、UI
+  自动化和失败后换路重试，所以 plan_manager 必须启用，且支持动态调整与增量重规划。工具层面强调优先本地执行、区分 knowledge_search
+  与 nodes、权限问题时直接 open_system_preferences、敏感操作需 HITL 确认、复杂替代方案用 plan-todo，因此应启用 tool_selector
+  并显式纳入这些工具。由于该助手要长期记住用户偏好、常用文件夹、写作风格，并在跨对话中自然使用，memory_manager 应开启且采用 user 级保留策略。输出强调通俗、温和、结构化，适合
+  markdown。并行工具不宜开启，因为桌面操作、多文件修改和确认式流程都要求稳妥、可验证、顺序执行。Skills 方面 Prompt 没有指定固定已启用技能集合，只强调‘只用已启用的
+  Skills’，因此 schema 保持精简，不预设具体 skill。
