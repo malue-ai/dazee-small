@@ -641,26 +641,24 @@ class RVRBExecutor(RVRExecutor):
         """
         Context Pollution 清理 + 回溯消息压缩
 
-        回溯发生后，将失败的 tool_result 替换为简洁的回溯摘要，
-        避免错误信息污染后续 LLM 推理上下文。
-
-        2025 研究表明：context pollution（错误信息残留）是 Agent 回溯后
-        性能下降的主要原因。清理污染上下文可显著提升重试成功率。
+        回溯发生后，将失败的 tool_result 内容压缩为简短摘要，
+        并额外注入一条 text 类型的反思块引导 LLM 换策略。
 
         策略：
         - 成功的 tool_result：保留原样
-        - 失败的 tool_result：替换为简洁摘要 + 反思建议
-        - 多次失败：压缩为一条汇总（节省 token）
+        - 失败的 tool_result：保留配对关系（tool_use_id 不变），
+          但把内容压缩为简短错误摘要
+        - 反思摘要：作为 text 块注入，不参与 tool 配对检查，
+          确保 LLM 一定能看到
 
         Args:
             tool_results: 原始 tool_result 列表
             state: RVR-B 状态（含失败历史）
 
         Returns:
-            清理后的 tool_result 列表
+            清理后的结果列表（tool_result + text 反思块）
         """
         if not state.backtrack_count:
-            # 未发生回溯，原样返回
             return tool_results
 
         cleaned = []
@@ -668,23 +666,24 @@ class RVRBExecutor(RVRExecutor):
 
         for result in tool_results:
             if not result.get("is_error"):
-                # 成功的结果保留
                 cleaned.append(result)
             else:
-                # 失败的结果收集摘要
                 content = result.get("content", "")
-                # 截取错误核心信息（不超过 100 字符）
-                error_brief = content[:100] if isinstance(content, str) else str(content)[:100]
+                error_brief = content[:150] if isinstance(content, str) else str(content)[:150]
                 failed_summaries.append(error_brief)
 
+                cleaned.append({
+                    "type": "tool_result",
+                    "tool_use_id": result.get("tool_use_id", ""),
+                    "content": f"[失败] {error_brief}",
+                    "is_error": True,
+                })
+
         if failed_summaries:
-            # 将多条失败压缩为一条简洁的回溯摘要 + 反思
             reflection = self._build_reflection_summary(failed_summaries, state)
             cleaned.append({
-                "type": "tool_result",
-                "tool_use_id": "backtrack_summary",
-                "content": reflection,
-                "is_error": False,  # 标记为非错误，让 LLM 视为参考信息
+                "type": "text",
+                "text": reflection,
             })
 
         return cleaned if cleaned else tool_results
@@ -727,6 +726,69 @@ class RVRBExecutor(RVRExecutor):
         parts.append("请使用完全不同的策略或工具重试。")
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _fold_backtracked_turns(
+        llm_messages: list,
+        state: "RVRBState",
+    ) -> None:
+        """
+        折叠被回溯的失败轮次消息，减少 token 膨胀。
+
+        在回溯触发后调用。向前扫描消息找到最近包含失败 tool_result
+        的 assistant+user 消息对，将其内容折叠为一行摘要。
+        只折叠最近两轮失败的消息（避免过度压缩导致上下文丢失）。
+        """
+        if state.backtrack_count < 2:
+            return
+
+        folded_count = 0
+        i = len(llm_messages) - 1
+        while i >= 2 and folded_count < 2:
+            msg = llm_messages[i]
+            content = msg.content if hasattr(msg, "content") else msg.get("content")
+            role = msg.role if hasattr(msg, "role") else msg.get("role")
+
+            if role != "user" or not isinstance(content, list):
+                i -= 1
+                continue
+
+            has_error = any(
+                (isinstance(b, dict) and b.get("is_error"))
+                for b in content
+            )
+            if not has_error:
+                i -= 1
+                continue
+
+            tool_names = []
+            error_briefs = []
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                    c = b.get("content", "")
+                    error_briefs.append(c[:80] if isinstance(c, str) else str(c)[:80])
+
+            prev_msg = llm_messages[i - 1]
+            prev_content = prev_msg.content if hasattr(prev_msg, "content") else prev_msg.get("content")
+            prev_role = prev_msg.role if hasattr(prev_msg, "role") else prev_msg.get("role")
+            if prev_role == "assistant" and isinstance(prev_content, list):
+                for b in prev_content:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        tool_names.append(b.get("name", "?"))
+
+            summary = (
+                f"[已折叠的失败轮次] 工具: {', '.join(tool_names) or '?'} "
+                f"→ 失败: {'; '.join(error_briefs[:2]) or '?'}"
+            )
+
+            from core.llm.base import Message
+            llm_messages[i - 1] = Message(role="assistant", content=summary)
+            llm_messages[i] = Message(role="user", content="请换一种方法继续。")
+            folded_count += 1
+            i -= 2
+
+        if folded_count:
+            logger.info(f"📦 折叠 {folded_count} 个失败轮次，减少 token 膨胀")
 
     def _build_progressive_hint(
         self,
@@ -1724,10 +1786,11 @@ class RVRBExecutor(RVRExecutor):
         append_assistant_message(llm_messages, response.raw_content)
 
         if tool_results:
-            # Context Pollution 清理：回溯成功后（替代工具返回了正确结果），
-            # 将失败的 tool_result 替换为简洁摘要，避免错误信息污染后续 LLM 推理。
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
+
+        if state.backtrack_count >= 2:
+            self._fold_backtracked_turns(llm_messages, state)
 
         # 渐进式失败引导：工具失败即注入（不等回溯触发），按连续失败次数升级强度
         if _round_failures:
@@ -1895,9 +1958,11 @@ class RVRBExecutor(RVRExecutor):
             ctx.record_tool_call(tool_name, tool_input)
 
         if tool_results:
-            # Context Pollution 清理（与 stream 版本对齐）
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
+
+        if state.backtrack_count >= 2:
+            self._fold_backtracked_turns(llm_messages, state)
 
         # 渐进式失败引导（与 stream 版本对齐）
         if _round_failures:

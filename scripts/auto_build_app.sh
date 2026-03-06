@@ -634,7 +634,7 @@ info "检查 Python 依赖..."
 
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec openai; do
     if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
