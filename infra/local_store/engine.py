@@ -68,21 +68,19 @@ def create_local_engine(
     db_dir: Optional[str] = None,
     db_name: Optional[str] = None,
     echo: bool = False,
-    use_null_pool: bool = False,
 ) -> AsyncEngine:
     """
     创建 SQLite 异步引擎
+
+    统一使用 NullPool：每次操作新建连接、用完即关。
+    aiosqlite + QueuePool 在 async 上下文切换时会因连接未归还导致死锁，
+    NullPool 彻底避免此问题。SQLite 连接创建仅打开文件句柄（微秒级），
+    配合 WAL 模式 + busy_timeout 可安全并发读写。
 
     Args:
         db_dir: 数据库目录
         db_name: 数据库文件名
         echo: 是否输出 SQL 日志
-        use_null_pool: 使用 NullPool（推荐用于独立引擎如 FTS5）。
-            NullPool 每次操作新建连接、用完即关，避免 aiosqlite
-            在 async 上下文切换时因 QueuePool 连接未归还导致的死锁。
-            SQLite 连接创建是轻量操作（仅打开文件句柄），
-            配合 WAL 模式可安全并发读写。
-            参考: https://www.sqlite.org/wal.html
 
     Returns:
         AsyncEngine 实例
@@ -90,22 +88,10 @@ def create_local_engine(
     db_path = _resolve_db_path(db_dir, db_name)
     url = f"sqlite+aiosqlite:///{db_path}"
 
-    pool_kwargs = {}
-    if use_null_pool:
-        # NullPool: 无连接池管理，每次新建连接用完即关。
-        # 适用于 FTS5 等独立引擎，避免 QueuePool + aiosqlite 死锁。
-        # SQLite WAL 模式保证并发读写安全。
-        pool_kwargs["poolclass"] = NullPool
-    else:
-        # QueuePool(size=1): 主引擎通过 FastAPI DI 管理会话生命周期，
-        # pool_size=1 保证 WAL 单写安全。
-        pool_kwargs["pool_size"] = 1
-        pool_kwargs["max_overflow"] = 0
-
     engine = create_async_engine(
         url,
         echo=echo or os.getenv("LOCAL_STORE_ECHO", "false").lower() == "true",
-        **pool_kwargs,
+        poolclass=NullPool,
     )
 
     # SQLite 连接初始化：启用 WAL、外键、性能参数
