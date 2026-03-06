@@ -253,9 +253,20 @@ class CapabilityRegistry:
 
     # ==================== 查询接口 ====================
 
+    @staticmethod
+    def normalize_tool_name(name: str) -> str:
+        """Skill/Tool 名称归一化：连字符 → 下划线（capabilities.yaml 统一用下划线）"""
+        return name.replace("-", "_")
+
     def get(self, name: str) -> Optional[Capability]:
-        """获取指定名称的能力"""
-        return self.capabilities.get(name)
+        """获取指定名称的能力（自动归一化 hyphen/underscore）"""
+        cap = self.capabilities.get(name)
+        if cap is not None:
+            return cap
+        normalized = self.normalize_tool_name(name)
+        if normalized != name:
+            return self.capabilities.get(normalized)
+        return None
 
     def find_by_type(self, cap_type: CapabilityType) -> List[Capability]:
         """按类型查找能力"""
@@ -300,14 +311,21 @@ class CapabilityRegistry:
         filtered._skills_dir = self._skills_dir
         filtered._initialized = True
 
+        normalized_enabled = {
+            self.normalize_tool_name(k): v for k, v in enabled_map.items()
+        }
+
         for name, cap in self.capabilities.items():
-            if enabled_map.get(name, False):
+            norm = self.normalize_tool_name(name)
+            if normalized_enabled.get(name, False) or normalized_enabled.get(norm, False):
                 filtered.capabilities[name] = cap
 
         for cap_data in self._raw_capabilities:
             cap_name = cap_data.get("name")
-            if cap_name and enabled_map.get(cap_name, False):
-                filtered._raw_capabilities.append(cap_data)
+            if cap_name:
+                norm = self.normalize_tool_name(cap_name)
+                if normalized_enabled.get(cap_name, False) or normalized_enabled.get(norm, False):
+                    filtered._raw_capabilities.append(cap_data)
 
         return filtered
 

@@ -1,11 +1,13 @@
 """
 Background Tasks REST API
 
-后台任务查询和管理接口，供前端 BackgroundTasksView 调用。
-任务本身由 PipelineTool 通过 BackgroundTaskManager 提交。
+后台任务查询、管理和提交接口，供前端 BackgroundTasksView 调用。
+支持两种提交来源：
+1. PipelineTool 通过 BackgroundTaskManager 内部提交
+2. 前端通过 POST /submit 主动提交（用户发起的后台任务）
 """
 
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -38,6 +40,17 @@ class BackgroundTaskResponse(BaseModel):
 class BackgroundTaskListResponse(BaseModel):
     tasks: list[BackgroundTaskResponse]
     total: int
+
+
+class SubmitBackgroundTaskRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=5000, description="任务内容")
+    user_id: str = Field(default="local")
+    files: Optional[List[Dict[str, Any]]] = None
+
+
+class SubmitBackgroundTaskResponse(BaseModel):
+    task_id: str
+    conversation_id: str
 
 
 # ============================================================
@@ -75,6 +88,67 @@ def get_manager():
 # ============================================================
 # Endpoints
 # ============================================================
+
+
+@router.post(
+    "/submit",
+    response_model=SubmitBackgroundTaskResponse,
+    summary="Submit a new background task from frontend",
+)
+async def submit_background_task(req: SubmitBackgroundTaskRequest):
+    """
+    前端主动提交后台任务。
+
+    创建新对话 → 包装为 BackgroundTask → 后台执行 Agent chat。
+    立即返回 task_id 和 conversation_id，前端可通过列表接口轮询进度。
+    """
+    from services.chat_service import get_chat_service
+    from services.conversation_service import get_conversation_service
+
+    manager = get_manager()
+    conv_service = get_conversation_service()
+    chat_svc = get_chat_service()
+
+    conv = await conv_service.create_conversation(
+        user_id=req.user_id, title=req.prompt[:30]
+    )
+    conversation_id = conv.id
+
+    task_name = req.prompt[:50]
+    if len(req.prompt) > 50:
+        task_name += "..."
+
+    async def _run_chat(
+        task: "BackgroundTask", mgr: "BackgroundTaskManager"
+    ) -> Any:
+        await mgr.update_progress(task.task_id, 0.05, "Agent 开始处理...")
+        result = await chat_svc.chat(
+            message=req.prompt,
+            user_id=req.user_id,
+            conversation_id=conversation_id,
+            stream=False,
+            files=req.files,
+        )
+        await mgr.update_progress(task.task_id, 1.0, "完成")
+        return result
+
+    bg_task = manager.submit(
+        name=task_name,
+        fn=_run_chat,
+        user_id=req.user_id,
+        conversation_id=conversation_id,
+        description=req.prompt,
+    )
+
+    logger.info(
+        f"前端提交后台任务: task_id={bg_task.task_id}, "
+        f"conversation_id={conversation_id}"
+    )
+
+    return SubmitBackgroundTaskResponse(
+        task_id=bg_task.task_id,
+        conversation_id=conversation_id,
+    )
 
 
 @router.get(

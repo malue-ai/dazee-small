@@ -320,11 +320,15 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
             # Use subprocess.run in thread-pool for Windows compatibility
             # (asyncio.create_subprocess_exec may raise NotImplementedError
             #  on Windows SelectorEventLoop)
+            from utils.subprocess_env import make_clean_env
+            clean_env = make_clean_env()
+
             try:
                 proc = await asyncio.create_subprocess_exec(
                     "playwright", "install", "chromium",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=clean_env,
                 )
                 _, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
                 rc, err_text = proc.returncode, stderr.decode()[:500]
@@ -335,6 +339,7 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                     return _sp.run(
                         ["playwright", "install", "chromium"],
                         capture_output=True, timeout=180,
+                        env=clean_env,
                     )
 
                 loop = asyncio.get_running_loop()

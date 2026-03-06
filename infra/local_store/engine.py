@@ -29,6 +29,8 @@ from utils.app_paths import get_shared_db_dir
 
 logger = get_logger("local_store.engine")
 
+_vec_loadable_path: Optional[str] = None
+
 SHARED_DB_NAME = "zenflux.db"
 
 
@@ -64,6 +66,31 @@ def _resolve_db_path(db_dir: Optional[str] = None, db_name: Optional[str] = None
     return directory / (db_name or _get_default_db_name())
 
 
+def _load_vec_on_connect(dbapi_conn) -> None:
+    """Load sqlite-vec extension on a DBAPI connection.
+
+    With NullPool, each operation gets a fresh sqlite3 connection.
+    SQLite extensions are per-connection, so we must reload on each connect.
+
+    The dbapi_conn from SQLAlchemy's aiosqlite adapter is NOT a raw
+    sqlite3.Connection — we must unwrap through the adapter chain:
+      AsyncAdapt_aiosqlite_connection._connection  (aiosqlite.Connection)
+        ._conn  (sqlite3.Connection)
+    """
+    try:
+        aio_conn = getattr(dbapi_conn, "_connection", None)
+        if aio_conn is None:
+            return
+        raw_conn = getattr(aio_conn, "_conn", None)
+        if raw_conn is None:
+            return
+        raw_conn.enable_load_extension(True)
+        raw_conn.load_extension(_vec_loadable_path)
+        raw_conn.enable_load_extension(False)
+    except Exception as e:
+        logger.warning(f"连接级 sqlite-vec 加载失败: {e}")
+
+
 def create_local_engine(
     db_dir: Optional[str] = None,
     db_name: Optional[str] = None,
@@ -94,19 +121,20 @@ def create_local_engine(
         poolclass=NullPool,
     )
 
-    # SQLite 连接初始化：启用 WAL、外键、性能参数
-    # 参考 SQLite 官方最佳实践 https://www.sqlite.org/pragma.html
     @event.listens_for(engine.sync_engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, connection_record):
+    def _on_connect(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")          # WAL 模式：支持并发读写
-        cursor.execute("PRAGMA foreign_keys=ON")            # 启用外键约束
-        cursor.execute("PRAGMA synchronous=NORMAL")         # WAL 模式下 NORMAL 即安全
-        cursor.execute("PRAGMA cache_size=-64000")          # 64MB 页缓存
-        cursor.execute("PRAGMA busy_timeout=5000")          # 5 秒忙等待（避免 SQLITE_BUSY）
-        cursor.execute("PRAGMA temp_store=MEMORY")          # 临时表/索引放内存（桌面端内存充足）
-        cursor.execute("PRAGMA mmap_size=268435456")        # 256MB 内存映射 I/O（提升读取性能）
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=-64000")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA mmap_size=268435456")
         cursor.close()
+
+        if _vec_loadable_path:
+            _load_vec_on_connect(dbapi_conn)
 
     logger.info(f"SQLite 引擎已创建: {db_path}")
     return engine
@@ -174,24 +202,31 @@ async def init_local_database(engine: AsyncEngine):
 
 async def init_vector_extension(engine: AsyncEngine) -> bool:
     """
-    尝试加载 sqlite-vec 扩展（可选）
+    探测 sqlite-vec 扩展并注册到全局变量，使后续每个新连接自动加载。
+
+    NullPool 下每次操作新建连接，因此扩展必须在 connect 事件中重复加载，
+    而非只在初始化连接上加载一次。
 
     Returns:
-        是否加载成功
+        是否可用
     """
+    global _vec_loadable_path
     try:
         import sqlite_vec
 
         vec_path = sqlite_vec.loadable_path()
 
         async with engine.begin() as conn:
-            # sqlite-vec: use loadable_path() for reliable extension loading
             raw_conn = await conn.get_raw_connection()
-            await raw_conn.driver_connection.enable_load_extension(True)
-            await raw_conn.driver_connection.load_extension(vec_path)
-            await raw_conn.driver_connection.enable_load_extension(False)
+            driver = raw_conn.driver_connection
+            if driver is None:
+                raise RuntimeError("driver_connection is None")
+            await driver.enable_load_extension(True)
+            await driver.load_extension(vec_path)
+            await driver.enable_load_extension(False)
 
-        logger.info("sqlite-vec 扩展加载成功")
+        _vec_loadable_path = vec_path
+        logger.info("sqlite-vec 扩展加载成功（已注册到 connect 事件）")
         return True
     except ImportError:
         logger.info("sqlite-vec 未安装（可选功能，pip install sqlite-vec）")
@@ -250,12 +285,13 @@ def is_vec_available() -> bool:
 
 async def close_local_engine():
     """关闭 SQLite 引擎（应用退出时调用）"""
-    global _engine, _session_factory, _vec_available
+    global _engine, _session_factory, _vec_available, _vec_loadable_path
     if _engine is not None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
         _vec_available = False
+        _vec_loadable_path = None
         logger.info("SQLite 引擎已关闭")
 
 
@@ -269,13 +305,14 @@ async def reload_local_engine() -> None:
     DB 路径为固定的共享路径 (data/db/zenflux.db)，不依赖 AGENT_INSTANCE，
     因此 reload 不会导致路径漂移。
     """
-    global _engine, _session_factory, _vec_available
+    global _engine, _session_factory, _vec_available, _vec_loadable_path
     if _engine is not None:
         await _engine.dispose()
         logger.info("SQLite 引擎已关闭，准备重新加载")
     _engine = None
     _session_factory = None
     _vec_available = False
+    _vec_loadable_path = None
     
     await get_local_engine()
     logger.info(f"SQLite 引擎已重新加载 (vec_available={_vec_available})")

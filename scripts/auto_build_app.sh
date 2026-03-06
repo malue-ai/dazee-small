@@ -10,7 +10,7 @@
 #   - Python 3.12（通过 Homebrew，或提示手动安装）
 #   - Node.js 18+（通过 Homebrew，或提示手动安装）
 #   - Rust toolchain（通过 rustup）
-#   - Python 虚拟环境 + pip 依赖（requirements.txt）
+#   - Python 虚拟环境 + pip 依赖（requirements-dev.txt = 运行时依赖 + 构建工具）
 #   - PyInstaller（后端打包工具）
 #   - 前端 npm 依赖（package.json）
 #
@@ -634,36 +634,37 @@ info "检查 Python 依赖..."
 
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec openai; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai; do
     if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
     fi
   done
 
+  # 构建时使用 requirements-dev.txt（包含运行时依赖 + PyInstaller 等构建工具）
+  DEV_REQ="$PROJECT_ROOT/requirements-dev.txt"
+  [ ! -f "$DEV_REQ" ] && DEV_REQ="$PROJECT_ROOT/requirements.txt"
+
   if [ "$NEEDS_INSTALL" = true ]; then
-    info "安装 Python 依赖 (requirements.txt)..."
-    if ! pip_install_or_mirror "$PYTHON_CMD -m pip" -r "$PROJECT_ROOT/requirements.txt"; then
+    info "安装 Python 依赖 ($(basename "$DEV_REQ"))..."
+    if ! pip_install_or_mirror "$PYTHON_CMD -m pip" -r "$DEV_REQ"; then
       fail "Python 依赖安装失败！请检查 Python 版本（当前: $($PYTHON_CMD --version 2>&1)，需要 3.12 ~ 3.13）"
     fi
     INSTALLED_SOMETHING=true
     ok "Python 依赖安装完成"
   else
-    ok "Python 依赖已是最新"
+    # 即使运行时依赖已安装，仍需确保 PyInstaller 存在
+    if [ "$SKIP_BACKEND" = false ] && ! $PYTHON_CMD -c "import PyInstaller" 2>/dev/null; then
+      info "安装构建工具 (PyInstaller)..."
+      pip_install_or_mirror "$PYTHON_CMD -m pip" -r "$DEV_REQ"
+      INSTALLED_SOMETHING=true
+      ok "构建工具安装完成"
+    else
+      ok "Python 依赖已是最新"
+    fi
   fi
 else
   warn "requirements.txt 不存在，跳过 Python 依赖安装"
-fi
-
-if [ "$SKIP_BACKEND" = false ]; then
-  if ! $PYTHON_CMD -c "import PyInstaller" 2>/dev/null; then
-    info "安装 PyInstaller..."
-    pip_install_or_mirror "$PYTHON_CMD -m pip" pyinstaller
-    INSTALLED_SOMETHING=true
-    ok "PyInstaller 安装完成"
-  else
-    ok "PyInstaller 已安装"
-  fi
 fi
 
 # ---------- 0d-2. Pandoc（Markdown → Word 转换）----------
@@ -798,31 +799,29 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
 
   # 安装 x86_64 依赖
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken mem0 sqlite_vec; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec; do
     if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
     fi
   done
 
+  X86_DEV_REQ="$PROJECT_ROOT/requirements-dev.txt"
+  [ ! -f "$X86_DEV_REQ" ] && X86_DEV_REQ="$PROJECT_ROOT/requirements.txt"
+
   if [ "$NEEDS_INSTALL" = true ]; then
     info "安装 x86_64 Python 依赖..."
-    if ! pip_install_or_mirror "$VENV_X86_DIR/bin/pip" --arch-prefix "arch -x86_64" -r "$PROJECT_ROOT/requirements.txt"; then
+    if ! pip_install_or_mirror "$VENV_X86_DIR/bin/pip" --arch-prefix "arch -x86_64" -r "$X86_DEV_REQ"; then
       fail "x86_64 Python 依赖安装失败"
     fi
     ok "x86_64 Python 依赖安装完成"
   else
-    ok "x86_64 Python 依赖已是最新"
-  fi
-
-  # 确保 x86_64 PyInstaller
-  if [ "$SKIP_BACKEND" = false ]; then
-    if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import PyInstaller" 2>/dev/null; then
-      info "安装 x86_64 PyInstaller..."
-      pip_install_or_mirror "$VENV_X86_DIR/bin/pip" --arch-prefix "arch -x86_64" pyinstaller
-      ok "x86_64 PyInstaller 安装完成"
+    if [ "$SKIP_BACKEND" = false ] && ! arch -x86_64 "$X86_PYTHON_CMD" -c "import PyInstaller" 2>/dev/null; then
+      info "安装 x86_64 构建工具..."
+      pip_install_or_mirror "$VENV_X86_DIR/bin/pip" --arch-prefix "arch -x86_64" -r "$X86_DEV_REQ"
+      ok "x86_64 构建工具安装完成"
     else
-      ok "x86_64 PyInstaller 已安装"
+      ok "x86_64 Python 依赖已是最新"
     fi
   fi
 
@@ -868,6 +867,8 @@ if [ "$CLEAN" = true ]; then
   rm -rf "$FRONTEND_DIR/src-tauri/target"
   rm -rf "$FRONTEND_DIR/src-tauri/binaries/xiaodazi-backend-*"
   rm -rf "$FRONTEND_DIR/src-tauri/binaries/_internal"
+  # 清理 __pycache__，防止 PyInstaller 复用旧 .pyc
+  find "$PROJECT_ROOT" -name "__pycache__" -not -path "*/.venv/*" -not -path "*/node_modules/*" -exec rm -rf {} + 2>/dev/null || true
   info "清理完成"
 fi
 

@@ -29,6 +29,16 @@ export interface ListBackgroundTasksParams {
   user_id?: string
 }
 
+export interface SubmitBackgroundTaskParams {
+  prompt: string
+  user_id?: string
+}
+
+export interface SubmitBackgroundTaskResponse {
+  task_id: string
+  conversation_id: string
+}
+
 // ==================== API Functions ====================
 
 export async function getBackgroundTasks(params?: ListBackgroundTasksParams): Promise<BackgroundTaskListResponse> {
@@ -53,5 +63,10 @@ export async function removeBackgroundTask(taskId: string): Promise<{ success: b
 
 export async function cleanupBackgroundTasks(maxAgeSeconds = 3600): Promise<{ success: boolean; removed: number }> {
   const response = await api.post<{ success: boolean; removed: number }>('/v1/background-tasks/cleanup', null, { params: { max_age_seconds: maxAgeSeconds } })
+  return response.data
+}
+
+export async function submitBackgroundTask(params: SubmitBackgroundTaskParams): Promise<SubmitBackgroundTaskResponse> {
+  const response = await api.post<SubmitBackgroundTaskResponse>('/v1/background-tasks/submit', params)
   return response.data
 }

@@ -73,6 +73,9 @@ export function useChat() {
   } | null>(null)
   const hitlConfirmLoading = ref(false)
 
+  /** V14: 复杂任务推荐后台执行（非阻塞） */
+  const recommendBackgroundData = ref<{ message: string } | null>(null)
+
   /** V11: 长任务确认弹窗 */
   const showLongRunConfirmModal = ref(false)
   const longRunConfirmData = ref<{ turn: number; message: string } | null>(null)
@@ -539,6 +542,13 @@ export function useChat() {
   }
 
   /**
+   * V14: 关闭后台推荐
+   */
+  function dismissRecommendBackground(): void {
+    recommendBackgroundData.value = null
+  }
+
+  /**
    * V11: 关闭长任务确认弹窗
    */
   async function dismissLongRunConfirm(): Promise<void> {
@@ -771,6 +781,13 @@ export function useChat() {
         message: data?.message ?? '危险操作需用户确认'
       }
       showHITLConfirmModal.value = true
+    }
+
+    // V14: 复杂任务推荐后台执行
+    if (type === 'recommend_background') {
+      recommendBackgroundData.value = {
+        message: data?.message ?? '此任务较复杂，建议转为后台执行',
+      }
     }
 
     // V11: 长任务确认
@@ -1253,6 +1270,10 @@ export function useChat() {
     hitlConfirmLoading,
     approveHITLConfirm,
     rejectHITLConfirm,
+
+    // V14: 复杂任务推荐后台执行
+    recommendBackgroundData,
+    dismissRecommendBackground,
 
     // V11: 长任务确认 + V13: 转后台
     showLongRunConfirmModal,

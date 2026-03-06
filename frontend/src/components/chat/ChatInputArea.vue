@@ -58,18 +58,51 @@
           >
             <SquareIcon class="w-4 h-4 fill-current" />
           </button>
-          <!-- 发送按钮 -->
-          <button 
-            v-else
-            class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center"
-            :class="canSend
-              ? 'bg-primary text-white hover:bg-primary-hover hover:shadow-lg shadow-primary/20'
-              : 'bg-muted text-muted-foreground/30 cursor-not-allowed'"
-            :disabled="!canSend"
-            @click="handleSend"
-          >
-            <ArrowUp class="w-5 h-5" />
-          </button>
+          <!-- 发送按钮组（split button） -->
+          <div v-else class="relative flex items-center" ref="sendMenuRef">
+            <button 
+              class="p-3 rounded-l-xl transition-all shadow-sm flex items-center justify-center"
+              :class="canSend
+                ? 'bg-primary text-white hover:bg-primary-hover shadow-primary/20'
+                : 'bg-muted text-muted-foreground/30 cursor-not-allowed'"
+              :disabled="!canSend"
+              @click="handleSend"
+            >
+              <ArrowUp class="w-5 h-5" />
+            </button>
+            <button
+              class="py-3 px-1 rounded-r-xl border-l transition-all shadow-sm flex items-center justify-center"
+              :class="canSend
+                ? 'bg-primary text-white/70 hover:text-white hover:bg-primary-hover border-white/20 shadow-primary/20'
+                : 'bg-muted text-muted-foreground/20 border-muted-foreground/10 cursor-not-allowed'"
+              :disabled="!canSend"
+              @click.stop="toggleSendMenu"
+            >
+              <ChevronDown class="w-3.5 h-3.5" />
+            </button>
+            <!-- 下拉菜单 -->
+            <Transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="opacity-0 scale-95"
+              enter-to-class="opacity-100 scale-100"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="opacity-100 scale-100"
+              leave-to-class="opacity-0 scale-95"
+            >
+              <div
+                v-if="showSendMenu"
+                class="absolute bottom-full right-0 mb-2 w-44 bg-white border border-border rounded-xl shadow-lg overflow-hidden"
+              >
+                <button
+                  @click="handleSendBackground"
+                  class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-foreground hover:bg-muted transition-colors"
+                >
+                  <MonitorCog class="w-4 h-4 text-muted-foreground" />
+                  后台运行
+                </button>
+              </div>
+            </Transition>
+          </div>
         </div>
       </div>
     </div>
@@ -80,9 +113,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import type { AttachedFile } from '@/types'
-import { Loader2, Plus, Square as SquareIcon, ArrowUp } from 'lucide-vue-next'
+import { Loader2, Plus, Square as SquareIcon, ArrowUp, ChevronDown, MonitorCog } from 'lucide-vue-next'
 import { useLocalWorkspaceStore } from '@/stores/localWorkspace'
 
 // ==================== Props ====================
@@ -115,6 +148,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'send'): void
+  (e: 'send-background'): void
   (e: 'stop'): void
   (e: 'upload-click'): void
   (e: 'files-dropped', files: File[]): void
@@ -129,6 +163,8 @@ const editorRef = ref<HTMLDivElement | null>(null)
 const isComposing = ref(false)
 const editorEmpty = ref(true)
 const isDragOver = ref(false)
+const showSendMenu = ref(false)
+const sendMenuRef = ref<HTMLDivElement | null>(null)
 let dragLeaveTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 防止 input → emit → watch → 更新 DOM 的循环 */
@@ -360,6 +396,27 @@ function handleSend() {
     emit('send')
   }
 }
+
+function handleSendBackground() {
+  if (canSend.value) {
+    showSendMenu.value = false
+    emit('send-background')
+  }
+}
+
+function toggleSendMenu() {
+  if (!canSend.value) return
+  showSendMenu.value = !showSendMenu.value
+}
+
+function onClickOutside(e: MouseEvent) {
+  if (sendMenuRef.value && !sendMenuRef.value.contains(e.target as Node)) {
+    showSendMenu.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('click', onClickOutside, true))
+onUnmounted(() => document.removeEventListener('click', onClickOutside, true))
 
 function focus() {
   editorRef.value?.focus()

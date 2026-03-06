@@ -1,0 +1,21 @@
+# ============================================================
+# 可选重量级依赖
+#
+# 这些包体积大（docling 传递依赖 ~600MB）或项目中未直接使用，
+# 不包含在默认安装和打包中。按需单独安装：
+#   pip install -r requirements-optional.txt
+# ============================================================
+
+# IBM 文档解析（视觉+语言模型，表格识别，本地运行）
+# 传递依赖：torch(335MB), scipy(67MB), transformers(50MB), pandas(37MB) 等
+# 代码位置：utils/document_parser.py（try/except 延迟导入，缺失时降级到 pdfplumber）
+docling>=2.31.0
+
+# Qwen DashScope SDK（代码中未直接 import，Qwen 通过 OpenAI 兼容端点调用）
+dashscope>=1.25.0
+
+# ODT 文档解析（代码中未 import）
+odfpy>=1.4.1
+
+# Word 模板渲染（仅 sandbox Dockerfile 中使用，主进程未 import）
+docxtpl>=0.18.0

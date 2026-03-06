@@ -1,23 +1,29 @@
+# ============================================================
+# 运行时依赖（打包构建使用此文件）
+#
+# 开发/测试工具 → requirements-dev.txt
+# 可选重量级依赖 → requirements-optional.txt
+# ============================================================
+
 # FastAPI 核心依赖
 fastapi>=0.109.0,<1.0.0
 uvicorn[standard]>=0.27.0
 pydantic>=2.5.3,<3.0.0
 
 # Claude API
-anthropic>=0.40.0  # 更新最低版本要求
-# OpenAI SDK（Responses API 需要 >=2.20.0）
-openai>=2.20.0      # GPT-5.x Responses API + Chat Completions 双通道
+anthropic>=0.40.0
 
-# Qwen DashScope SDK
-dashscope>=1.25.0
+# OpenAI SDK（Responses API 需要 >=2.20.0）
+openai>=2.20.0
 
 # 配置管理
 pyyaml>=6.0
+python-dotenv>=1.0.0      # .env 文件加载（实例 API Key 等）
 
-# 其他工具
+# 网络 / 异步 I/O
 python-multipart>=0.0.6
 aiofiles>=24.1.0          # 异步文件操作
-aiohttp>=3.9.0            # 异步 HTTP 客户端
+aiohttp>=3.9.0            # 异步 HTTP 客户端（tools/api_calling.py）
 httpx>=0.27.0             # HTTP 客户端
 filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
 
@@ -36,27 +42,25 @@ numpy>=1.26.0
 json5>=0.9.0
 json-repair>=0.44.0
 
-
 # Mem0 记忆系统
+mem0ai>=0.1.29            # 向量记忆核心（长期记忆存储+检索）
 sqlite-vec>=0.1.1         # SQLite 向量搜索扩展（本地向量存储）
 huggingface-hub>=0.20.0   # HuggingFace 模型下载（嵌入模型 GGUF）
-llama-cpp-python>=0.2.0   # GGUF 本地 Embedding（BGE-M3 Q4，推荐方案）
+llama-cpp-python>=0.2.0   # GGUF 本地 Embedding（BGE-M3 Q4）
 
 # 文件处理
 Pillow>=10.0.0            # 图片压缩
-PyPDF2>=3.0.0             # PDF 文本提取
+PyPDF2>=3.0.0             # PDF 文本提取（旧版 fallback）
+pypdf>=4.0.0              # PDF 文本提取（新版，知识库索引首选）
 pdfplumber>=0.11.0        # PDF 表格+文本提取（本地降级方案）
-docling>=2.31.0           # IBM 文档解析（视觉+语言模型，表格识别，本地运行）
 python-docx>=0.8.11       # Word 文档解析（页数估算）
-docxtpl>=0.18.0           # Word 模板渲染（Jinja2 驱动）
 python-pptx>=0.6.21       # PPT 生成和解析
 openpyxl>=3.0.0           # Excel 表格解析（工作表数量）
-odfpy>=1.4.1              # ODT 文档解析
 unstructured-client>=0.30.6  # 非结构化数据处理客户端
 
 # 定时任务
 apscheduler>=3.10.0
-croniter>=6.0.0               # Cron 表达式解析
+croniter>=6.0.0           # Cron 表达式解析
 
 # Google Gemini API（图像生成）
 google-genai>=1.0.0       # Gemini 3 Pro Image API
@@ -66,15 +70,13 @@ pyobjc-core>=12.0; sys_platform == "darwin"
 pyobjc-framework-Vision>=12.0; sys_platform == "darwin"
 pyobjc-framework-Quartz>=12.0; sys_platform == "darwin"
 
-# 测试工具
-pytest>=8.0.0             # 测试框架
-pytest-asyncio>=0.23.0    # 异步测试支持
+# 系统监控
 psutil>=5.9.0
-pyinstaller==6.11.1
+
 # WebSocket（实时通信）
 websockets>=12.0
 
-# Multi-channel gateway (optional)
+# Multi-channel gateway
 python-telegram-bot>=21.0     # Telegram bot long polling
 lark-oapi>=1.3.0              # Feishu (Lark) WebSocket + API
 python-socks[asyncio]>=2.0    # SOCKS proxy support for WebSocket

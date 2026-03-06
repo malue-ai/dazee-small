@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -21,7 +22,7 @@ from core.nodes.protocol import (
     ShellResult,
     SystemRunParams,
 )
-from utils.app_paths import get_bundle_dir
+from utils.app_paths import get_bundle_dir, is_frozen
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +54,43 @@ class LocalNodeBase(ABC):
         self.display_name = display_name
         self._initialized = False
 
-        # Shell 执行器：默认 cwd 为项目根，使相对路径如 skills/library/... 可解析
+        # Shell 执行器的默认 cwd
+        # frozen 模式下 get_bundle_dir() 返回 _MEIPASS（含 .pyc 文件），
+        # 不能用作子进程 cwd，否则 python3 会加载到错误版本的 .pyc
+        if is_frozen():
+            default_cwd = os.path.expanduser("~")
+        else:
+            default_cwd = str(get_bundle_dir())
+
         self.shell_executor = ShellExecutor(
             allowlist=allowlist,
             safe_bins=safe_bins,
-            default_cwd=str(get_bundle_dir()),
+            default_cwd=default_cwd,
         )
+
+        self.python_info: Dict[str, object] = {
+            "available": False, "version": "", "path": "", "has_safe_path": False,
+        }
+        self._python_detected = False
+
+    async def detect_python(self) -> Dict[str, object]:
+        """Detect system Python (lazy, runs once)."""
+        if self._python_detected:
+            return self.python_info
+
+        from utils.subprocess_env import detect_python_info
+        self.python_info = await detect_python_info(
+            shell_execute=self.shell_executor.execute,
+        )
+        self._python_detected = True
+
+        ver = self.python_info.get("version", "")
+        if self.python_info.get("available"):
+            logger.info(f"系统 Python 探测: {ver} ({self.python_info.get('path')})")
+        else:
+            logger.info("系统 Python 探测: 不可用")
+
+        return self.python_info
 
     @property
     @abstractmethod

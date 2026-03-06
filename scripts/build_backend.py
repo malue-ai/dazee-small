@@ -70,6 +70,18 @@ def clean_build() -> None:
             print(f"已清理: {d}")
 
 
+def _purge_pycache() -> None:
+    """Remove all __pycache__ dirs so PyInstaller compiles from fresh source."""
+    count = 0
+    for cache_dir in PROJECT_ROOT.rglob("__pycache__"):
+        if ".venv" in cache_dir.parts or "node_modules" in cache_dir.parts:
+            continue
+        shutil.rmtree(cache_dir)
+        count += 1
+    if count:
+        print(f"已清理 {count} 个 __pycache__ 目录")
+
+
 def build() -> Path:
     """
     执行 PyInstaller 构建（onedir 模式）
@@ -96,6 +108,8 @@ def build() -> Path:
     print(f"输出: {BINARIES_DIR}")
     print(f"模式: onedir（目录模式）")
     print()
+
+    _purge_pycache()
 
     # 执行 PyInstaller
     cmd = [

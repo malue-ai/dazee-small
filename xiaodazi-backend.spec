@@ -110,12 +110,12 @@ _native_packages = [
     'yarl',
     'PIL',             # Pillow
     'llama_cpp',       # GGUF 本地 Embedding（C 扩展）
-    # 数据文件类（有 .py 时区数据 / 模板文件导致建目录）
-    'pytz',
-    'Crypto',          # pycryptodome
+    # 数据文件类
+    'Crypto',          # pycryptodome（lark-oapi 加密依赖，含 C 扩展）
     'docx',            # python-docx
     'pdfplumber',      # PDF 表格+文本解析（document_parser.py 延迟导入）
-    'google',          # google-* 命名空间
+    'google.genai',    # Google Gemini API（仅收集 genai 子包，不收集整个 google 命名空间）
+    'google.auth',     # google-genai 的认证依赖
     # 以下仅在实际使用时取消注释：
     # 'asyncpg',       # PostgreSQL（本项目用 SQLite，不需要）
     # 'boto3',         # AWS S3（未使用）
@@ -186,7 +186,7 @@ hiddenimports += [
     # 文档结构化解析（utils/document_parser.py 延迟导入）
     'pdfplumber',
     'unstructured_client',
-    'docling',
+    # docling 已移至 requirements-optional.txt，不再打包
     # .env 文件加载（utils/instance_loader.py、services/settings_service.py 延迟导入）
     'dotenv',
 ]
@@ -241,22 +241,45 @@ hiddenimports = list(set(hiddenimports))
 # ==================== 排除包（减小体积）====================
 
 excludes = [
-    # 科学计算 / 机器学习（服务端不需要）
+    # 科学计算 / 机器学习
     # 注意：不排除 numpy（intent_cache 需要）和 PIL（file_handler 需要图片压缩）
     'matplotlib', 'pandas', 'scipy',
     'cv2',
-    'torch', 'tensorflow',
-    # 开发/测试工具
+    'torch', 'torchvision', 'torchaudio', 'tensorflow',
+
+    # docling 及其传递依赖（已移至 requirements-optional.txt，即使意外安装也不打包）
+    'docling', 'docling_core', 'docling_ibm_models', 'docling_parse',
+    'transformers', 'accelerate', 'safetensors',
+    'sympy', 'mpmath', 'networkx',
+    'rapidocr', 'onnxruntime',
+    'lxml',
+    'rtree', 'shapely',
+    'Faker',
+    'tokenizers',
+
+    # dashscope SDK（代码中未 import，Qwen 通过 OpenAI 兼容端点调用）
+    'dashscope',
+
+    # 开发/测试/构建工具（已移至 requirements-dev.txt）
     'jupyter', 'notebook', 'IPython',
     'pytest', 'test', 'tests', 'unittest',
+    'pyinstaller', 'PyInstaller',
+
     # 构建/包管理工具（运行时不需要）
     # pkg_resources 依赖 jaraco.text（setuptools 80.x），项目代码不使用，直接排除
     # 注意：保留 setuptools（Python 3.12 的 distutils 来自 setuptools）
     'pkg_resources', 'jaraco',
     'pip', '_distutils_hack',
     'ensurepip', 'venv',
-    # GUI 工具包（服务端不需要）
+
+    # GUI 工具包
     'tkinter', '_tkinter', 'tcl', 'tk',
+
+    # 其他传递依赖（运行时不需要）
+    'pygments',        # 语法高亮（通过 rich/transformers 拉入）
+    'tqdm',            # 进度条（仅 CLI 用）
+    'email_validator',
+
     # 其他不需要的标准库模块
     'xmlrpc', 'pydoc', 'doctest', 'lib2to3',
 ]
