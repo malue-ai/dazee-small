@@ -386,27 +386,31 @@ class ToolSelector:
         schema_tools: Optional[List[str]] = None,
         plan: Optional[Dict[str, Any]] = None,
         intent_required_tools: Optional[List[str]] = None,
+        intent_skill_groups: Optional[List[str]] = None,
+        skills_loader=None,
+        skill_group_registry=None,
     ) -> Tuple[List[str], str, List[str], Optional[List[str]]]:
         """
         解析能力需求（Plan + Intent + Schema 三级优先级）
 
         优先级策略：
-        1. Plan.required_skills：最高优先（Plan 在完整任务上下文中由 LLM 创建）
-        2. Intent.required_tools：LLM 语义推断的动态工具需求
-        3. Schema 配置：作为 Allowlist (白名单)
-        4. 全量 fallback：加载所有注册工具
+        1. Plan.required_skills：最高优先
+        2. Intent.required_tools + skill_groups 派生工具：合并后提取能力标签
+        3. Schema 配置：作为 Allowlist
+        4. 全量 fallback
 
         Args:
             schema_tools: Schema 配置的工具名列表
             plan: 任务规划结果（包含 required_skills 字段）
             intent_required_tools: IntentAnalyzer LLM 推断的动态工具名列表
+            intent_skill_groups: IntentAnalyzer 推断的 skill 分组列表，
+                从中提取 backend_type=tool 的 skill 对应的 tool_name，
+                补充到 required_tools 中（重召回）
+            skills_loader: SkillsLoader 实例（用于 skill_groups → tool_name 映射）
+            skill_group_registry: SkillGroupRegistry 实例
 
         Returns:
-            (required_capabilities, selection_source, overridden_sources, allowed_tools) 四元组
-            - required_capabilities: 最终选择的能力标签列表
-            - selection_source: 选择来源（plan/intent/schema/default）
-            - overridden_sources: 被覆盖的来源列表
-            - allowed_tools: 允许使用的工具白名单（来自 Schema，工具名列表）
+            (required_capabilities, selection_source, overridden_sources, allowed_tools)
         """
         required_capabilities: List[str] = []
         selection_source = "default"
@@ -445,12 +449,26 @@ class ToolSelector:
             else:
                 logger.info(f"✅ 使用 Plan 推荐: {required_capabilities}")
 
-        elif intent_required_tools:
-            required_capabilities = self._extract_capability_tags(intent_required_tools)
+        elif intent_required_tools or intent_skill_groups:
+            merged_tools = list(intent_required_tools or [])
+
+            if intent_skill_groups:
+                derived = self._derive_tools_from_skill_groups(
+                    intent_skill_groups, skills_loader, skill_group_registry,
+                )
+                for t in derived:
+                    if t not in merged_tools:
+                        merged_tools.append(t)
+                if derived:
+                    logger.info(
+                        f"📎 从 skill_groups {intent_skill_groups} 派生工具: {derived}"
+                    )
+
+            required_capabilities = self._extract_capability_tags(merged_tools)
             selection_source = "intent"
             logger.info(
                 f"✅ 使用 Intent 推荐工具: "
-                f"{intent_required_tools} → {required_capabilities}"
+                f"{merged_tools} → {required_capabilities}"
             )
 
         elif allowed_tools:
@@ -471,6 +489,51 @@ class ToolSelector:
             )
 
         return required_capabilities, selection_source, overridden_sources, allowed_tools
+
+    @staticmethod
+    def _derive_tools_from_skill_groups(
+        skill_groups: List[str],
+        skills_loader=None,
+        group_registry=None,
+    ) -> List[str]:
+        """
+        从 skill_groups 中提取 backend_type=tool 的 skill 对应的 tool_name。
+
+        解决 relevant_skill_groups 召回准确但工具选择断链的问题。
+        """
+        if not skills_loader or not group_registry:
+            return []
+
+        derived: List[str] = []
+        try:
+            all_entries = (
+                skills_loader.get_enabled_skills()
+                if hasattr(skills_loader, "get_enabled_skills") else []
+            )
+            entries_by_name = {e.name: e for e in all_entries}
+
+            for group_name in skill_groups:
+                if group_name.startswith("_"):
+                    continue
+                skill_names_in_group = (
+                    group_registry.get_skills_in_group(group_name)
+                    if hasattr(group_registry, "get_skills_in_group") else []
+                )
+                for sname in skill_names_in_group:
+                    entry = entries_by_name.get(sname)
+                    if not entry:
+                        continue
+                    bt = getattr(entry, "backend_type", None)
+                    bt_val = bt.value if hasattr(bt, "value") else str(bt)
+                    if bt_val == "tool":
+                        raw = getattr(entry, "raw_config", None) or {}
+                        tool_name = raw.get("tool_name", "") or entry.name
+                        if tool_name and tool_name not in derived:
+                            derived.append(tool_name)
+        except Exception as e:
+            logger.debug(f"从 skill_groups 派生工具失败（不影响功能）: {e}")
+
+        return derived
 
     def get_available_apis(self, executor=None) -> List[str]:
         """

@@ -727,6 +727,12 @@ class Agent:
                 f"工具裁剪: complexity=simple, 精简为 {len(schema_tools)} 个核心工具"
             )
 
+        _skills_loader = getattr(self, "_skills_loader", None)
+        _group_registry = None
+        if hasattr(self, "_prompt_cache") and self._prompt_cache:
+            rc = getattr(self._prompt_cache, "runtime_context", None) or {}
+            _group_registry = rc.get("_skill_group_registry")
+
         required_capabilities, selection_source, overridden_sources, allowed_tools = (
             await self.tool_selector.resolve_capabilities(
                 schema_tools=schema_tools,
@@ -734,6 +740,11 @@ class Agent:
                 intent_required_tools=(
                     intent.required_tools if intent else None
                 ),
+                intent_skill_groups=(
+                    intent.relevant_skill_groups if intent else None
+                ),
+                skills_loader=_skills_loader,
+                skill_group_registry=_group_registry,
             )
         )
 

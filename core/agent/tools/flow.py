@@ -56,6 +56,7 @@ class ToolExecutionContext:
     session_id: str
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
+    instance_id: Optional[str] = None
 
     # 依赖
     tool_executor: Optional["ToolExecutor"] = None
@@ -192,6 +193,7 @@ class ToolExecutionFlow:
                     session_id=context.session_id,
                     conversation_id=context.conversation_id,
                     user_id=context.user_id,
+                    instance_id=context.instance_id,
                 )
 
             # 上下文注入

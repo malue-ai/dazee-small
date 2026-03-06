@@ -1,5 +1,5 @@
-name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，主动、亲切、可靠，能执行本地桌面任务并记住用户偏好
+name: XiaoDaziDesktopCompanion
+description: 桌面端本地 AI 搭子，面向普通用户，擅长文件处理、桌面操作、写作整理、数据处理与个性化陪伴式协助。
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,13 +7,15 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_operation
-  - data_analysis
+  - desktop_operation
+  - file_management
   - writing
+  - data_analysis
   - translation
+  - knowledge_search
+  - memory_query
+  - screenshot
   - ui_automation
-  - memory_recall
-  - preference_adaptation
   output_formats:
   - text
   - markdown
@@ -25,32 +27,38 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
+  trigger_condition: task_complexity in ['medium','complex'] or involves_multi_file_modification
+    or requires_ui_automation or unavailable_skill_fallback_needed
   max_steps: 20
-  granularity: fine
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
   max_replan_attempts: 3
   replan_strategy: incremental
-  failure_threshold: 0.4
+  failure_threshold: 0.34
 tool_selector:
   enabled: true
-  available_tools: []
-  selection_strategy: capability_based
-  allow_parallel: false
-  max_parallel_tools: 3
-  base_tools:
+  available_tools:
   - nodes
   - knowledge_search
   - open_system_preferences
   - hitl
+  - plan
+  - plan-todo
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools:
+  - nodes
+  - hitl
+  - plan
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: user
   episodic_memory: true
-  working_memory_limit: 50
+  working_memory_limit: 40
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -62,31 +70,22 @@ output_formatter:
   - json
   - html
   code_highlighting: false
-  max_output_length: 2000
+  max_output_length: 12000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills:
-- name: excel-generator
-  enabled: true
-  description: ''
-- name: multi-lang-ocr
-  enabled: true
-  description: ''
-- name: elegant-reports
-  enabled: true
-  description: ''
+skills: []
 tools:
-- web_search
-- api_calling
 - nodes
 - knowledge_search
 - open_system_preferences
 - hitl
-model: qwen3-max
+- plan
+- plan-todo
+model: gpt-5.4
 max_turns: null
 execution_strategy: rvr-b
 allow_parallel_tools: false
@@ -100,4 +99,8 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂桌面任务（文件操作、UI自动化、多步规划），具备强记忆与偏好学习能力，强调本地执行、安全操作和用户引导。需启用细粒度规划、用户级记忆、HITL确认机制及基础工具集，支持OCR、报告生成等关键技能，并通过intent_analyzer识别任务复杂度与类型以触发合适行为模式。
+reasoning: 该 Prompt 描述的是一个本地桌面 AI 助手，而非纯问答或单一文档生成器。它需要理解任务复杂度、在文件操作/桌面 UI 操作/知识库检索/用户记忆之间切换，并在复杂任务时进行规划，因此必须启用
+  intent_analyzer 和 plan_manager。由于强调‘只用已启用的 Skills’、优先本地执行、敏感操作确认、多文件修改协议、不可用 Skill
+  的替代规划，所以需要显式配置 tool_selector，并保守地限制并行，避免桌面操作和文件修改出现竞态。Prompt 强调记住用户偏好、项目隔离、回答记忆相关问题前先查
+  `<user_memory>`，因此应启用 user 级 memory_manager，并保留较大的会话工作记忆。输出需要亲切、结构化、通俗，因此启用 markdown
+  输出格式。Schema 中不额外臆造具体 Skills，因为 Prompt 明确要求只使用运行时已启用的能力；这里保留工具层能力，具体 Skills 由运行时注入更合适。

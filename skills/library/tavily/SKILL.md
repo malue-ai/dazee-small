@@ -16,8 +16,8 @@ metadata:
 ## 使用场景
 
 - 需要高质量搜索结果用于调研、写作等复杂任务
-- ddg-search 结果不够精确时的升级选项
-- deep-research 流程中的搜索后端
+- 免费搜索 Skill 结果不够精确时的升级选项
+- 深度调研流程中的搜索后端
 
 ## 前置条件
 
@@ -88,4 +88,4 @@ for result in response["results"]:
 
 - 搜索结果标注来源 URL 和相关度分数
 - advanced 搜索用于深度调研，basic 用于快速查询
-- 免费额度有限，简单查询优先用 ddg-search
+- 免费额度有限，简单查询优先用免费搜索 Skill（如 jina-reader）
