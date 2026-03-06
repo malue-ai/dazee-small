@@ -1066,6 +1066,7 @@ async def configure_skill(request: SkillConfigureRequest):
                         source="skill_configure",
                     )
                     os.environ[key] = value
+            await session.commit()
 
         logger.info(
             f"配置 Skill credential: {request.skill_name}, "
