@@ -972,8 +972,125 @@ class OpenAIAdaptor(BaseAdaptor):
 
         return cleaned_messages
 
+    # ============================================================
+    # Responses API: Claude CCB → Responses input items (zero-copy)
+    # ============================================================
+
+    def convert_messages_for_responses(
+        self, messages: List[Message], system: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Claude CCB → Responses API format in one pass (no Chat intermediate).
+
+        Returns:
+            {"instructions": str, "input": List[Dict]}
+        """
+        instructions = system or ""
+        input_items: List[Dict[str, Any]] = []
+
+        func_call_ids: set = set()
+        func_output_ids: set = set()
+
+        for msg in messages:
+            content = msg.content
+
+            if isinstance(content, str):
+                input_items.append({"role": msg.role, "content": content})
+                continue
+
+            if not isinstance(content, list):
+                input_items.append({"role": msg.role, "content": str(content)})
+                continue
+
+            content_parts: List[Dict[str, Any]] = []
+
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type", "")
+
+                if btype == "text":
+                    text = block.get("text", "")
+                    if text:
+                        content_parts.append({"type": "input_text", "text": text})
+
+                elif btype == "image":
+                    source = block.get("source", {})
+                    stype = source.get("type")
+                    if stype == "url":
+                        content_parts.append({"type": "input_image", "image_url": source.get("url", "")})
+                    elif stype == "base64":
+                        mt = source.get("media_type", "image/jpeg")
+                        content_parts.append({"type": "input_image", "image_url": f"data:{mt};base64,{source.get('data', '')}"})
+
+                elif btype == "input_audio":
+                    content_parts.append(block)
+
+                elif btype == "document":
+                    source = block.get("source", {})
+                    text = source.get("data", "") or source.get("text", "")
+                    if text:
+                        content_parts.append({"type": "input_text", "text": text})
+
+                elif btype in ("thinking", "redacted_thinking"):
+                    pass
+
+                elif btype == "tool_use":
+                    call_id = block.get("id", "")
+                    func_call_ids.add(call_id)
+                    input_items.append({
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": block.get("name", ""),
+                        "arguments": self._serialize_json(block.get("input", {})),
+                    })
+
+                elif btype == "tool_result":
+                    call_id = block.get("tool_use_id", "")
+                    func_output_ids.add(call_id)
+                    output = self._get_tool_result_content(block)
+                    if not isinstance(output, str):
+                        output = json.dumps(output, ensure_ascii=False)
+                    input_items.append({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": output,
+                    })
+
+                else:
+                    logger.warning(f"⚠️ [Responses] Unknown block type '{btype}', converting to text")
+                    text = block.get("text", "")
+                    if text:
+                        content_parts.append({"type": "input_text", "text": text})
+
+            if content_parts:
+                if msg.role == "assistant":
+                    text = "\n".join(
+                        p["text"] for p in content_parts if p.get("type") == "input_text" and p.get("text")
+                    )
+                    if text:
+                        input_items.append({"role": "assistant", "content": text})
+                else:
+                    if len(content_parts) == 1 and content_parts[0].get("type") == "input_text":
+                        input_items.append({"role": msg.role, "content": content_parts[0]["text"]})
+                    else:
+                        input_items.append({"role": msg.role, "content": content_parts})
+
+        unpaired_calls = func_call_ids - func_output_ids
+        unpaired_outputs = func_output_ids - func_call_ids
+        if unpaired_calls or unpaired_outputs:
+            input_items = [
+                item for item in input_items
+                if not (item.get("type") == "function_call" and item.get("call_id") in unpaired_calls)
+                and not (item.get("type") == "function_call_output" and item.get("call_id") in unpaired_outputs)
+            ]
+
+        return {"instructions": instructions, "input": input_items}
+
+    # ============================================================
+    # Shared utilities
+    # ============================================================
+
     def _serialize_json(self, obj: Any) -> str:
-        """序列化为 JSON 字符串"""
         return json.dumps(obj, ensure_ascii=False)
 
     def _get_tool_result_content(self, block: Dict) -> Any:
@@ -982,7 +1099,6 @@ class OpenAIAdaptor(BaseAdaptor):
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            # Multimodal content blocks (e.g. text + image), pass through
             return content
         return str(content)
 
