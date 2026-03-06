@@ -14,7 +14,7 @@ skills:
   os_aware: true
   common:
     builtin:
-      - { name: plan-todo, backend_type: tool, tool_name: plan_todo, system: true, description: "任务规划与进度追踪" }
+      - { name: plan-todo, backend_type: tool, tool_name: plan, system: true, description: "任务规划与进度追踪" }
       - { name: hitl, backend_type: tool, tool_name: hitl, system: true, description: "涉及敏感操作时请求用户确认" }
       - { name: api-calling, backend_type: tool, tool_name: api_calling, system: true, description: "通用 HTTP API 调用能力" }
       - { name: file-manager, backend_type: local, skill_source: library, system: true, description: "本地文件管理" }
