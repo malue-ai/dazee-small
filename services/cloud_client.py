@@ -400,7 +400,9 @@ async def get_cloud_client_for_instance(instance_name: str) -> Optional["CloudCl
         config = await load_instance_config(instance_name)
         raw = config.raw_config or {}
         cloud_cfg = raw.get("cloud") or {}
-        if not cloud_cfg.get("enabled", False):
+        # 环境变量兜底：CLOUD_ENABLED=true 时即使 config.yaml 缺失也能启用
+        enabled = cloud_cfg.get("enabled", False) or os.getenv("CLOUD_ENABLED", "").lower() in ("true", "1", "yes")
+        if not enabled:
             return None
         cloud_url = (cloud_cfg.get("url") or "").strip() or os.getenv("CLOUD_URL", "https://agent.dazee.ai")
         username = os.getenv("CLOUD_USERNAME") or cloud_cfg.get("username") or None

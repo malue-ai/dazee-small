@@ -148,10 +148,11 @@ async def _background_reload(
     if not task:
         return
 
+    # Save old config/prototype so we can restore on failure
+    saved_prototype = registry._agent_prototypes.get(agent_id)
+    saved_config = registry._configs.get(agent_id)
+
     try:
-        # Save old config/prototype so we can restore on failure
-        saved_prototype = registry._agent_prototypes.get(agent_id)
-        saved_config = registry._configs.get(agent_id)
 
         registry._agent_prototypes.pop(agent_id, None)
         registry._configs.pop(agent_id, None)
@@ -726,6 +727,18 @@ def _build_config_dict(request: AgentCreateRequest) -> dict:
             "retention_policy": request.memory.retention_policy,
         }
 
+    # Cloud (cloud agent connection)
+    if request.cloud:
+        cloud_dict: dict = {
+            "enabled": request.cloud.enabled,
+            "url": request.cloud.url,
+        }
+        if request.cloud.username:
+            cloud_dict["username"] = request.cloud.username
+        if request.cloud.password:
+            cloud_dict["password"] = request.cloud.password
+        config_data["cloud"] = cloud_dict
+
     # Storage (custom data directory)
     if request.data_dir:
         config_data["storage"] = {
@@ -1284,8 +1297,55 @@ async def get_agent(agent_id: str):
         "enabled_capabilities": detail_raw.get("enabled_capabilities", {}),
         "apis": detail_raw.get("apis", []),
         "skills": detail_raw.get("skills", []),
+        "cloud": detail_raw.get("cloud"),
         "loaded_at": detail_raw["loaded_at"],
     }
+
+
+class CloudConfigUpdate(BaseModel):
+    enabled: bool = Field(False)
+    url: str = Field("https://agent.dazee.ai")
+    username: Optional[str] = Field(None)
+    password: Optional[str] = Field(None)
+
+
+@router.post(
+    "/{agent_id}/cloud",
+    summary="更新 Agent 的云端配置",
+    description="单独更新 cloud 配置段，不触发 Agent 重载",
+)
+async def update_agent_cloud(agent_id: str, body: CloudConfigUpdate):
+    """Patch cloud section in config.yaml without full agent rebuild."""
+    instance_dir = get_instances_dir() / agent_id
+    config_path = instance_dir / "config.yaml"
+    if not config_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "AGENT_NOT_FOUND", "message": f"Agent '{agent_id}' 不存在"},
+        )
+
+    async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
+        existing = yaml.safe_load(await f.read()) or {}
+
+    cloud_dict: dict = {"enabled": body.enabled, "url": body.url}
+    if body.username:
+        cloud_dict["username"] = body.username
+    if body.password:
+        cloud_dict["password"] = body.password
+    existing["cloud"] = cloud_dict
+
+    config_yaml = yaml.dump(existing, allow_unicode=True, default_flow_style=False, sort_keys=False, indent=2)
+    async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
+        await f.write(config_yaml)
+
+    # Invalidate cached cloud client so next usage picks up new config
+    try:
+        from services.cloud_client import _instance_clients
+        _instance_clients.pop(agent_id, None)
+    except Exception:
+        pass
+
+    return {"success": True, "cloud": cloud_dict}
 
 
 @router.get(

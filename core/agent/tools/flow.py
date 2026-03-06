@@ -56,6 +56,7 @@ class ToolExecutionContext:
     session_id: str
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
+    instance_id: Optional[str] = None
 
     # 依赖
     tool_executor: Optional["ToolExecutor"] = None

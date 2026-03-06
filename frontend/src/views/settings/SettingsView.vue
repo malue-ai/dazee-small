@@ -418,90 +418,107 @@
           </h2>
 
           <div class="bg-card rounded-lg border border-border overflow-hidden">
-            <div class="px-4 py-3 border-b border-border">
-              <div class="flex items-center gap-2 mb-1">
-                <Cloud class="w-4 h-4 text-primary" />
-                <span class="text-sm font-medium text-foreground">云端 Agent 连接</span>
-                <span
-                  v-if="cloudStatus === 'connected'"
-                  class="ml-auto inline-flex items-center gap-1 text-xs text-success"
-                >
-                  <span class="w-1.5 h-1.5 rounded-full bg-success" />
-                  已连接
-                </span>
-                <span
-                  v-else-if="cloudStatus === 'checking'"
-                  class="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground"
-                >
-                  <Loader2 class="w-3 h-3 animate-spin" />
-                  检查中
-                </span>
-                <span
-                  v-else
-                  class="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground"
-                >
-                  <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
-                  未连接
-                </span>
+            <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <Cloud class="w-4 h-4 text-primary" />
+                  <span class="text-sm font-medium text-foreground">云端 Agent 连接</span>
+                  <span
+                    v-if="cloudEnabled && cloudStatus === 'connected'"
+                    class="inline-flex items-center gap-1 text-xs text-success"
+                  >
+                    <span class="w-1.5 h-1.5 rounded-full bg-success" />
+                    已连接
+                  </span>
+                  <span
+                    v-else-if="cloudEnabled && cloudStatus === 'checking'"
+                    class="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                  >
+                    <Loader2 class="w-3 h-3 animate-spin" />
+                    检查中
+                  </span>
+                </div>
+                <p class="text-[11px] text-muted-foreground">
+                  连接到云端 Agent 可使用沙箱代码执行、深度调研和持续运行任务
+                </p>
               </div>
-              <p class="text-[11px] text-muted-foreground">
-                连接到云端 Agent 可使用沙箱代码执行、深度调研和持续运行任务
-              </p>
+              <button
+                @click="toggleCloudEnabled"
+                class="relative w-10 h-[22px] rounded-full transition-colors flex-shrink-0 ml-3"
+                :class="cloudEnabled ? 'bg-primary' : 'bg-muted-foreground/20'"
+              >
+                <div
+                  class="absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform"
+                  :class="cloudEnabled ? 'translate-x-[22px]' : 'translate-x-[3px]'"
+                />
+              </button>
             </div>
 
-            <div class="px-4 py-3 space-y-3">
-              <div>
-                <label class="block text-xs font-medium text-muted-foreground mb-1">云端 URL</label>
-                <input
-                  v-model="cloudUrl"
-                  type="text"
-                  placeholder="https://agent.dazee.ai"
-                  class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-muted-foreground mb-1">用户名</label>
-                <input
-                  v-model="cloudUsername"
-                  type="text"
-                  placeholder="用户名（可选）"
-                  class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                />
-              </div>
-              <div>
-                <label class="block text-xs font-medium text-muted-foreground mb-1">密码</label>
-                <div class="relative">
+            <template v-if="cloudEnabled">
+              <div class="px-4 py-3 space-y-3">
+                <div>
+                  <label class="block text-xs font-medium text-muted-foreground mb-1">云端 URL</label>
                   <input
-                    v-model="cloudPassword"
-                    :type="showCloudPassword ? 'text' : 'password'"
-                    placeholder="密码（可选）"
-                    class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 pr-8"
+                    v-model="cloudUrl"
+                    type="text"
+                    placeholder="https://agent.dazee.ai"
+                    class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
-                  <button
-                    @click="showCloudPassword = !showCloudPassword"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground"
-                  >
-                    <Eye v-if="!showCloudPassword" class="w-3.5 h-3.5" />
-                    <EyeOff v-else class="w-3.5 h-3.5" />
-                  </button>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-muted-foreground mb-1">用户名</label>
+                  <input
+                    v-model="cloudUsername"
+                    type="text"
+                    placeholder="用户名（可选）"
+                    class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-muted-foreground mb-1">密码</label>
+                  <div class="relative">
+                    <input
+                      v-model="cloudPassword"
+                      :type="showCloudPassword ? 'text' : 'password'"
+                      placeholder="密码（可选）"
+                      class="w-full px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 pr-8"
+                    />
+                    <button
+                      @click="showCloudPassword = !showCloudPassword"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <Eye v-if="!showCloudPassword" class="w-3.5 h-3.5" />
+                      <EyeOff v-else class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div class="px-4 py-3 border-t border-border flex items-center gap-3">
-              <button
-                @click="testCloudConnection"
-                :disabled="cloudStatus === 'checking'"
-                class="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-40 transition-colors flex items-center gap-1.5"
-              >
-                <Loader2 v-if="cloudStatus === 'checking'" class="w-3 h-3 animate-spin" />
-                <Wifi v-else class="w-3 h-3" />
-                测试连接
-              </button>
-              <span v-if="cloudTestMessage" class="text-xs" :class="cloudStatus === 'connected' ? 'text-success' : 'text-destructive'">
-                {{ cloudTestMessage }}
-              </span>
-            </div>
+              <div class="px-4 py-3 border-t border-border flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <button
+                    @click="testCloudConnection"
+                    :disabled="cloudStatus === 'checking'"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-40 transition-colors flex items-center gap-1.5"
+                  >
+                    <Loader2 v-if="cloudStatus === 'checking'" class="w-3 h-3 animate-spin" />
+                    <Wifi v-else class="w-3 h-3" />
+                    测试连接
+                  </button>
+                  <span v-if="cloudTestMessage" class="text-xs" :class="cloudStatus === 'connected' ? 'text-success' : 'text-destructive'">
+                    {{ cloudTestMessage }}
+                  </span>
+                </div>
+                <button
+                  @click="saveCloudConfig"
+                  :disabled="cloudSaving"
+                  class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                >
+                  <Loader2 v-if="cloudSaving" class="w-3 h-3 animate-spin" />
+                  <span>{{ cloudSaving ? '保存中...' : '保存' }}</span>
+                </button>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -1018,12 +1035,57 @@ async function applySemanticMode() {
 
 // ==================== 云端协同状态 ====================
 
+const cloudEnabled = ref(false)
 const cloudUrl = ref('https://agent.dazee.ai')
 const cloudUsername = ref('')
 const cloudPassword = ref('')
 const showCloudPassword = ref(false)
 const cloudStatus = ref<'idle' | 'checking' | 'connected' | 'failed'>('idle')
 const cloudTestMessage = ref('')
+const cloudSaving = ref(false)
+
+function toggleCloudEnabled() {
+  cloudEnabled.value = !cloudEnabled.value
+}
+
+async function loadCloudConfig() {
+  const agentId = agentStore.currentAgentId
+  if (!agentId) return
+  try {
+    const detail = await agentStore.loadDetail(agentId)
+    if (detail?.cloud) {
+      cloudEnabled.value = detail.cloud.enabled ?? false
+      cloudUrl.value = detail.cloud.url || 'https://agent.dazee.ai'
+      cloudUsername.value = detail.cloud.username || ''
+      cloudPassword.value = detail.cloud.password || ''
+    }
+  } catch {
+    // Agent 详情加载失败时保持默认值
+  }
+}
+
+async function saveCloudConfig() {
+  const agentId = agentStore.currentAgentId
+  if (!agentId) return
+  cloudSaving.value = true
+  try {
+    const cloud = {
+      enabled: cloudEnabled.value,
+      url: cloudUrl.value.trim() || 'https://agent.dazee.ai',
+      username: cloudUsername.value.trim() || undefined,
+      password: cloudPassword.value.trim() || undefined,
+    }
+    await api.post(`/v1/agents/${agentId}/cloud`, cloud)
+    cloudTestMessage.value = '已保存'
+    cloudStatus.value = 'idle'
+    setTimeout(() => { cloudTestMessage.value = '' }, 2000)
+  } catch (e: any) {
+    cloudTestMessage.value = e?.response?.data?.detail?.message || e?.message || '保存失败'
+    cloudStatus.value = 'failed'
+  } finally {
+    cloudSaving.value = false
+  }
+}
 
 async function testCloudConnection() {
   cloudStatus.value = 'checking'
@@ -1620,7 +1682,7 @@ function applyGuideTarget(step: number) {
 // ==================== 生命周期 ====================
 
 onMounted(async () => {
-  await Promise.all([loadAll(), loadEmbeddingStatus(), loadGatewayConfig()])
+  await Promise.all([loadAll(), loadEmbeddingStatus(), loadGatewayConfig(), loadCloudConfig()])
 
   // 检查是否有后台下载正在进行（用户离开设置页后再回来的场景）
   await checkAndResumeDownload()

@@ -3,9 +3,10 @@
 
 将任务委托给云端 ZenFlux Agent 执行，实时推送进度到本地界面。
 Phase 1: 通过 CloudClient.chat_stream_with_tracking() 消费 SSE，
-本地 TaskManager 追踪任务状态，结构化 cloud_progress 事件桥接到前端。
+本地 TaskManager 追踪任务状态，cloud_progress content_block 桥接到前端。
 """
 
+import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -52,7 +53,14 @@ class CloudAgentTool(BaseTool):
     async def execute(
         self, params: Dict[str, Any], context: Optional[ToolContext] = None
     ) -> Dict[str, Any]:
-        task = params.get("task", "").strip()
+        # 兼容 LLM 有时使用 prompt / query / message 作为参数名
+        task = (
+            params.get("task")
+            or params.get("prompt")
+            or params.get("query")
+            or params.get("message")
+            or ""
+        ).strip()
         if not task:
             return {"success": False, "error": "task 参数不能为空"}
 
@@ -63,11 +71,15 @@ class CloudAgentTool(BaseTool):
         session_id = context.session_id if context else ""
         user_id = context.user_id if context else "local_agent"
 
-        await self._emit_progress(broadcaster, session_id, "cloud_connect", "正在连接云端 Agent...")
+        # cloud_progress content_block 状态
+        _block_idx = 0
+        _steps: List[Dict[str, str]] = []
+        _block_started = False
 
         task_id: Optional[str] = None
         task_mgr = None
         db_session = None
+        start_time = time.time()
 
         try:
             from services.cloud_client import CloudClientError, get_cloud_client_for_instance
@@ -89,10 +101,10 @@ class CloudAgentTool(BaseTool):
                 cloud_task = await task_mgr.create_task(db_session, task, user_id)
                 task_id = cloud_task.id
 
-            await self._emit_progress(
-                broadcaster, session_id, "cloud_start", "云端 Agent 开始处理...",
-                task_id=task_id,
-            )
+            # --- content_start: 创建 cloud_progress 块 ---
+            _steps.append({"id": "connect", "label": "正在连接云端 Agent...", "status": "done"})
+            await self._cloud_block_start(broadcaster, session_id, _block_idx, task_id, _steps)
+            _block_started = True
 
             files_from_params = params.get("files") or []
             files_from_context = (context.extra.get("files") if context else None) or []
@@ -104,13 +116,14 @@ class CloudAgentTool(BaseTool):
                 await task_mgr.update_status(db_session, task_id, "streaming")
 
             final_text = ""
-            start_time = time.time()
 
             async for evt in client.chat_stream_with_tracking(
                 message=message,
                 user_id=user_id,
                 files=files,
             ):
+                elapsed_ms = int((time.time() - start_time) * 1000)
+
                 if evt.kind == "session_info" and evt.conversation_id:
                     if task_mgr and db_session and task_id:
                         await task_mgr.update_status(
@@ -119,10 +132,13 @@ class CloudAgentTool(BaseTool):
                         )
 
                 elif evt.kind == "tool_start":
-                    await self._emit_progress(
-                        broadcaster, session_id, "cloud_tool",
-                        f"云端调用工具: {evt.tool_name}",
-                        task_id=task_id, tool_name=evt.tool_name, status="running",
+                    _steps.append({
+                        "id": f"tool_{len(_steps)}",
+                        "label": f"云端调用: {evt.tool_name}",
+                        "status": "running",
+                    })
+                    await self._cloud_block_delta(
+                        broadcaster, session_id, _block_idx, _steps, "running", elapsed_ms,
                     )
                     if task_mgr and db_session and task_id:
                         await task_mgr.add_progress_step(db_session, task_id, {
@@ -131,16 +147,21 @@ class CloudAgentTool(BaseTool):
                         })
 
                 elif evt.kind == "tool_end":
-                    await self._emit_progress(
-                        broadcaster, session_id, "cloud_tool_done",
-                        f"云端工具 {evt.tool_name} 执行完成",
-                        task_id=task_id, tool_name=evt.tool_name, status="done",
+                    for s in _steps:
+                        if s["status"] == "running":
+                            s["status"] = "done"
+                    await self._cloud_block_delta(
+                        broadcaster, session_id, _block_idx, _steps, "running", elapsed_ms,
                     )
 
                 elif evt.kind == "thinking_start":
-                    await self._emit_progress(
-                        broadcaster, session_id, "cloud_thinking", "云端思考中...",
-                        task_id=task_id,
+                    _steps.append({
+                        "id": f"think_{len(_steps)}",
+                        "label": "云端思考中...",
+                        "status": "running",
+                    })
+                    await self._cloud_block_delta(
+                        broadcaster, session_id, _block_idx, _steps, "running", elapsed_ms,
                     )
 
                 elif evt.kind == "text_delta":
@@ -152,29 +173,49 @@ class CloudAgentTool(BaseTool):
             elapsed_ms = int((time.time() - start_time) * 1000)
 
             if not final_text:
+                for s in _steps:
+                    if s["status"] == "running":
+                        s["status"] = "done"
+                _steps.append({"id": "error", "label": "云端未返回有效文本", "status": "done"})
+                await self._cloud_block_delta(
+                    broadcaster, session_id, _block_idx, _steps, "failed", elapsed_ms,
+                )
+                await self._cloud_block_stop(broadcaster, session_id, _block_idx)
+                _block_started = False
                 if task_mgr and db_session and task_id:
                     await task_mgr.update_status(
-                        db_session, task_id, "failed",
-                        error_message="云端未返回有效文本",
+                        db_session, task_id, "failed", error_message="云端未返回有效文本",
                     )
                 return {"success": False, "error": "云端未返回有效文本", "task_id": task_id}
 
+            # 成功：标记所有 running steps 为 done
+            for s in _steps:
+                if s["status"] == "running":
+                    s["status"] = "done"
+            _steps.append({"id": "done", "label": "云端任务完成", "status": "done"})
+            await self._cloud_block_delta(
+                broadcaster, session_id, _block_idx, _steps, "completed", elapsed_ms,
+            )
+            await self._cloud_block_stop(broadcaster, session_id, _block_idx)
+            _block_started = False
+
             if task_mgr and db_session and task_id:
                 await task_mgr.update_status(
-                    db_session, task_id, "completed",
-                    result_summary=final_text[:3000],
+                    db_session, task_id, "completed", result_summary=final_text[:3000],
                 )
-
-            await self._emit_progress(
-                broadcaster, session_id, "cloud_done", "云端任务完成",
-                task_id=task_id, elapsed_ms=elapsed_ms,
-            )
 
             return {"success": True, "result": final_text, "task_id": task_id}
 
         except Exception as e:
             error_msg = str(e)
             logger.error("cloud_agent 执行失败: %s", error_msg, exc_info=True)
+            if _block_started:
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                _steps.append({"id": "error", "label": f"失败: {error_msg[:80]}", "status": "done"})
+                await self._cloud_block_delta(
+                    broadcaster, session_id, _block_idx, _steps, "failed", elapsed_ms,
+                )
+                await self._cloud_block_stop(broadcaster, session_id, _block_idx)
             if task_mgr and db_session and task_id:
                 try:
                     await task_mgr.update_status(
@@ -190,7 +231,61 @@ class CloudAgentTool(BaseTool):
                 except Exception:
                     pass
 
-    # --- 内部方法 ---
+    # ------------------------------------------------------------------
+    # cloud_progress content_block 事件（前端 CloudProgressCard 消费）
+    # ------------------------------------------------------------------
+
+    async def _cloud_block_start(
+        self, broadcaster, session_id: str, index: int,
+        task_id: Optional[str], steps: List[Dict[str, str]],
+    ):
+        """发送 content_start 创建 cloud_progress 块"""
+        if not broadcaster or not session_id:
+            return
+        try:
+            await broadcaster.emit_content_start(
+                session_id=session_id, index=index,
+                content_block={
+                    "type": "cloud_progress",
+                    "taskId": task_id or "",
+                    "status": "connecting",
+                    "title": "云端执行中",
+                    "steps": steps,
+                },
+            )
+        except Exception as e:
+            logger.debug("cloud_progress content_start 失败: %s", e)
+
+    async def _cloud_block_delta(
+        self, broadcaster, session_id: str, index: int,
+        steps: List[Dict[str, str]], status: str, elapsed_ms: int,
+    ):
+        """发送 content_delta 更新 cloud_progress 块"""
+        if not broadcaster or not session_id:
+            return
+        try:
+            delta_json = json.dumps(
+                {"steps": steps, "status": status, "elapsedMs": elapsed_ms},
+                ensure_ascii=False,
+            )
+            await broadcaster.emit_content_delta(
+                session_id=session_id, index=index, delta=delta_json,
+            )
+        except Exception as e:
+            logger.debug("cloud_progress content_delta 失败: %s", e)
+
+    async def _cloud_block_stop(self, broadcaster, session_id: str, index: int):
+        """发送 content_stop 结束 cloud_progress 块"""
+        if not broadcaster or not session_id:
+            return
+        try:
+            await broadcaster.emit_content_stop(session_id=session_id, index=index)
+        except Exception as e:
+            logger.debug("cloud_progress content_stop 失败: %s", e)
+
+    # ------------------------------------------------------------------
+    # 辅助方法
+    # ------------------------------------------------------------------
 
     async def _init_task_tracking(self, context: Optional[ToolContext]):
         """初始化任务追踪（graceful：workspace 不可用时返回 None）"""
@@ -249,26 +344,3 @@ class CloudAgentTool(BaseTool):
             return EventBroadcaster(context.event_manager)
         except Exception:
             return None
-
-    async def _emit_progress(
-        self,
-        broadcaster,
-        session_id: str,
-        step_id: str,
-        message: str,
-        *,
-        task_id: Optional[str] = None,
-        tool_name: str = "",
-        status: str = "",
-        elapsed_ms: int = 0,
-    ):
-        if not broadcaster or not session_id:
-            return
-        try:
-            await broadcaster.emit_progress_update(
-                session_id=session_id,
-                step_id=step_id,
-                message=message,
-            )
-        except Exception as e:
-            logger.debug("进度事件发送失败（不影响执行）: %s", e)

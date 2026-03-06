@@ -1011,6 +1011,17 @@ class AgentRegistry:
 
         detail["data_dir"] = get_instance_custom_data_dir(config.name)
 
+        # Fill cloud config from raw config.yaml
+        raw_cfg = instance_config.raw_config if instance_config else {}
+        cloud_cfg = (raw_cfg or {}).get("cloud")
+        if cloud_cfg and isinstance(cloud_cfg, dict):
+            detail["cloud"] = {
+                "enabled": cloud_cfg.get("enabled", False),
+                "url": cloud_cfg.get("url", ""),
+                "username": cloud_cfg.get("username") or None,
+                "password": cloud_cfg.get("password") or None,
+            }
+
         return detail
 
     async def get_agent_prompt(self, agent_id: str) -> str:

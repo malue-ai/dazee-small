@@ -122,6 +122,7 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 - 提到**邮件/日历/笔记/提醒/消息/待办** → 加上 productivity
 - 提到**翻译/多语言** → 加上 translation
 - 提到**视频/音频/语音/TTS/转录** → 加上 media
+- 提到**云端智能体/云端Agent/深度调研/沙箱执行** → 加上 cloud_skills
 - **纯聊天/闲聊/问答/计算/打招呼** → []（不需要任何 skill）
 
 ---
@@ -136,6 +137,8 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
   - 例: "把这段录音转成文字"、"用语音读出来"
 - **code_execution**: 需要在安全沙箱中执行代码
   - 例: "运行这段 Python 代码"、"帮我算一下这组数据"
+- **cloud_agent**: 用户明确要求使用云端智能体/云端Agent执行任务
+  - 例: "用云端智能体帮我调研"、"让云端Agent分析"
 
 **大多数请求不需要动态工具**，填 []。
 核心工具（文件操作、搜索、截图、命令执行等）始终可用，不需要在此列出。
@@ -211,6 +214,11 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <example>
 <query>运行这段 Python 代码看看输出什么</query>
 <output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["code"], "required_tools": ["code_execution"]}}</output>
+</example>
+
+<example>
+<query>用云端智能体分析24小时的伊朗局势最新进展</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["research", "cloud_skills"], "required_tools": ["cloud_agent"]}}</output>
 </example>
 
 <!-- 多动作 → 必须多选 ⚠️ -->
