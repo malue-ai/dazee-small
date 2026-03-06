@@ -57,6 +57,7 @@ class ConfigureInstanceTool(BaseTool):
                     skill_name=skill_name,
                     source="hitl",
                 )
+                await session.commit()
 
             if category == "credential" and value:
                 os.environ[key] = value
