@@ -54,6 +54,10 @@ def _is_reasoning_model(model: str) -> bool:
 
 
 def _thinking_budget_to_effort(budget: int) -> str:
+    """Map internal thinking budget to OpenAI reasoning effort.
+
+    GPT-5.4 supports: none, low, medium, high, xhigh.
+    """
     if budget <= 0:
         return "none"
     if budget <= 3000:
@@ -271,7 +275,10 @@ class OpenAILLMService(BaseLLMService):
     def _chat_messages_to_responses_input(
         messages: List[Dict[str, Any]],
     ) -> tuple:
-        """将 Chat Completions 格式的 messages 转为 Responses API input + instructions。
+        """Convert Chat Completions messages to Responses API input + instructions.
+
+        Maps system/developer → instructions, user/assistant/tool → input items.
+        Converts Chat content parts (text/image_url) to Responses format (input_text/input_image).
 
         Returns:
             (instructions: str, input_items: list)
@@ -282,16 +289,29 @@ class OpenAILLMService(BaseLLMService):
         for msg in messages:
             role = msg.get("role", "")
 
-            if role == "system":
-                instructions = msg.get("content", "")
+            if role in ("system", "developer"):
+                text = msg.get("content", "")
+                if text:
+                    instructions = (instructions + "\n" + text).strip() if instructions else text
 
             elif role == "user":
-                items.append({"role": "user", "content": msg.get("content", "")})
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    content = OpenAILLMService._convert_content_to_responses(content)
+                items.append({"role": "user", "content": content})
 
             elif role == "assistant":
                 content = msg.get("content")
                 if content:
-                    items.append({"role": "assistant", "content": content})
+                    if isinstance(content, str):
+                        items.append({"role": "assistant", "content": content})
+                    elif isinstance(content, list):
+                        text = "\n".join(
+                            p.get("text", "") for p in content
+                            if isinstance(p, dict) and p.get("type") == "text" and p.get("text")
+                        )
+                        if text:
+                            items.append({"role": "assistant", "content": text})
 
                 for tc in msg.get("tool_calls", []):
                     func = tc.get("function", {})
@@ -310,6 +330,36 @@ class OpenAILLMService(BaseLLMService):
                 })
 
         return instructions, items
+
+    @staticmethod
+    def _convert_content_to_responses(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert Chat Completions content parts to Responses API format.
+
+        Chat: text/image_url → Responses: input_text/input_image
+        """
+        result = []
+        for part in parts:
+            ptype = part.get("type", "")
+
+            if ptype == "text":
+                result.append({"type": "input_text", "text": part.get("text", "")})
+
+            elif ptype == "image_url":
+                url = ""
+                img = part.get("image_url")
+                if isinstance(img, dict):
+                    url = img.get("url", "")
+                elif isinstance(img, str):
+                    url = img
+                result.append({"type": "input_image", "image_url": url})
+
+            elif ptype == "input_audio":
+                result.append(part)
+
+            else:
+                result.append({"type": "input_text", "text": str(part)})
+
+        return result
 
     # ============================================================
     # 核心 API — 路由入口
@@ -376,15 +426,11 @@ class OpenAILLMService(BaseLLMService):
         request_params: Dict[str, Any] = {
             "model": self.config.model,
             "messages": openai_messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
             "stream": False,
         }
-        if _is_reasoning:
-            request_params["max_completion_tokens"] = _max
-        else:
-            request_params["max_tokens"] = _max
 
         if _is_reasoning:
+            request_params["max_completion_tokens"] = _max
             effort = kwargs.get("reasoning_effort")
             if effort:
                 request_params["reasoning_effort"] = effort
@@ -392,6 +438,9 @@ class OpenAILLMService(BaseLLMService):
                 request_params["reasoning_effort"] = _thinking_budget_to_effort(
                     self.config.thinking_budget
                 )
+        else:
+            request_params["max_tokens"] = _max
+            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
 
         if _is_audio_model(self.config.model):
             request_params["modalities"] = ["text", "audio"]
@@ -431,16 +480,12 @@ class OpenAILLMService(BaseLLMService):
         request_params: Dict[str, Any] = {
             "model": self.config.model,
             "messages": openai_messages,
-            "temperature": kwargs.get("temperature", self.config.temperature),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if _is_reasoning:
-            request_params["max_completion_tokens"] = _max
-        else:
-            request_params["max_tokens"] = _max
 
         if _is_reasoning:
+            request_params["max_completion_tokens"] = _max
             effort = kwargs.get("reasoning_effort")
             if effort:
                 request_params["reasoning_effort"] = effort
@@ -448,6 +493,9 @@ class OpenAILLMService(BaseLLMService):
                 request_params["reasoning_effort"] = _thinking_budget_to_effort(
                     self.config.thinking_budget
                 )
+        else:
+            request_params["max_tokens"] = _max
+            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
 
         if _is_audio_model(self.config.model):
             request_params["modalities"] = ["text", "audio"]
@@ -602,7 +650,7 @@ class OpenAILLMService(BaseLLMService):
     ) -> LLMResponse:
         sys_text = self._extract_system_text(system)
         if sys_text:
-            openai_messages.insert(0, {"role": "system", "content": sys_text})
+            openai_messages.insert(0, {"role": "developer", "content": sys_text})
 
         instructions, input_items = self._chat_messages_to_responses_input(openai_messages)
         _max = kwargs.get("max_tokens", self.config.max_tokens)
@@ -617,13 +665,16 @@ class OpenAILLMService(BaseLLMService):
         if _max:
             request_params["max_output_tokens"] = _max
 
+        reasoning_params: Dict[str, str] = {}
         effort = kwargs.get("reasoning_effort")
         if effort:
-            request_params["reasoning"] = {"effort": effort}
+            reasoning_params["effort"] = effort
         elif self.config.enable_thinking:
-            request_params["reasoning"] = {
-                "effort": _thinking_budget_to_effort(self.config.thinking_budget),
-            }
+            reasoning_params["effort"] = _thinking_budget_to_effort(self.config.thinking_budget)
+        if self.config.enable_thinking:
+            reasoning_params["summary"] = "auto"
+        if reasoning_params:
+            request_params["reasoning"] = reasoning_params
 
         all_tools = self._collect_tools(tools, for_responses=True)
         if all_tools:
@@ -652,7 +703,7 @@ class OpenAILLMService(BaseLLMService):
     ) -> AsyncIterator[LLMResponse]:
         sys_text = self._extract_system_text(system)
         if sys_text:
-            openai_messages.insert(0, {"role": "system", "content": sys_text})
+            openai_messages.insert(0, {"role": "developer", "content": sys_text})
 
         instructions, input_items = self._chat_messages_to_responses_input(openai_messages)
         _max = kwargs.get("max_tokens", self.config.max_tokens)
@@ -667,13 +718,16 @@ class OpenAILLMService(BaseLLMService):
         if _max:
             request_params["max_output_tokens"] = _max
 
+        reasoning_params: Dict[str, str] = {}
         effort = kwargs.get("reasoning_effort")
         if effort:
-            request_params["reasoning"] = {"effort": effort}
+            reasoning_params["effort"] = effort
         elif self.config.enable_thinking:
-            request_params["reasoning"] = {
-                "effort": _thinking_budget_to_effort(self.config.thinking_budget),
-            }
+            reasoning_params["effort"] = _thinking_budget_to_effort(self.config.thinking_budget)
+        if self.config.enable_thinking:
+            reasoning_params["summary"] = "auto"
+        if reasoning_params:
+            request_params["reasoning"] = reasoning_params
 
         all_tools = self._collect_tools(tools, for_responses=True)
         if all_tools:
@@ -708,12 +762,12 @@ class OpenAILLMService(BaseLLMService):
                         content=text, model=self.config.model, is_stream=True,
                     )
 
-                # --- Reasoning / thinking ---
                 elif etype in (
                     "response.reasoning_summary_text.delta",
                     "response.reasoning_summary_part.delta",
+                    "response.reasoning.delta",
                 ):
-                    text = getattr(event, "delta", "")
+                    text = getattr(event, "delta", "") or getattr(event, "text", "")
                     if text:
                         accumulated_thinking += text
                         if on_thinking:
@@ -762,7 +816,6 @@ class OpenAILLMService(BaseLLMService):
                 elif etype == "response.function_call_arguments.done":
                     pass
 
-                # --- 完成 ---
                 elif etype == "response.completed":
                     resp_obj = event.response
                     if hasattr(resp_obj, "usage") and resp_obj.usage:
@@ -771,7 +824,10 @@ class OpenAILLMService(BaseLLMService):
                             "input_tokens": getattr(u, "input_tokens", 0),
                             "output_tokens": getattr(u, "output_tokens", 0),
                         }
-                        rt = getattr(u, "reasoning_tokens", 0)
+                        out_details = getattr(u, "output_tokens_details", None)
+                        rt = getattr(out_details, "reasoning_tokens", 0) if out_details else 0
+                        if not rt:
+                            rt = getattr(u, "reasoning_tokens", 0)
                         if rt:
                             usage["thinking_tokens"] = rt
                         logger.info(
@@ -918,7 +974,10 @@ class OpenAILLMService(BaseLLMService):
                 "input_tokens": getattr(u, "input_tokens", 0),
                 "output_tokens": getattr(u, "output_tokens", 0),
             }
-            rt = getattr(u, "reasoning_tokens", 0)
+            out_details = getattr(u, "output_tokens_details", None)
+            rt = getattr(out_details, "reasoning_tokens", 0) if out_details else 0
+            if not rt:
+                rt = getattr(u, "reasoning_tokens", 0)
             if rt:
                 usage["thinking_tokens"] = rt
             logger.info(
