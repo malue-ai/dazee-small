@@ -214,10 +214,17 @@ class ToolResultCompressor:
     async def _compress_default(
         self, tool_name: str, tool_id: str, result_str: str,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
-        """Original head+tail compression with file backup."""
+        """Character-budget compression with file backup."""
         ref_id = self._generate_ref_id(tool_name, tool_id, result_str)
         file_path = await self._save_full_content(ref_id, tool_name, tool_id, result_str)
         compressed_text = self._generate_compressed_text(tool_name, result_str, ref_id, file_path)
+
+        if len(compressed_text) >= len(result_str):
+            logger.debug(
+                f"压缩无效: {tool_name} ({len(compressed_text)} >= {len(result_str)})，保留原文"
+            )
+            return result_str, None
+
         metadata = self._build_metadata(ref_id, file_path, result_str, tool_name, tool_id)
         self._update_stats(result_str, compressed_text, tool_name)
         return compressed_text, metadata
@@ -274,30 +281,44 @@ class ToolResultCompressor:
     def _generate_compressed_text(
         self, tool_name: str, result_str: str, ref_id: str, file_path: Path
     ) -> str:
-        lines = result_str.split("\n")
+        # 字符预算：头部 60%、尾部 20%、metadata 开销预留 20%
+        metadata_budget = 350
+        content_budget = max(self.threshold - metadata_budget, 400)
+        head_budget = int(content_budget * 0.75)
+        tail_budget = content_budget - head_budget
 
-        head = "\n".join(lines[: self.head_lines])
-        tail = "\n".join(lines[-self.tail_lines :]) if len(lines) > self.tail_lines else ""
+        head = result_str[:head_budget]
+        tail = result_str[-tail_budget:] if len(result_str) > head_budget + tail_budget else ""
 
-        if len(lines) <= self.head_lines + self.tail_lines:
-            tail = ""
+        # 尽量在行边界截断，避免截断 JSON key 导致可读性差
+        last_newline = head.rfind("\n")
+        if last_newline > head_budget * 0.6:
+            head = head[:last_newline]
 
+        if tail:
+            first_newline = tail.find("\n")
+            if first_newline != -1 and first_newline < len(tail) * 0.4:
+                tail = tail[first_newline + 1:]
+
+        omitted = len(result_str) - len(head) - len(tail)
         compressed_parts = [
             f"{COMPRESSED_MARKER}{ref_id}] 工具结果摘要 - {tool_name}",
-            f"原始长度: {len(result_str)} 字符",
+            f"原始 {len(result_str)} 字符, 省略 {omitted} 字符",
             "",
-            f"=== 开头 (前{self.head_lines}行) ===",
             head,
             "",
-            "=== 完整内容 ===",
-            f"文件路径: {file_path}",
-            "访问方式:",
-            f"- cat {file_path}",
-            "- 或重新执行工具获取最新结果",
+            f"... 省略 {omitted} 字符 ...",
+            "",
         ]
 
         if tail:
-            compressed_parts.extend(["", f"=== 结尾 (后{self.tail_lines}行) ===", tail])
+            compressed_parts.append(tail)
+            compressed_parts.append("")
+
+        compressed_parts.extend([
+            f"完整内容: {file_path}",
+            f"查看: cat {file_path}",
+        ])
 
         return "\n".join(compressed_parts)
 

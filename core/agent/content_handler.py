@@ -249,7 +249,7 @@ class ContentHandler:
             content_stop 事件对象
         """
         if not self.block_state.is_block_open():
-            logger.warning("尝试关闭 block 但没有打开的 block")
+            logger.debug("尝试关闭 block 但没有打开的 block")
             return {}
 
         result = await self.broadcaster.emit_content_stop(

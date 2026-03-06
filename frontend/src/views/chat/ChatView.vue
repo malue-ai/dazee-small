@@ -229,6 +229,31 @@
           </div>
         </Transition>
 
+        <!-- V14: 复杂任务推荐后台执行条 -->
+        <Transition name="slide-up">
+          <div
+            v-if="chat.recommendBackgroundData.value"
+            class="max-w-4xl mx-auto px-6 mb-2"
+          >
+            <div class="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-primary/20 bg-accent/50 text-sm">
+              <MonitorCog class="w-4 h-4 text-primary shrink-0" />
+              <span class="flex-1 text-accent-foreground">{{ chat.recommendBackgroundData.value.message }}</span>
+              <button
+                @click="handleAcceptBackgroundRecommend"
+                class="px-3 py-1 rounded-lg text-xs font-medium bg-primary text-white hover:bg-primary-hover transition-colors shadow-sm shadow-primary/20"
+              >
+                转后台
+              </button>
+              <button
+                @click="chat.dismissRecommendBackground()"
+                class="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+              >
+                继续
+              </button>
+            </div>
+          </div>
+        </Transition>
+
         <!-- 输入框区域 -->
         <div ref="inputAreaWrapperRef">
           <ChatInputArea
@@ -239,6 +264,7 @@
             :uploading="fileUpload.isUploading.value"
             :external-drag-over="tauriDragTarget === 'chatInput'"
             @send="handleSendMessage"
+            @send-background="handleSendBackground"
             @stop="handleStopGeneration"
             @upload-click="handleUploadClick"
             @files-dropped="handleFilesDropped"
@@ -427,13 +453,15 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useAgentStore } from '@/stores/agent'
 import { useGuideStore } from '@/stores/guide'
 import { useLocalWorkspaceStore } from '@/stores/localWorkspace'
+import { useBackgroundTaskStore } from '@/stores/backgroundTask'
+import { useNotificationStore } from '@/stores/notification'
 
 // Composables
 import { useChat } from '@/composables/useChat'
 import { useFileUpload } from '@/composables/useFileUpload'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauriEnv } from '@/api/tauri'
-import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2, Rocket, FolderOpen } from 'lucide-vue-next'
+import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2, Rocket, FolderOpen, MonitorCog } from 'lucide-vue-next'
 
 // Components
 import ConversationSidebar from '@/components/chat/ConversationSidebar.vue'
@@ -465,6 +493,8 @@ const workspaceStore = useWorkspaceStore()
 const agentStore = useAgentStore()
 const guideStore = useGuideStore()
 const localWorkspaceStore = useLocalWorkspaceStore()
+const bgTaskStore = useBackgroundTaskStore()
+const notify = useNotificationStore()
 const chat = useChat()
 const fileUpload = useFileUpload()
 const hitl = chat.hitl
@@ -1263,6 +1293,47 @@ async function handleSendMessage(): Promise<void> {
   messageListRef.value?.scrollToBottom()
 }
 
+/** 后台运行：提交当前输入为后台任务 */
+async function handleSendBackground(): Promise<void> {
+  const content = inputMessage.value.trim()
+  if (!content) return
+
+  inputMessage.value = ''
+  fileUpload.clearFiles()
+
+  const result = await bgTaskStore.submitTask(content)
+  if (result) {
+    notify.success('已提交后台任务', '任务正在后台执行，完成后会通知你', {
+      label: '查看',
+      route: { name: 'background-tasks' },
+    })
+  } else {
+    notify.error('提交失败', '后台任务提交失败，请重试')
+  }
+}
+
+/** V14: 接受后台执行推荐 — 停止当前生成，提交为后台任务 */
+async function handleAcceptBackgroundRecommend(): Promise<void> {
+  const lastUserMsg = conversationStore.messages
+    .filter((m: UIMessage) => m.role === 'user')
+    .pop()
+  const content = lastUserMsg?.content?.trim()
+
+  chat.dismissRecommendBackground()
+
+  if (!content) return
+
+  await chat.stopGeneration()
+
+  const result = await bgTaskStore.submitTask(content)
+  if (result) {
+    notify.success('已转为后台任务', '任务正在后台执行，完成后会通知你', {
+      label: '查看',
+      route: { name: 'background-tasks' },
+    })
+  }
+}
+
 /** 停止生成 */
 async function handleStopGeneration(): Promise<void> {
   await chat.stopGeneration()
@@ -1457,5 +1528,16 @@ async function handleHITLCancel(): Promise<void> {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 </style>

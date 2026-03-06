@@ -723,6 +723,12 @@ class Agent:
         )
         if is_simple_task:
             schema_tools = get_simple_task_tools()
+            if intent and intent.required_tools:
+                from core.tool.registry import CapabilityRegistry
+                for rt in intent.required_tools:
+                    norm = CapabilityRegistry.normalize_tool_name(rt)
+                    if norm not in schema_tools:
+                        schema_tools.append(norm)
             logger.info(
                 f"工具裁剪: complexity=simple, 精简为 {len(schema_tools)} 个核心工具"
             )

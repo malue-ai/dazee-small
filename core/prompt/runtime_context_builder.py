@@ -54,11 +54,15 @@ async def _safe_subprocess_exec(
     when the event loop is SelectorEventLoop (common under uvicorn).
     Falls back to subprocess.run() via thread-pool.
     """
+    from utils.subprocess_env import make_clean_env
+    clean_env = make_clean_env()
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=clean_env,
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
@@ -70,12 +74,12 @@ async def _safe_subprocess_exec(
             stderr=stderr,
         )
     except NotImplementedError:
-        # Windows SelectorEventLoop fallback
         def _run():
             return subprocess.run(
                 list(args),
                 capture_output=True,
                 timeout=timeout,
+                env=clean_env,
             )
 
         loop = asyncio.get_running_loop()

@@ -356,7 +356,14 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         logger.info("   已合并 config/memory.yaml")
 
     # LLM profiles (provider templates + profiles with tier)
-    llm_file = await _load_yaml(instance_dir / "config" / "llm_profiles.yaml")
+    # 实例没有自己的 llm_profiles.yaml 时，从 _template 加载
+    llm_profiles_path = instance_dir / "config" / "llm_profiles.yaml"
+    if not llm_profiles_path.exists():
+        template_path = get_instances_dir() / "_template" / "config" / "llm_profiles.yaml"
+        if template_path.exists():
+            llm_profiles_path = template_path
+            logger.info("   llm_profiles.yaml 不存在，使用 _template 默认配置")
+    llm_file = await _load_yaml(llm_profiles_path)
 
     # ── 2. Resolve provider templates ─────────────────────────────
     agent_config = raw_config.get("agent", {})

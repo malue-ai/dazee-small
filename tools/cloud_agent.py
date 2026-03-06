@@ -71,8 +71,13 @@ class CloudAgentTool(BaseTool):
         session_id = context.session_id if context else ""
         user_id = context.user_id if context else "local_agent"
 
-        # cloud_progress content_block 状态
-        _block_idx = 0
+        logger.info(
+            f"cloud_agent 启动: session_id={session_id[:8] if session_id else '空'}, "
+            f"broadcaster={'有' if broadcaster else '无'}, "
+            f"event_manager={'有' if (context and context.event_manager) else '无'}"
+        )
+
+        _block_idx = 100
         _steps: List[Dict[str, str]] = []
         _block_started = False
 
@@ -204,7 +209,12 @@ class CloudAgentTool(BaseTool):
                     db_session, task_id, "completed", result_summary=final_text[:3000],
                 )
 
-            return {"success": True, "result": final_text, "task_id": task_id}
+            return {
+                "success": True,
+                "result": final_text,
+                "task_id": task_id,
+                "_compression_hint": "skip",
+            }
 
         except Exception as e:
             error_msg = str(e)
@@ -239,10 +249,14 @@ class CloudAgentTool(BaseTool):
         self, broadcaster, session_id: str, index: int,
         task_id: Optional[str], steps: List[Dict[str, str]],
     ):
-        """发送 content_start 创建 cloud_progress 块"""
         if not broadcaster or not session_id:
+            logger.warning(
+                f"cloud_progress 跳过: broadcaster={'无' if not broadcaster else '有'}, "
+                f"session_id={session_id or '空'}"
+            )
             return
         try:
+            logger.info(f"cloud_progress content_start: index={index}, session={session_id[:8]}")
             await broadcaster.emit_content_start(
                 session_id=session_id, index=index,
                 content_block={
@@ -254,7 +268,7 @@ class CloudAgentTool(BaseTool):
                 },
             )
         except Exception as e:
-            logger.debug("cloud_progress content_start 失败: %s", e)
+            logger.warning("cloud_progress content_start 失败: %s", e)
 
     async def _cloud_block_delta(
         self, broadcaster, session_id: str, index: int,

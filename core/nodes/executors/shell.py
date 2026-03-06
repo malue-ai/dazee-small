@@ -43,31 +43,10 @@ class ShellExecutor(BaseExecutor):
     - Windows: PATHEXT 解析、进程树终止、大小写无关白名单
     """
 
-    # 阻止的环境变量键（安全过滤）
+    # env sanitization 已迁移到 utils.subprocess_env.make_clean_env()
+    # 此处仅保留 BLOCKED_ENV_KEYS 供 _check / logging 使用
     BLOCKED_ENV_KEYS: Set[str] = {
-        "NODE_OPTIONS",
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "LD_PRELOAD",
-    }
-
-    # PyInstaller frozen binary 额外清理的环境变量
-    _PYINSTALLER_ENV_KEYS: Set[str] = {
-        "_MEIPASS", "_MEIPASS2", "_PYI_ARCHIVE_FILE",
-        "_PYI_SPLASH_IPC",
-    }
-    _PYINSTALLER_ENV_PREFIXES: List[str] = ["_PYI_", "_MEI"]
-
-    # 阻止的环境变量前缀
-    BLOCKED_ENV_PREFIXES: List[str] = [
-        "DYLD_",  # macOS 动态链接器
-        "LD_",  # Linux 动态链接器
-    ]
-
-    # Windows 额外阻止的环境变量键
-    BLOCKED_ENV_KEYS_WIN32: Set[str] = {
-        "PSModulePath",  # 防止注入恶意 PowerShell 模块
-        "__PSLockdownPolicy",  # PowerShell Constrained Language Mode
+        "NODE_OPTIONS", "PYTHONHOME", "PYTHONPATH", "LD_PRELOAD",
     }
 
     # 默认超时时间（秒），仅在上层未传入 timeout 时兜底
@@ -164,67 +143,50 @@ class ShellExecutor(BaseExecutor):
     # ==================== Environment Sanitization ====================
 
     def _sanitize_env(self, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """Delegate to the centralized env sanitizer."""
+        from utils.subprocess_env import make_clean_env
+        return make_clean_env(extra_env=env)
+
+    # ==================== Python Command Isolation ====================
+
+    _PYTHON_BINS = {"python3", "python", "python3.9", "python3.10",
+                    "python3.11", "python3.12", "python3.13"}
+
+    @classmethod
+    def _maybe_isolate_python(cls, command: List[str]) -> List[str]:
+        """Inject ``-I`` (isolated mode) into python commands.
+
+        ``-I`` prevents Python from adding cwd / user site-packages to
+        sys.path and ignores PYTHON* env vars (defense-in-depth).
+        Available since Python 3.4.
+
+        For ``bash -lc "...python3..."`` wrappers, injects
+        ``PYTHONSAFEPATH=1`` at the start of the shell string instead.
         """
-        清理环境变量，移除危险项
+        if not command:
+            return command
 
-        Args:
-            env: 用户提供的环境变量
-
-        Returns:
-            清理后的环境变量
-        """
-        sanitized = dict(os.environ)
-
-        import sys
-        is_frozen = getattr(sys, "frozen", False)
-
-        if is_frozen:
-            # PyInstaller frozen binary: 清理 PyInstaller 注入的环境变量，
-            # 防止子进程的 Python 加载到 _internal/ 中的 .pyc（版本不匹配会 bad magic number）
-            for key in list(sanitized.keys()):
-                if key in self._PYINSTALLER_ENV_KEYS:
-                    del sanitized[key]
-                    continue
-                for prefix in self._PYINSTALLER_ENV_PREFIXES:
-                    if key.startswith(prefix):
-                        del sanitized[key]
-                        break
-        else:
-            # 常规场景（venv / 系统 Python）：将解释器 bin 目录放在 PATH 最前面，
-            # 使子进程的 python3 命中启动后端的同一个 Python（含虚拟环境包）
-            python_bin_dir = os.path.dirname(os.path.abspath(sys.executable))
-            current_path = sanitized.get("PATH", "")
-            if python_bin_dir not in current_path.split(os.pathsep):
-                sanitized["PATH"] = python_bin_dir + os.pathsep + current_path
-
-        blocked_keys = self.BLOCKED_ENV_KEYS
+        bin_name = os.path.basename(command[0]).lower()
         if _IS_WIN32:
-            blocked_keys = blocked_keys | self.BLOCKED_ENV_KEYS_WIN32
+            bin_name = bin_name.rsplit(".", 1)[0]
 
-        for key in list(sanitized.keys()):
-            if key in blocked_keys:
-                del sanitized[key]
-                continue
-            for prefix in self.BLOCKED_ENV_PREFIXES:
-                if key.startswith(prefix):
-                    del sanitized[key]
-                    break
+        # Direct python invocation: ["python3", ...]
+        if bin_name in cls._PYTHON_BINS:
+            if "-I" in command:
+                return command
+            return [command[0], "-I"] + command[1:]
 
-        if env:
-            for key, value in env.items():
-                if key in blocked_keys:
-                    logger.warning(f"跳过阻止的环境变量: {key}")
-                    continue
-                blocked = False
-                for prefix in self.BLOCKED_ENV_PREFIXES:
-                    if key.startswith(prefix):
-                        logger.warning(f"跳过阻止的环境变量: {key}")
-                        blocked = True
-                        break
-                if not blocked:
-                    sanitized[key] = value
+        # bash -lc / bash -c wrapper: inject PYTHONSAFEPATH
+        if bin_name in ("bash", "sh", "zsh") and len(command) >= 3:
+            flag = command[1]
+            if "c" in flag and "python" in command[2].lower():
+                prefix = "export PYTHONSAFEPATH=1 PYTHONDONTWRITEBYTECODE=1; "
+                if prefix not in command[2]:
+                    patched = list(command)
+                    patched[2] = prefix + patched[2]
+                    return patched
 
-        return sanitized
+        return command
 
     # ==================== Allowlist & Command Resolution ====================
 
@@ -467,6 +429,7 @@ class ShellExecutor(BaseExecutor):
             )
 
         # 准备参数
+        command = self._maybe_isolate_python(command)
         work_dir = cwd or self.default_cwd
         sanitized_env = self._sanitize_env(env)
         timeout_s = timeout or self.DEFAULT_TIMEOUT

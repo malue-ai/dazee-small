@@ -1044,6 +1044,13 @@ const cloudStatus = ref<'idle' | 'checking' | 'connected' | 'failed'>('idle')
 const cloudTestMessage = ref('')
 const cloudSaving = ref(false)
 
+const _cloudInitialEnabled = ref(false)
+const _cloudInitialUrl = ref('https://your-cloud-agent.example.com')
+const cloudDirty = computed(() =>
+  cloudEnabled.value !== _cloudInitialEnabled.value
+  || cloudUrl.value.trim() !== _cloudInitialUrl.value.trim()
+)
+
 function toggleCloudEnabled() {
   cloudEnabled.value = !cloudEnabled.value
 }
@@ -1059,6 +1066,8 @@ async function loadCloudConfig() {
       cloudUsername.value = detail.cloud.username || ''
       cloudPassword.value = detail.cloud.password || ''
     }
+    _cloudInitialEnabled.value = cloudEnabled.value
+    _cloudInitialUrl.value = cloudUrl.value
   } catch {
     // Agent 详情加载失败时保持默认值
   }
@@ -1076,6 +1085,8 @@ async function saveCloudConfig() {
       password: cloudPassword.value.trim() || undefined,
     }
     await api.post(`/v1/agents/${agentId}/cloud`, cloud)
+    _cloudInitialEnabled.value = cloudEnabled.value
+    _cloudInitialUrl.value = cloudUrl.value
     cloudTestMessage.value = '已保存'
     cloudStatus.value = 'idle'
     setTimeout(() => { cloudTestMessage.value = '' }, 2000)
@@ -1600,6 +1611,10 @@ async function saveSettings() {
       delete validateResults[p.name]
     }
 
+    if (cloudDirty.value) {
+      await saveCloudConfig()
+    }
+
     saveSuccess.value = true
 
     // 引导系统：保存成功后允许跳过 + 推进步骤
@@ -1626,6 +1641,9 @@ async function saveSettings() {
 
 /** 返回聊天 */
 function handleBackToChat() {
+  if (cloudDirty.value) {
+    saveCloudConfig()
+  }
   if (guideStore.isActive && guideStore.currentStep === 5) {
     guideStore.nextStep() // → step 6
   }

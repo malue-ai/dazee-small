@@ -710,7 +710,7 @@ class EventBroadcaster:
         )
 
         if not self.conversation_service:
-            logger.warning(f"🔧 [DB_DEBUG] _checkpoint_message 跳过: conversation_service 为 None")
+            logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message 跳过: conversation_service 为 None")
             return
 
         accumulator = self._accumulators.get(session_id)

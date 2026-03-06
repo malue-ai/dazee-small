@@ -13,6 +13,7 @@ Conversation 路由层 - 对话管理接口
 - 异常转换为 HTTP 异常
 """
 
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 
@@ -196,6 +197,11 @@ async def list_conversations(
 
         return APIResponse(code=200, message="success", data=result)
 
+    except asyncio.CancelledError:
+        logger.debug("获取对话列表被取消（可能由热重载触发）")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="服务正在重启，请稍后重试"
+        )
     except Exception as e:
         logger.error(f"❌ 获取对话列表失败: {str(e)}", exc_info=True)
         raise HTTPException(

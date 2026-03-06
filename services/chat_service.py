@@ -1624,7 +1624,7 @@ class ChatService:
 
             # 确保 intent 不为 None（Agent 要求必须传入）
             if routing_intent is None:
-                from core.routing.types import Complexity, IntentResult
+                from core.routing.types import IntentResult
 
                 routing_intent = IntentResult(
                     complexity=Complexity.MEDIUM,
@@ -1795,6 +1795,25 @@ class ChatService:
             )
 
             _assistant_text_for_tasks = ""
+
+            # V14: 复杂任务推荐后台执行（非阻塞，仅发送建议事件）
+            if (
+                routing_intent.complexity == Complexity.COMPLEX
+                and not routing_intent.is_follow_up
+            ):
+                await agent.broadcaster.emit_message_delta(
+                    session_id=session_id,
+                    delta={
+                        "type": "recommend_background",
+                        "content": {
+                            "complexity": routing_intent.complexity.value,
+                            "message": "此任务较复杂，预计耗时较长，建议转为后台执行",
+                        },
+                    },
+                    message_id=assistant_message_id,
+                    persist=False,
+                )
+                logger.info("已发送后台执行推荐事件")
 
             # 保存 generator 引用，供 _move_agent_to_background 后台继续消费
             _chat_gen = agent.chat(
@@ -2235,7 +2254,7 @@ class ChatService:
             )
 
             # 构造简单意图（定时任务默认 simple 复杂度）
-            from core.routing.types import Complexity, IntentResult
+            from core.routing.types import IntentResult
 
             intent = IntentResult(
                 complexity=Complexity.SIMPLE,

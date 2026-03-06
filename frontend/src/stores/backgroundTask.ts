@@ -10,8 +10,10 @@ import {
   getBackgroundTasks,
   cancelBackgroundTask as apiCancel,
   removeBackgroundTask as apiRemove,
+  submitBackgroundTask as apiSubmit,
   type BackgroundTask,
   type ListBackgroundTasksParams,
+  type SubmitBackgroundTaskResponse,
 } from '@/api/backgroundTasks'
 
 export type StatusFilter = 'all' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -79,6 +81,23 @@ export const useBackgroundTaskStore = defineStore('backgroundTask', () => {
     }
   }
 
+  const submitting = ref(false)
+
+  async function submitTask(prompt: string): Promise<SubmitBackgroundTaskResponse | null> {
+    submitting.value = true
+    try {
+      const result = await apiSubmit({ prompt })
+      await fetchTasks()
+      startPolling(3000)
+      return result
+    } catch (error) {
+      console.warn('Failed to submit background task:', error)
+      return null
+    } finally {
+      submitting.value = false
+    }
+  }
+
   function updateTaskProgress(taskId: string, progress: number, message: string, status: string) {
     const task = tasks.value.find(t => t.task_id === taskId)
     if (task) {
@@ -109,12 +128,14 @@ export const useBackgroundTaskStore = defineStore('backgroundTask', () => {
     tasks,
     total,
     loading,
+    submitting,
     statusFilter,
     filteredTasks,
     isEmpty,
     hasRunning,
     fetchTasks,
     setStatusFilter,
+    submitTask,
     cancelTask,
     removeTask,
     updateTaskProgress,

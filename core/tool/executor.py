@@ -32,6 +32,8 @@ from core.tool.types import (
     InvocationType,
     LegacyToolAdapter,
     ToolContext,
+    ToolError,
+    ToolErrorType,
     create_tool_context,
 )
 from logger import get_logger
@@ -166,16 +168,15 @@ class ToolExecutor:
 
     def _load_tools(self):
         """从 Registry 加载所有工具"""
+        self._tool_instances.clear()
         tool_caps = self.registry.find_by_type(CapabilityType.TOOL)
 
         for cap in tool_caps:
             tool_name = cap.name
 
             if cap.provider == "system":
-                # 系统工具不需要实例化
                 self._tool_instances[tool_name] = None
             elif cap.provider == "user":
-                # 用户自定义工具 - 动态加载
                 self._load_custom_tool(cap)
 
     def _load_custom_tool(self, cap: Capability):
@@ -227,7 +228,7 @@ class ToolExecutor:
                     cap.metadata["description"] = tool_instance.description
                 logger.info(f"🔧 工具 {tool_name}: 从 class 补全 input_schema")
 
-            logger.info(f"✅ 加载工具: {tool_name}")
+            logger.debug(f"✅ 加载工具: {tool_name}")
 
         except (ModuleNotFoundError, ImportError) as e:
             logger.warning(
@@ -328,7 +329,6 @@ class ToolExecutor:
             self._record_usage(tool_name, result)
             return await self._maybe_compact(tool_name, effective_tool_id, result, skip_compaction)
         except asyncio.TimeoutError:
-            from core.tool.types import ToolError, ToolErrorType
             logger.error(f"工具 {tool_name} 执行超时")
             # HITL 工具超时时通知前端关闭弹窗
             if tool_name == "hitl":
@@ -338,21 +338,18 @@ class ToolExecutor:
                 message=f"工具 {tool_name} 执行超时",
             ).to_dict()
         except PermissionError as e:
-            from core.tool.types import ToolError, ToolErrorType
             logger.error(f"工具 {tool_name} 权限不足: {e}", exc_info=True)
             return ToolError(
                 error_type=ToolErrorType.PERMISSION_DENIED,
                 message=str(e),
             ).to_dict()
         except FileNotFoundError as e:
-            from core.tool.types import ToolError, ToolErrorType
             logger.error(f"工具 {tool_name} 依赖缺失: {e}", exc_info=True)
             return ToolError(
                 error_type=ToolErrorType.DEPENDENCY_MISSING,
                 message=str(e),
             ).to_dict()
         except Exception as e:
-            from core.tool.types import ToolError, ToolErrorType
             error_str = str(e)
             logger.error(f"执行工具 {tool_name} 失败: {e}", exc_info=True)
 

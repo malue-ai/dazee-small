@@ -863,17 +863,21 @@ class OpenAIAdaptor(BaseAdaptor):
                     result.append(assistant_msg)
 
             elif msg.role == "user":
+                # tool_results 必须先于 text content 加入，确保 role="tool"
+                # 紧跟前一条 assistant(tool_calls)，满足 OpenAI/Qwen 邻接要求
+                result.extend(tool_results)
+
                 if content_parts:
-                    # 如果只有纯文本，可以简化为字符串
                     if all(p["type"] == "text" for p in content_parts):
                         result.append(
                             {"role": "user", "content": "\n".join(p["text"] for p in content_parts)}
                         )
                     else:
-                        # 多模态（含图片），使用列表
                         result.append({"role": "user", "content": content_parts})
 
-            # Tool results 作为独立消息
+                tool_results = []  # 已处理，防止下方重复 extend
+
+            # Tool results 作为独立消息（仅 assistant 角色走到这里）
             result.extend(tool_results)
 
             # 如果 result 为空但原始消息有内容（例如只有 thinking 被过滤了），返回空内容的消息以防报错
