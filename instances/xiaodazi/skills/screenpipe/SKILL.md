@@ -20,7 +20,7 @@ metadata:
 - 用户说「今天我在电脑上花了多少时间在哪些应用上？」
 - 用户说「帮我找一下之前看到的那个代码片段」
 - 用户说「我这周总共写了多少代码？看了多少邮件？」
-- 结合 `daily-briefing` 自动生成基于真实屏幕活动的每日回顾
+- 结合每日简报类 Skill（如已启用）自动生成基于真实屏幕活动的每日回顾
 
 ## 前置条件
 
@@ -102,14 +102,14 @@ curl "http://localhost:3030/search?limit=20&start_time=2026-02-25T00:00:00Z"
 ```
 用户：我今天在各个应用上花了多少时间？
 → 获取应用使用统计
-→ 生成时间分布报告（可结合 chart-image 生成图表）
+→ 生成时间分布报告（可结合图表生成类 Skill 生成图表）
 ```
 
 ## 与其他 Skills 的协作
 
 | 组合 | 效果 |
 |------|------|
-| screenpipe + daily-briefing | 基于真实屏幕活动生成每日回顾 |
+| screenpipe + 每日简报类 Skill（如已启用） | 基于真实屏幕活动生成每日回顾 |
 | screenpipe + meeting-insights-analyzer | 自动回顾会议录音和屏幕共享内容 |
 | screenpipe + habit-tracker | 基于真实应用使用数据追踪习惯 |
 | screenpipe + pomodoro | 回顾专注时段内的实际工作内容 |

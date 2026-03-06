@@ -29,7 +29,7 @@ metadata:
 1. 天气 → 调用 weather skill（wttr.in）
 2. 日历 → 调用 apple-calendar / outlook-cli / gog（按平台）
 3. 待办 → 调用 apple-reminders / things-mac / trello / todoist（按用户配置）
-4. 新闻 → 调用 ddg-search 搜索当日热点（可选）
+4. 新闻 → 调用搜索类 Skill 搜索当日热点（可选）
 ```
 
 每个模块独立获取，某个模块失败不影响其他模块。

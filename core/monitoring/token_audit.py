@@ -68,6 +68,12 @@ class TokenAuditRecord(BaseModel):
     is_anomaly: bool = Field(False, description="是否为异常消耗")
     anomaly_reason: Optional[str] = Field(None, description="异常原因")
 
+    # 扩展上下文追踪
+    is_extended_context: bool = Field(False, description="是否使用了扩展窗口")
+    standard_region_tokens: int = Field(0, description="标准区间 token 数")
+    extended_region_tokens: int = Field(0, description="扩展区间 token 数")
+    estimated_cost_savings: float = Field(0.0, description="缓存节省的费用")
+
 
 class TokenAuditStats(BaseModel):
     """Token 审计统计"""

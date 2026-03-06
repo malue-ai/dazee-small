@@ -393,6 +393,15 @@
       @dismiss="chat.dismissLongRunConfirm"
     />
 
+    <!-- V12: 上下文窗口扩展确认模态框 -->
+    <ContextExpansionConfirmModal
+      :show="chat.showContextExpansionConfirmModal.value"
+      :data="chat.contextExpansionConfirmData.value"
+      :loading="chat.contextExpansionConfirmLoading.value"
+      @choose="chat.confirmContextExpansion"
+      @dismiss="chat.dismissContextExpansion"
+    />
+
     <!-- 通用确认/提示弹窗 -->
     <SimpleConfirmModal
       :show="simpleModal.show"
@@ -440,6 +449,7 @@ import SimpleConfirmModal from '@/components/modals/SimpleConfirmModal.vue'
 import RollbackOptionsModal from '@/components/modals/RollbackOptionsModal.vue'
 import LongRunConfirmModal from '@/components/modals/LongRunConfirmModal.vue'
 import HITLConfirmModal from '@/components/modals/HITLConfirmModal.vue'
+import ContextExpansionConfirmModal from '@/components/modals/ContextExpansionConfirmModal.vue'
 import LocalWorkspaceSidebar from '@/components/workspace/LocalWorkspaceSidebar.vue'
 
 // Types

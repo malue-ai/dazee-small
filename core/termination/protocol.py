@@ -8,9 +8,9 @@ V12 更新：
 定义执行器何时停止的接口，供自适应终止器等实现。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from core.context.runtime import RuntimeContext
@@ -46,6 +46,7 @@ class FinishReason(str, Enum):
     HITL_CONFIRM = "hitl_confirm"  # HITL 危险操作确认
     LONG_RUNNING_CONFIRM = "long_running_confirm"  # 长任务确认
     INTENT_CLARIFY = "intent_clarify"  # 意图澄清（回溯升级）
+    CONTEXT_WINDOW_EXPANSION = "context_window_expansion"  # 上下文窗口扩展确认
 
 
 class TerminationAction(str, Enum):
@@ -72,6 +73,7 @@ class TerminationDecision:
     reason: str = ""
     finish_reason: Optional[FinishReason] = None
     action: TerminationAction = TerminationAction.STOP
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class BaseTerminator:

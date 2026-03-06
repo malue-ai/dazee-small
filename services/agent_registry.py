@@ -220,6 +220,9 @@ class AgentRegistry:
         对于没有缓存 prompt_results 的实例（需要跑 LLM 生成），
         推迟到后台异步加载，避免阻塞服务启动。
 
+        防雪崩：单实例加载失败不影响其他实例。所有实例加载完成后，
+        从主实例（AGENT_INSTANCE）恢复全局 LLM Profiles。
+
         Args:
             force_refresh: 是否强制刷新缓存
 
@@ -228,11 +231,11 @@ class AgentRegistry:
         """
         instances = list_instances()
         loaded_count = 0
+        failed_instances: list[str] = []
         deferred: list[str] = []
 
         for instance_name in instances:
             try:
-                # Check if prompt_results are cached (fast path vs slow LLM path)
                 if not force_refresh and self._needs_llm_generation(instance_name):
                     deferred.append(instance_name)
                     logger.info(
@@ -245,17 +248,50 @@ class AgentRegistry:
                 if success:
                     loaded_count += 1
             except Exception as e:
-                logger.warning(f"⚠️ 加载实例 '{instance_name}' 失败: {e}")
+                logger.warning(f"⚠️ 加载实例 '{instance_name}' 失败（已隔离，不影响其他实例）: {e}")
+                failed_instances.append(instance_name)
                 continue
 
         self._loaded = loaded_count > 0
 
-        # Launch deferred instances in background (non-blocking)
+        # 防雪崩：从主实例恢复全局 LLM Profiles
+        self._restore_primary_profiles()
+
+        if failed_instances:
+            logger.warning(
+                f"⚠️ {len(failed_instances)} 个实例加载失败: {failed_instances}，"
+                f"其余 {loaded_count} 个实例正常运行"
+            )
+
         if deferred:
             logger.info(f"🔄 {len(deferred)} 个实例将在后台异步加载: {deferred}")
             asyncio.create_task(self._deferred_load(deferred, force_refresh))
 
         return loaded_count
+
+    def _restore_primary_profiles(self) -> None:
+        """
+        从主实例恢复全局 LLM Profiles，防止其他实例的加载覆盖主实例配置。
+
+        多实例加载时，最后加载的实例会覆盖全局 profiles。此方法确保
+        加载完成后，全局 profiles 始终来自主实例（AGENT_INSTANCE）。
+        """
+        primary = os.environ.get("AGENT_INSTANCE")
+        if not primary or primary not in self._configs:
+            return
+
+        config = self._configs[primary]
+        if not config.instance_config:
+            return
+
+        llm_profiles = (config.instance_config.raw_config or {}).get("llm_profiles", {})
+        if llm_profiles:
+            from config.llm_config.loader import set_instance_profiles
+            set_instance_profiles(llm_profiles)
+            logger.info(
+                f"🔒 已从主实例 '{primary}' 恢复全局 LLM Profiles "
+                f"({len(llm_profiles)} 个)"
+            )
 
     def _needs_llm_generation(self, instance_name: str) -> bool:
         """
@@ -735,12 +771,38 @@ class AgentRegistry:
         """
         加载单个 Agent 配置
 
+        失败时回滚全局 LLM Profiles，防止单实例配置错误导致雪崩。
+
         Args:
             agent_id: Agent ID
             force_refresh: 是否强制刷新缓存
             progress_callback: async callback(step, message) for progress reporting
         """
+        from config.llm_config.loader import get_current_profiles, set_instance_profiles
+
         instance_start = datetime.now()
+        saved_profiles = get_current_profiles()
+
+        try:
+            return await self._do_load_single_agent(
+                agent_id, force_refresh, progress_callback, instance_start,
+            )
+        except Exception:
+            set_instance_profiles(saved_profiles)
+            logger.warning(
+                f"⚠️ 实例 '{agent_id}' 加载失败，已回滚全局 LLM Profiles"
+            )
+            raise
+
+    async def _do_load_single_agent(
+        self,
+        agent_id: str,
+        force_refresh: bool,
+        progress_callback,
+        instance_start: datetime,
+    ):
+        """_load_single_agent 的实际逻辑，由外层负责 profiles 保护。"""
+        from config.llm_config.loader import set_instance_profiles
 
         # 1. 加载实例环境变量（从 config.yaml 的 env_vars 段）
         await load_instance_env_from_config(agent_id)
@@ -757,8 +819,6 @@ class AgentRegistry:
             logger.info(f"   自定义存储路径: {custom_data_dir}")
 
         # 2.1 注入实例 LLM Profiles（必须在 InstancePromptCache 之前）
-        from config.llm_config.loader import set_instance_profiles
-
         llm_profiles = (config.raw_config or {}).get("llm_profiles", {})
         if llm_profiles:
             set_instance_profiles(llm_profiles)
@@ -981,6 +1041,8 @@ class AgentRegistry:
         """
         热重载 Agent 配置
 
+        防雪崩：重载失败时恢复旧配置，不丢失实例。
+
         Args:
             agent_id: 指定 Agent ID，为 None 时重载所有
 
@@ -992,12 +1054,7 @@ class AgentRegistry:
             if agent_id not in self._configs:
                 raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
 
-            # 清除旧的原型和配置
-            self._agent_prototypes.pop(agent_id, None)
-            self._configs.pop(agent_id, None)
-
-            # 重新加载
-            await self.preload_instance(agent_id, force_refresh=True)
+            await self._safe_reload_single(agent_id)
 
             logger.info(f"🔄 Agent '{agent_id}' 热重载完成")
             return {"reloaded": [agent_id], "failed": []}
@@ -1005,10 +1062,7 @@ class AgentRegistry:
             # 重载所有 Agent
             agent_ids = list(self._configs.keys())
 
-            # 首次启动可能因缺少模型而加载失败，_configs 为空
-            # 此时需要重新发现实例并尝试加载
             if not agent_ids:
-                import os
                 instance_name = os.environ.get("AGENT_INSTANCE")
                 if not instance_name:
                     instances = list_instances()
@@ -1025,16 +1079,37 @@ class AgentRegistry:
 
             for aid in agent_ids:
                 try:
-                    self._agent_prototypes.pop(aid, None)
-                    self._configs.pop(aid, None)
-                    await self.preload_instance(aid, force_refresh=True)
+                    await self._safe_reload_single(aid)
                     reloaded.append(aid)
                 except Exception as e:
-                    logger.warning(f"⚠️ 重载 Agent '{aid}' 失败: {e}")
+                    logger.warning(f"⚠️ 重载 Agent '{aid}' 失败（已保留旧配置）: {e}")
                     failed.append({"agent_id": aid, "error": str(e)})
+
+            self._restore_primary_profiles()
 
             logger.info(f"🔄 热重载完成: {len(reloaded)} 成功, {len(failed)} 失败")
             return {"reloaded": reloaded, "failed": failed}
+
+    async def _safe_reload_single(self, agent_id: str) -> None:
+        """
+        安全重载单个实例：失败时恢复旧配置，不丢失实例。
+        """
+        saved_prototype = self._agent_prototypes.get(agent_id)
+        saved_config = self._configs.get(agent_id)
+
+        self._agent_prototypes.pop(agent_id, None)
+        self._configs.pop(agent_id, None)
+
+        try:
+            await self.preload_instance(agent_id, force_refresh=True)
+        except Exception:
+            if saved_config is not None:
+                self._configs[agent_id] = saved_config
+            if saved_prototype is not None:
+                self._agent_prototypes[agent_id] = saved_prototype
+            if saved_config or saved_prototype:
+                logger.info(f"🔄 已恢复 Agent '{agent_id}' 到重载前状态")
+            raise
 
     def unload_agent(self, agent_id: str) -> None:
         """

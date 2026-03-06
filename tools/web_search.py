@@ -73,16 +73,22 @@ class WebSearchTool(BaseTool):
         time_range = params.get("time_range", "any")
 
         backends = [
-            ("tavily", self._search_tavily),
-            ("exa", self._search_exa),
+            ("tavily", self._search_tavily, "TAVILY_API_KEY"),
+            ("exa", self._search_exa, "EXA_API_KEY"),
         ]
 
         tried: List[str] = []
+        no_key: List[str] = []
+        errors: List[str] = []
+
         async with httpx.AsyncClient(
             timeout=_TIMEOUT,
             headers={"User-Agent": _USER_AGENT},
         ) as client:
-            for name, fn in backends:
+            for name, fn, key_env in backends:
+                if not os.environ.get(key_env):
+                    no_key.append(f"{name}（未配置 {key_env}）")
+                    continue
                 tried.append(name)
                 try:
                     results = await fn(
@@ -103,12 +109,24 @@ class WebSearchTool(BaseTool):
                     logger.warning(
                         "web_search 后端 [%s] 失败: %s", name, e, exc_info=True
                     )
+                    errors.append(f"{name}: {e}")
                     continue
+
+        if not tried and no_key:
+            return {
+                "success": False,
+                "error": f"搜索功能未配置 API Key，无法使用。缺失：{'; '.join(no_key)}",
+                "recovery_hint": (
+                    "请在「设置」→「搜索」中配置至少一个搜索 API Key（推荐 Tavily，免费额度足够日常使用）。"
+                    "或者改用 cloud_agent 工具进行云端搜索（无需本地 Key）。"
+                ),
+            }
 
         return {
             "success": False,
-            "error": "所有搜索源均不可用",
+            "error": "所有搜索源请求失败",
             "tried": tried,
+            "details": errors,
         }
 
     # ------------------------------------------------------------------
@@ -123,9 +141,7 @@ class WebSearchTool(BaseTool):
         search_depth: str,
         time_range: str,
     ) -> Optional[List[Dict[str, str]]]:
-        api_key = os.environ.get("TAVILY_API_KEY")
-        if not api_key:
-            return None
+        api_key = os.environ.get("TAVILY_API_KEY", "")
 
         body: Dict[str, Any] = {
             "api_key": api_key,
@@ -166,9 +182,7 @@ class WebSearchTool(BaseTool):
         search_depth: str,
         time_range: str,
     ) -> Optional[List[Dict[str, str]]]:
-        api_key = os.environ.get("EXA_API_KEY")
-        if not api_key:
-            return None
+        api_key = os.environ.get("EXA_API_KEY", "")
 
         body: Dict[str, Any] = {
             "query": query,

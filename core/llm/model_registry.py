@@ -85,12 +85,22 @@ class ModelPricing:
 
     用于实时费用估算和 HITL 费用预警。
     None 表示免费或未知（如私有化部署）。
+
+    阶梯计价（GPT-5.4 等）：
+    当 input_tokens 超过 long_context_threshold 时，整个会话按
+    long_context_* 费率计费（不是仅超出部分）。
     """
 
     input_per_million: Optional[float] = None  # 输入 $/M tokens
     output_per_million: Optional[float] = None  # 输出 $/M tokens
     cache_read_per_million: Optional[float] = None  # 缓存读取 $/M tokens
     cache_write_per_million: Optional[float] = None  # 缓存写入 $/M tokens
+
+    # 长上下文阶梯计价（超过阈值后整个会话按此费率）
+    long_context_threshold: Optional[int] = None  # 触发阈值（input tokens）
+    long_context_input_per_million: Optional[float] = None
+    long_context_output_per_million: Optional[float] = None
+    long_context_cache_read_per_million: Optional[float] = None
 
     @property
     def is_free(self) -> bool:
@@ -110,19 +120,31 @@ class ModelPricing:
         """
         Estimate cost in USD based on token counts.
 
+        If long_context_threshold is set and input_tokens exceeds it,
+        the entire session is billed at long_context_* rates.
+
         Returns:
             Estimated cost in USD, or None if pricing is unknown.
         """
         if self.is_free:
             return None
 
+        use_long = (
+            self.long_context_threshold is not None
+            and input_tokens > self.long_context_threshold
+        )
+
+        inp = (self.long_context_input_per_million if use_long else None) or self.input_per_million
+        out = (self.long_context_output_per_million if use_long else None) or self.output_per_million
+        cache_r = (self.long_context_cache_read_per_million if use_long else None) or self.cache_read_per_million
+
         cost = 0.0
-        if self.input_per_million:
-            cost += input_tokens * self.input_per_million / 1_000_000
-        if self.output_per_million:
-            cost += output_tokens * self.output_per_million / 1_000_000
-        if self.cache_read_per_million:
-            cost += cache_read_tokens * self.cache_read_per_million / 1_000_000
+        if inp:
+            cost += input_tokens * inp / 1_000_000
+        if out:
+            cost += output_tokens * out / 1_000_000
+        if cache_r:
+            cost += cache_read_tokens * cache_r / 1_000_000
         if self.cache_write_per_million:
             cost += cache_write_tokens * self.cache_write_per_million / 1_000_000
         return cost
@@ -134,15 +156,21 @@ class ModelCapabilities:
     模型能力配置
 
     描述模型支持的功能和限制。
+
+    max_input_tokens: 标准上下文窗口大小（默认生效）
+    max_extended_input_tokens: 可扩展的上下文窗口上限（需用户通过 HITL 确认）
+        - Claude 4.6: 200K → 1M（需 beta header）
+        - None 表示不支持扩展（已是最大窗口或无扩展 API）
     """
 
-    supports_tools: bool = True  # 是否支持工具调用
-    supports_vision: bool = False  # 是否支持图像输入
-    supports_thinking: bool = False  # 是否支持深度思考（Claude/Qwen）
-    supports_audio: bool = False  # 是否支持音频输入
-    supports_streaming: bool = True  # 是否支持流式输出
-    max_tokens: int = 4096  # 最大输出 token 数
-    max_input_tokens: Optional[int] = None  # 最大输入 token 数（None 表示未知）
+    supports_tools: bool = True
+    supports_vision: bool = False
+    supports_thinking: bool = False
+    supports_audio: bool = False
+    supports_streaming: bool = True
+    max_tokens: int = 4096
+    max_input_tokens: Optional[int] = None
+    max_extended_input_tokens: Optional[int] = None
 
 
 @dataclass
@@ -410,12 +438,17 @@ class ModelRegistry:
                 "supports_streaming": config.capabilities.supports_streaming,
                 "max_tokens": config.capabilities.max_tokens,
                 "max_input_tokens": config.capabilities.max_input_tokens,
+                "max_extended_input_tokens": config.capabilities.max_extended_input_tokens,
             },
             "pricing": {
                 "input_per_million": config.pricing.input_per_million,
                 "output_per_million": config.pricing.output_per_million,
                 "cache_read_per_million": config.pricing.cache_read_per_million,
                 "cache_write_per_million": config.pricing.cache_write_per_million,
+                "long_context_threshold": config.pricing.long_context_threshold,
+                "long_context_input_per_million": config.pricing.long_context_input_per_million,
+                "long_context_output_per_million": config.pricing.long_context_output_per_million,
+                "long_context_cache_read_per_million": config.pricing.long_context_cache_read_per_million,
                 "is_free": config.pricing.is_free,
             },
         }
@@ -710,12 +743,17 @@ class ModelRegistry:
                 "supports_streaming": config.capabilities.supports_streaming,
                 "max_tokens": config.capabilities.max_tokens,
                 "max_input_tokens": config.capabilities.max_input_tokens,
+                "max_extended_input_tokens": config.capabilities.max_extended_input_tokens,
             },
             "pricing": {
                 "input_per_million": config.pricing.input_per_million,
                 "output_per_million": config.pricing.output_per_million,
                 "cache_read_per_million": config.pricing.cache_read_per_million,
                 "cache_write_per_million": config.pricing.cache_write_per_million,
+                "long_context_threshold": config.pricing.long_context_threshold,
+                "long_context_input_per_million": config.pricing.long_context_input_per_million,
+                "long_context_output_per_million": config.pricing.long_context_output_per_million,
+                "long_context_cache_read_per_million": config.pricing.long_context_cache_read_per_million,
             },
             "extra_config": config.extra_config or {},
         }
@@ -743,12 +781,17 @@ class ModelRegistry:
                 supports_streaming=caps_data.get("supports_streaming", True),
                 max_tokens=caps_data.get("max_tokens", 4096),
                 max_input_tokens=caps_data.get("max_input_tokens"),
+                max_extended_input_tokens=caps_data.get("max_extended_input_tokens"),
             ),
             pricing=ModelPricing(
                 input_per_million=pricing_data.get("input_per_million"),
                 output_per_million=pricing_data.get("output_per_million"),
                 cache_read_per_million=pricing_data.get("cache_read_per_million"),
                 cache_write_per_million=pricing_data.get("cache_write_per_million"),
+                long_context_threshold=pricing_data.get("long_context_threshold"),
+                long_context_input_per_million=pricing_data.get("long_context_input_per_million"),
+                long_context_output_per_million=pricing_data.get("long_context_output_per_million"),
+                long_context_cache_read_per_million=pricing_data.get("long_context_cache_read_per_million"),
             ),
             extra_config=data.get("extra_config", {}),
             is_custom=True,
@@ -979,6 +1022,48 @@ def _register_preset_models() -> None:
     )
 
     # --- GPT-5 family ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5.4",
+            model_type=ModelType.VLM,
+            display_name="GPT-5.4",
+            description="OpenAI 最强前沿模型（2026.03），专业工作/编码/Agent/Computer Use，1.05M 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=128000, max_input_tokens=1050000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=2.50, output_per_million=15.0,
+                cache_read_per_million=0.25,
+                long_context_threshold=272000,
+                long_context_input_per_million=5.0,
+                long_context_output_per_million=22.5,
+                long_context_cache_read_per_million=0.50,
+            ),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5.4-pro",
+            model_type=ModelType.VLM,
+            display_name="GPT-5.4 Pro",
+            description="GPT-5.4 最强版本，复杂任务极限性能，1.05M 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=128000, max_input_tokens=1050000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=30.0, output_per_million=180.0,
+                long_context_threshold=272000,
+                long_context_input_per_million=60.0,
+                long_context_output_per_million=270.0,
+            ),
+            **_OPENAI_COMMON,
+        )
+    )
 
     ModelRegistry.register(
         ModelConfig(
@@ -1290,14 +1375,19 @@ def _register_preset_models() -> None:
             model_name="claude-sonnet-4-6",
             model_type=ModelType.VLM,
             display_name="Claude Sonnet 4.6",
-            description="Anthropic 速度与智能最佳平衡",
+            description="Anthropic 速度与智能最佳平衡，200K→1M 可扩展",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=True, supports_thinking=True,
                 max_tokens=64000, max_input_tokens=200000,
+                max_extended_input_tokens=1_000_000,
             ),
             pricing=ModelPricing(
                 input_per_million=3.0, output_per_million=15.0,
                 cache_read_per_million=0.30, cache_write_per_million=3.75,
+                long_context_threshold=200_000,
+                long_context_input_per_million=6.0,
+                long_context_output_per_million=22.5,
+                long_context_cache_read_per_million=0.60,
             ),
             **_CLAUDE_COMMON,
         )
@@ -1308,14 +1398,19 @@ def _register_preset_models() -> None:
             model_name="claude-opus-4-6",
             model_type=ModelType.VLM,
             display_name="Claude Opus 4.6",
-            description="Anthropic 最强模型（2026.02）",
+            description="Anthropic 最强模型（2026.02），200K→1M 可扩展，128K 输出",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=True, supports_thinking=True,
-                max_tokens=64000, max_input_tokens=200000,
+                max_tokens=128000, max_input_tokens=200000,
+                max_extended_input_tokens=1_000_000,
             ),
             pricing=ModelPricing(
                 input_per_million=15.0, output_per_million=75.0,
                 cache_read_per_million=1.50, cache_write_per_million=18.75,
+                long_context_threshold=200_000,
+                long_context_input_per_million=30.0,
+                long_context_output_per_million=112.5,
+                long_context_cache_read_per_million=3.0,
             ),
             **_CLAUDE_COMMON,
         )
@@ -1328,14 +1423,19 @@ def _register_preset_models() -> None:
             model_name="claude-sonnet-4-20250514",
             model_type=ModelType.VLM,
             display_name="Claude Sonnet 4",
-            description="Claude 4 系列均衡模型",
+            description="Claude 4 系列均衡模型，200K→1M 可扩展",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=True, supports_thinking=True,
                 max_tokens=64000, max_input_tokens=200000,
+                max_extended_input_tokens=1_000_000,
             ),
             pricing=ModelPricing(
                 input_per_million=3.0, output_per_million=15.0,
                 cache_read_per_million=0.30, cache_write_per_million=3.75,
+                long_context_threshold=200_000,
+                long_context_input_per_million=6.0,
+                long_context_output_per_million=22.5,
+                long_context_cache_read_per_million=0.60,
             ),
             **_CLAUDE_COMMON,
         )
@@ -1354,6 +1454,10 @@ def _register_preset_models() -> None:
             pricing=ModelPricing(
                 input_per_million=15.0, output_per_million=75.0,
                 cache_read_per_million=1.50, cache_write_per_million=18.75,
+                long_context_threshold=200_000,
+                long_context_input_per_million=30.0,
+                long_context_output_per_million=112.5,
+                long_context_cache_read_per_million=3.0,
             ),
             **_CLAUDE_COMMON,
         )
@@ -1960,12 +2064,17 @@ def _register_preset_models() -> None:
             model_name="gemini-2.5-pro",
             model_type=ModelType.VLM,
             display_name="Gemini 2.5 Pro",
-            description="Google 旗舰推理模型，支持多模态",
+            description="Google 旗舰推理模型，支持多模态，200K+ 阶梯计价",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=True, supports_thinking=True,
                 max_tokens=65536, max_input_tokens=1048576,
             ),
-            pricing=ModelPricing(input_per_million=1.25, output_per_million=10.0),
+            pricing=ModelPricing(
+                input_per_million=1.25, output_per_million=10.0,
+                long_context_threshold=200_000,
+                long_context_input_per_million=2.50,
+                long_context_output_per_million=20.0,
+            ),
             **_GEMINI_COMMON,
         )
     )
@@ -1975,12 +2084,17 @@ def _register_preset_models() -> None:
             model_name="gemini-2.5-flash",
             model_type=ModelType.VLM,
             display_name="Gemini 2.5 Flash",
-            description="Google 高性价比快速模型",
+            description="Google 高性价比快速模型，200K+ 阶梯计价",
             capabilities=ModelCapabilities(
                 supports_tools=True, supports_vision=True, supports_thinking=True,
                 max_tokens=65536, max_input_tokens=1048576,
             ),
-            pricing=ModelPricing(input_per_million=0.15, output_per_million=0.60),
+            pricing=ModelPricing(
+                input_per_million=0.15, output_per_million=0.60,
+                long_context_threshold=200_000,
+                long_context_input_per_million=0.30,
+                long_context_output_per_million=1.20,
+            ),
             **_GEMINI_COMMON,
         )
     )
