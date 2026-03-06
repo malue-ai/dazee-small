@@ -12,5 +12,9 @@ instance:
   description: 住在你电脑里的 AI 搭子，亲切靠谱，帮你搞定桌面上的大小事
   version: 1.0.0
 agent:
-  provider: openai
-  model: gpt-5.4
+  provider: qwen
+  model: qwen3-max
+
+cloud:
+  enabled: true
+  url: https://your-cloud-agent.example.com

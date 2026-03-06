@@ -67,6 +67,14 @@ class MemoryConfig(BaseModel):
     retention_policy: str = Field("user", description="记忆保留策略: session / user / persistent")
 
 
+class CloudConfig(BaseModel):
+    """云端 Agent 连接配置"""
+    enabled: bool = Field(False, description="是否启用云端 Agent")
+    url: str = Field("https://your-cloud-agent.example.com", description="云端 Agent URL")
+    username: Optional[str] = Field(None, description="登录用户名（可选）")
+    password: Optional[str] = Field(None, description="登录密码（可选）")
+
+
 # ============================================================
 # Agent 请求模型
 # ============================================================
@@ -96,6 +104,9 @@ class AgentCreateRequest(BaseModel):
     
     # 记忆
     memory: Optional[MemoryConfig] = Field(None, description="记忆配置")
+
+    # 云端
+    cloud: Optional[CloudConfig] = Field(None, description="云端 Agent 连接配置")
 
     # 存储
     data_dir: Optional[str] = Field(

@@ -909,15 +909,6 @@ capabilities:
         description: Output audio format (TTS, default wav)
     required: [action]
 
-
-
-
-
-
-
-
-
-
 # ========== 内置代码执行 ==========
 
 - name: code_execution
@@ -935,3 +926,54 @@ capabilities:
     requires_api: false
   metadata:
     description: Execute Python code dynamically via code_execution
+
+# ========== 云端 Agent 委托 ==========
+
+- name: cloud_agent
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  state_category: executing
+  cache_stable: false
+  implementation:
+    module: tools.cloud_agent
+    class: CloudAgentTool
+  capabilities:
+    - cloud_delegation
+    - deep_research
+    - sandbox_execution
+  priority: 60
+  cost:
+    time: variable
+    money: low
+  constraints:
+    requires_api: false
+    requires_network: true
+  metadata:
+    description: 将任务委托给云端 Agent 执行，适用于深度调研、沙箱代码执行、持续运行等本地不擅长的场景
+  input_schema:
+    type: object
+    properties:
+      task:
+        type: string
+        description: 委托给云端的任务描述
+      context:
+        type: string
+        description: 相关上下文信息（可选）
+      files:
+        type: array
+        items:
+          type: object
+          properties:
+            file_url:
+              type: string
+              description: 文件路径或 URL
+            file_name:
+              type: string
+              description: 文件名
+            file_type:
+              type: string
+              description: MIME 类型
+        description: 附件列表（PDF/Excel/CSV/图片等），本地文件会自动上传到云端
+    required: [task]

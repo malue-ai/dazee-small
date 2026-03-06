@@ -48,6 +48,8 @@ export interface AgentDetail {
   loaded_at: string | null
   /** 自定义数据存储目录（null 表示使用默认路径） */
   data_dir: string | null
+  /** 云端 Agent 连接配置 */
+  cloud?: CloudConfig | null
 }
 
 export interface AgentMCPTool {
@@ -70,6 +72,15 @@ export interface AgentAPI {
   description: string
 }
 
+// ==================== 云端配置 ====================
+
+export interface CloudConfig {
+  enabled: boolean
+  url: string
+  username?: string | null
+  password?: string | null
+}
+
 // ==================== 创建请求 ====================
 
 export interface AgentCreateRequest {
@@ -81,6 +92,8 @@ export interface AgentCreateRequest {
   plan_manager_enabled?: boolean
   /** 自定义数据存储目录（绝对路径），不填则使用默认路径 */
   data_dir?: string
+  /** 云端 Agent 连接配置 */
+  cloud?: CloudConfig
 }
 
 // ==================== 更新请求 ====================
@@ -92,6 +105,8 @@ export interface AgentUpdateRequest {
   model?: string
   /** 自定义数据存储目录（绝对路径），不填则使用默认路径 */
   data_dir?: string
+  /** 云端 Agent 连接配置 */
+  cloud?: CloudConfig
 }
 
 // ==================== 创建/更新响应（异步模式） ====================
