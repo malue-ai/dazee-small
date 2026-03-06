@@ -60,7 +60,7 @@ class QwenConfig(LLMConfig):
 
     # 千问特有功能
     enable_thinking: bool = False  # 深度思考模式
-    thinking_budget: Optional[int] = None  # 思考长度限制
+    thinking_budget: int = 0  # 思考长度限制（0 = 不限制，由模型默认）
 
     # 视觉模型参数
     vl_high_resolution_images: bool = False
@@ -72,7 +72,7 @@ class QwenConfig(LLMConfig):
     # 音频模型参数
     audio_voice: Optional[str] = None  # 音色
     audio_format: str = "wav"
-    modalities: List[str] = None  # ["text"] 或 ["text", "audio"]
+    modalities: Optional[List[str]] = None  # ["text"] 或 ["text", "audio"]
 
     # 其他参数
     seed: Optional[int] = None
@@ -477,12 +477,14 @@ class QwenLLMService(BaseLLMService):
         # Qwen Omni 模型强制使用流式（API 要求 stream=True）
         if QwenModelCapability.supports_audio(self.config.model):
             logger.info(f"🎵 Qwen Omni 模型 {self.config.model} 强制使用流式请求")
-            final_response = None
+            final_response: LLMResponse | None = None
             async for resp in self.create_message_stream(
                 messages=messages, system=system, tools=tools,
                 override_thinking=override_thinking, **kwargs,
             ):
                 final_response = resp
+            if final_response is None:
+                raise RuntimeError(f"Qwen Omni stream for {self.config.model} yielded no response")
             return final_response
 
         # 使用 adaptor 转换消息
@@ -1526,7 +1528,7 @@ def create_qwen_service(
         model = get_default_model("qwen")
 
     if api_key is None:
-        api_key = os.getenv("DASHSCOPE_API_KEY")
+        api_key = os.getenv("DASHSCOPE_API_KEY", "")
 
     config = QwenConfig(
         provider=LLMProvider.QWEN,
