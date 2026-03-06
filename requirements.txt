@@ -5,8 +5,8 @@ pydantic>=2.5.3,<3.0.0
 
 # Claude API
 anthropic>=0.40.0  # 更新最低版本要求
-# OpenAI SDK（用于千问等兼容接口）
-openai>=1.0.0      # 🆕 千问使用 OpenAI 兼容接口
+# OpenAI SDK（Responses API 需要 >=2.20.0）
+openai>=2.20.0      # GPT-5.x Responses API + Chat Completions 双通道
 
 # Qwen DashScope SDK
 dashscope>=1.25.0

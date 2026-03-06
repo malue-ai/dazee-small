@@ -51,7 +51,7 @@ class ErrorCategory(Enum):
     PERMISSION_DENIED = "permission_denied"
     DEPENDENCY_MISSING = "dependency_missing"
 
-    # Layer 2: 业务逻辑层错误（具体类别由 LLM 判断，此处仅作枚举定义）
+    # Layer 2: 业务逻辑层错误
     PLAN_INVALID = "plan_invalid"
     TOOL_MISMATCH = "tool_mismatch"
     RESULT_UNSATISFACTORY = "result_unsatisfactory"
@@ -59,6 +59,14 @@ class ErrorCategory(Enum):
     PARAMETER_ERROR = "parameter_error"
     CONTEXT_INSUFFICIENT = "context_insufficient"
     EXECUTION_LOGIC_ERROR = "execution_logic_error"
+
+    # Layer 2 细分：常见工具错误（确定性格式匹配，非语义判断）
+    SELECTOR_AMBIGUOUS = "selector_ambiguous"
+    APP_NOT_FOUND = "app_not_found"
+    COMMAND_NOT_FOUND = "command_not_found"
+    COMMAND_SYNTAX_ERROR = "command_syntax_error"
+    FILE_NOT_FOUND = "file_not_found"
+    CODE_SYNTAX_ERROR = "code_syntax_error"
 
     # 未知
     UNKNOWN = "unknown"
@@ -290,15 +298,23 @@ class ErrorClassifier:
                 category = matched_category
                 confidence = 0.7
 
-        # Step 3: If still unknown → treat as business logic (conservative)
-        # Most tool execution errors that don't match infra patterns are
-        # business logic issues that the LLM should analyze.
+        # Step 3: If still unknown → treat as business logic
         if layer == ErrorLayer.UNKNOWN:
             layer = ErrorLayer.BUSINESS_LOGIC
             confidence = 0.4
 
+        # Step 3b: For business-logic errors, try to match common tool error
+        # patterns. These are deterministic format matches on structured error
+        # messages from tools (Playwright, shell, etc.), not semantic judgment.
+        if layer == ErrorLayer.BUSINESS_LOGIC and category == ErrorCategory.UNKNOWN:
+            matched = self._match_tool_error_category(error_message)
+            if matched:
+                category, confidence = matched
+
         # Step 4: Determine backtrack strategy
-        backtrack_type, suggested_action = self._determine_backtrack_strategy(layer)
+        backtrack_type, suggested_action = self._determine_backtrack_strategy(
+            layer, category
+        )
         is_retryable = self._is_retryable(layer, category)
 
         classified = ClassifiedError(
@@ -355,21 +371,131 @@ class ErrorClassifier:
                     return category
         return ErrorCategory.UNKNOWN
 
+    # ── Layer 2 细分：常见工具错误模式 ──────────────────────────
+    # 匹配对象：工具框架的结构化错误消息（Playwright、shell 返回码等）
+    # 这些是技术格式匹配，不是自然语言语义判断，符合 LLM-First
+    _TOOL_ERROR_PATTERNS: List[tuple] = [
+        (
+            ErrorCategory.SELECTOR_AMBIGUOUS,
+            re.compile(
+                r"strict mode violation.*resolved to \d+ elements|"
+                r"multiple elements? match|locator resolved to \d+ element",
+                re.IGNORECASE,
+            ),
+            0.85,
+            "选择器匹配到多个元素，用 .first 或 .nth(0) 精确定位",
+        ),
+        (
+            ErrorCategory.APP_NOT_FOUND,
+            re.compile(
+                r"unable to find application named|"
+                r"can'?t find app|application.*not found|"
+                r"no such app",
+                re.IGNORECASE,
+            ),
+            0.85,
+            "应用名称不匹配，检查应用的准确全名",
+        ),
+        (
+            ErrorCategory.COMMAND_SYNTAX_ERROR,
+            re.compile(
+                r"requires a subcommand|"
+                r"unrecognized (arguments?|options?)|"
+                r"invalid option|unknown flag|"
+                r"usage:\s|error: expected",
+                re.IGNORECASE,
+            ),
+            0.80,
+            "命令语法错误，检查子命令和参数格式",
+        ),
+        (
+            ErrorCategory.COMMAND_NOT_FOUND,
+            re.compile(
+                r"command not found|"
+                r"is not recognized as|"
+                r"no such file or directory.*bin/",
+                re.IGNORECASE,
+            ),
+            0.85,
+            "命令不存在，可能需要换用其他工具或先安装",
+        ),
+        (
+            ErrorCategory.FILE_NOT_FOUND,
+            re.compile(
+                r"enoent|filenotfounderror|"
+                r"no such file or directory(?!.*bin/)|"
+                r"path.*does not exist|"
+                r"file.*not found",
+                re.IGNORECASE,
+            ),
+            0.80,
+            "文件或路径不存在，检查路径是否正确",
+        ),
+        (
+            ErrorCategory.CODE_SYNTAX_ERROR,
+            re.compile(
+                r"syntaxerror|indentationerror|"
+                r"unexpected token|unterminated string|"
+                r"parsing error",
+                re.IGNORECASE,
+            ),
+            0.80,
+            "代码语法错误，检查生成的代码格式",
+        ),
+    ]
+
+    def _match_tool_error_category(
+        self, error_message: str,
+    ) -> Optional[tuple]:
+        """Match common tool error patterns for more precise classification."""
+        for category, pattern, confidence, _hint in self._TOOL_ERROR_PATTERNS:
+            if pattern.search(error_message):
+                return category, confidence
+        return None
+
+    _CATEGORY_BACKTRACK_MAP = {
+        ErrorCategory.SELECTOR_AMBIGUOUS: (
+            BacktrackType.PARAM_ADJUST,
+            "选择器匹配到多个元素，用 .first 或 .nth(0) 精确定位",
+        ),
+        ErrorCategory.APP_NOT_FOUND: (
+            BacktrackType.PARAM_ADJUST,
+            "应用名称不匹配，检查应用的准确全名",
+        ),
+        ErrorCategory.COMMAND_NOT_FOUND: (
+            BacktrackType.TOOL_REPLACE,
+            "命令不存在，换用其他工具或方法",
+        ),
+        ErrorCategory.COMMAND_SYNTAX_ERROR: (
+            BacktrackType.PARAM_ADJUST,
+            "命令语法错误，调整参数格式",
+        ),
+        ErrorCategory.FILE_NOT_FOUND: (
+            BacktrackType.PARAM_ADJUST,
+            "文件不存在，检查路径",
+        ),
+        ErrorCategory.CODE_SYNTAX_ERROR: (
+            BacktrackType.PARAM_ADJUST,
+            "代码语法错误，修正代码",
+        ),
+    }
+
     def _determine_backtrack_strategy(
-        self, layer: ErrorLayer
+        self, layer: ErrorLayer, category: ErrorCategory = ErrorCategory.UNKNOWN,
     ) -> tuple[BacktrackType, str]:
         """
-        Determine backtrack strategy.
+        Determine backtrack strategy based on layer and category.
 
-        - Layer 1 (infrastructure): NO_BACKTRACK, handled by resilience
-        - Layer 2 (business logic): conservative PARAM_ADJUST default
-          Actual strategy decided by BacktrackManager via LLM
+        - Layer 1 (infrastructure): NO_BACKTRACK
+        - Layer 2 with known category: precise strategy from map
+        - Layer 2 unknown: conservative PARAM_ADJUST default
         """
         if layer == ErrorLayer.INFRASTRUCTURE:
             return BacktrackType.NO_BACKTRACK, "使用基础设施层重试/降级机制"
 
-        # Layer 2: conservative default — BacktrackManager._llm_decide
-        # will override with a proper strategy
+        if category in self._CATEGORY_BACKTRACK_MAP:
+            return self._CATEGORY_BACKTRACK_MAP[category]
+
         return BacktrackType.PARAM_ADJUST, "业务逻辑错误，由回溯管理器决策具体策略"
 
     def _is_retryable(self, layer: ErrorLayer, category: ErrorCategory) -> bool:
