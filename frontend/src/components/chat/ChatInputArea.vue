@@ -280,6 +280,7 @@ function insertFile(file: AttachedFile) {
   chip.setAttribute('data-file-chip', '')
   chip.setAttribute('data-file-data', JSON.stringify({
     file_url: file.file_url,
+    local_path: file.local_path,
     file_name: file.file_name,
     file_type: file.file_type,
     file_size: file.file_size,

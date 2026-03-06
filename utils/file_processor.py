@@ -401,8 +401,8 @@ class FileProcessor:
             if ext in (".docx", ".pdf"):
                 is_parseable = True
                 logger.info(f"MIME 为 octet-stream 但扩展名为 {ext}，视为可解析文档")
-        if is_parseable and local_path:
-            preparsed = await self._preparse_document(local_path, filename)
+        if is_parseable and resolved_path:
+            preparsed = await self._preparse_document(str(resolved_path), filename)
             if preparsed:
                 return ProcessedFile(
                     category=FileCategory.DOCUMENT,
