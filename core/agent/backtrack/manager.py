@@ -14,6 +14,7 @@
 - CONTEXT_ENRICH: 上下文补充 - 补充上下文信息后重试
 """
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -106,8 +107,8 @@ class BacktrackManager:
         self.error_classifier = error_classifier or get_error_classifier()
         self.max_backtracks = max_backtracks
 
-        # 回溯历史记录
         self._backtrack_history: Dict[str, List[BacktrackResult]] = {}
+        self._last_error_fingerprints: Dict[str, str] = {}
 
     async def evaluate_and_decide(
         self, ctx: BacktrackContext, use_llm: bool = True
@@ -171,8 +172,43 @@ class BacktrackManager:
                 confidence=1.0,
             )
 
-        # 业务逻辑层错误，需要决策
-        if use_llm and self.llm_service:
+        # Phase 3: 重复错误熔断 — 同样的错误回溯后再次出现，自动升级策略
+        error_fingerprint = self._compute_error_fingerprint(ctx.error)
+        last_fp = self._last_error_fingerprints.get(ctx.session_id)
+        repeat_detected = last_fp is not None and error_fingerprint == last_fp
+        self._last_error_fingerprints[ctx.session_id] = error_fingerprint
+
+        if repeat_detected:
+            logger.warning(
+                f"⚠️ 重复错误检测: 回溯后出现相同错误，自动升级策略"
+            )
+            escalated_type = self._escalate_backtrack_type(
+                ctx.error.backtrack_type
+            )
+            action = self._build_action(escalated_type, ctx)
+            result = BacktrackResult(
+                decision=BacktrackDecision.BACKTRACK,
+                backtrack_type=escalated_type,
+                action=action,
+                reason=f"同样的错误在回溯后再次出现，策略升级为 {escalated_type.value}",
+                confidence=0.90,
+            )
+            self._record_backtrack(ctx.session_id, result)
+            logger.info(
+                f"✅ 回溯决策完成(熔断): decision=backtrack, "
+                f"backtrack_type={escalated_type.value}, confidence=0.90"
+            )
+            return result
+
+        # Phase 4: 决策短路 — 高确定性场景跳过 LLM 评估
+        skip_llm = (
+            ctx.backtrack_count == 0  # 首次回溯
+            or ctx.error.confidence >= 0.70  # 错误分类置信度高
+        )
+
+        if skip_llm:
+            result = self._rule_based_decide(ctx)
+        elif use_llm and self.llm_service:
             result = await self._llm_decide(ctx)
         else:
             result = self._rule_based_decide(ctx)
@@ -397,8 +433,14 @@ class BacktrackManager:
 
     def clear_session_history(self, session_id: str):
         """清除会话历史"""
-        if session_id in self._backtrack_history:
-            del self._backtrack_history[session_id]
+        self._backtrack_history.pop(session_id, None)
+        self._last_error_fingerprints.pop(session_id, None)
+
+    @staticmethod
+    def _compute_error_fingerprint(error: ClassifiedError) -> str:
+        """计算错误指纹（前 200 字符的 hash），用于重复错误检测。"""
+        msg = str(error.original_error)[:200]
+        return hashlib.md5(msg.encode()).hexdigest()[:12]
 
     # NOTE: execute_backtrack() 回调方法已删除（从未被调用）。
     # 回溯执行逻辑内联在 RVRBExecutor._handle_tool_error_with_backtrack() 中。

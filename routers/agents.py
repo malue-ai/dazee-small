@@ -149,7 +149,10 @@ async def _background_reload(
         return
 
     try:
-        # Clear old config/prototype before reload
+        # Save old config/prototype so we can restore on failure
+        saved_prototype = registry._agent_prototypes.get(agent_id)
+        saved_config = registry._configs.get(agent_id)
+
         registry._agent_prototypes.pop(agent_id, None)
         registry._configs.pop(agent_id, None)
 
@@ -186,6 +189,14 @@ async def _background_reload(
 
     except Exception as e:
         logger.error(f"后台重载 Agent '{agent_id}' 失败: {e}", exc_info=True)
+
+        # Restore old config/prototype so the instance stays usable
+        if saved_config is not None:
+            registry._configs[agent_id] = saved_config
+        if saved_prototype is not None:
+            registry._agent_prototypes[agent_id] = saved_prototype
+        if saved_config or saved_prototype:
+            logger.info(f"🔄 已恢复 Agent '{agent_id}' 到重载前状态")
 
         task.status = "error"
         task.error = str(e)
