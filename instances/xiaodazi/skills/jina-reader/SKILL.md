@@ -3,9 +3,9 @@ name: jina-reader
 description: Extract clean readable content from any URL using Jina Reader API. No API key required.
 quickstart: |
   # 读取网页内容（通过 nodes 工具执行）:
-  {"action": "run", "command": ["python3", "-c", "import httpx; r=httpx.get('https://r.jina.ai/目标URL', headers={'Accept':'text/markdown','X-Retain-Images':'none'}, timeout=30, follow_redirects=True); print(r.text[:8000])"], "output_handling": "full"}
-  # 搜索（同 ddg-search）:
-  {"action": "run", "command": ["python3", "-c", "import httpx,json; r=httpx.get('https://s.jina.ai/搜索关键词', headers={'Accept':'application/json','X-Retain-Images':'none'}, timeout=30); print(json.dumps(r.json(), ensure_ascii=False, indent=2))"], "output_handling": "full"}
+  {"action": "run", "command": ["curl", "-sS", "-L", "--max-time", "30", "-H", "Accept: text/markdown", "-H", "X-Retain-Images: none", "https://r.jina.ai/目标URL"], "output_handling": "full"}
+  # 搜索:
+  {"action": "run", "command": ["curl", "-sS", "-L", "--max-time", "30", "-H", "Accept: application/json", "-H", "X-Retain-Images: none", "https://s.jina.ai/搜索关键词"], "output_handling": "full"}
 metadata:
   xiaodazi:
     dependency_level: builtin
@@ -22,7 +22,7 @@ metadata:
 
 - 用户说「帮我读一下这个链接的内容」「总结这篇文章」
 - 需要获取网页完整内容用于分析、翻译、摘要
-- deep-research 流程中需要抓取网页正文
+- 深度调研流程中需要抓取网页正文
 - 用户分享了一个 URL，想了解内容
 
 ## 执行方式
@@ -36,7 +36,7 @@ metadata:
 ```json
 {
   "action": "run",
-  "command": ["python3", "-c", "import httpx; r=httpx.get('https://r.jina.ai/https://example.com/article', headers={'Accept':'text/markdown','X-Retain-Images':'none'}, timeout=30, follow_redirects=True); print(r.text[:8000])"],
+  "command": ["curl", "-sS", "-L", "--max-time", "30", "-H", "Accept: text/markdown", "-H", "X-Retain-Images: none", "https://r.jina.ai/https://example.com/article"],
   "output_handling": "full"
 }
 ```
@@ -46,7 +46,7 @@ metadata:
 ```json
 {
   "action": "run",
-  "command": ["python3", "-c", "import httpx,json; r=httpx.get('https://s.jina.ai/搜索关键词', headers={'Accept':'application/json','X-Retain-Images':'none'}, timeout=30); print(json.dumps(r.json(), ensure_ascii=False, indent=2))"],
+  "command": ["curl", "-sS", "-L", "--max-time", "30", "-H", "Accept: application/json", "-H", "X-Retain-Images: none", "https://s.jina.ai/搜索关键词"],
   "output_handling": "full"
 }
 ```
@@ -54,9 +54,9 @@ metadata:
 ### 使用建议
 
 1. **优先用于长文章**：短页面直接搜索摘要即可，长文用 Jina Reader 获取完整内容
-2. **配合搜索使用**：先用 `ddg-search` 找到 URL，再用 Jina Reader 提取正文
-3. **超时处理**：设置 30 秒超时
-4. **内容截断**：超长文章只取前 8000 字符，避免上下文溢出
+2. **配合搜索使用**：先用搜索功能（`https://s.jina.ai/关键词`）找到 URL，再用 Jina Reader 提取正文
+3. **超时处理**：`--max-time 30` 控制超时
+4. **内容截断**：超长文章由 output_handling 控制，避免上下文溢出
 
 ## 输出规范
 
@@ -67,5 +67,5 @@ metadata:
 ## 注意事项
 
 - **不要用 api_calling**，Jina Reader 不是注册 API
-- **不要打开 Safari/浏览器**做手动搜索，直接用 nodes 执行 Python 命令
-- 使用 `nodes` 工具 + `python3 -c` 执行 httpx 请求
+- **不要打开 Safari/浏览器**做手动搜索，直接用 nodes 执行 curl 命令
+- **不要用 python3 -c "import httpx; ..."**，直接用 curl（零依赖，所有系统预装）

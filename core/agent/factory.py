@@ -514,10 +514,12 @@ class AgentFactory:
 
         # 4. 创建 ToolExecutor
         capability_registry = create_capability_registry()
+        instance_id = getattr(prompt_cache, "instance_name", None) or os.getenv("AGENT_INSTANCE", "")
         tool_context = create_tool_context(
             event_manager=event_manager,
             workspace_dir=None,
             apis_config=apis_config or [],
+            instance_id=instance_id,
         )
         tool_executor = create_tool_executor(
             registry=capability_registry,
@@ -530,7 +532,7 @@ class AgentFactory:
             qos_level = QoSLevel(qos_level_str)
         except ValueError:
             qos_level = QoSLevel.PRO
-        context_strategy = get_context_strategy(qos_level=qos_level)
+        context_strategy = get_context_strategy(qos_level, model_name=schema.model)
 
         # 6. 创建 Agent
         agent = Agent(

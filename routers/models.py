@@ -78,6 +78,10 @@ def _pricing_response(p: ModelPricing) -> ModelPricingResponse:
         output_per_million=p.output_per_million,
         cache_read_per_million=p.cache_read_per_million,
         cache_write_per_million=p.cache_write_per_million,
+        long_context_threshold=p.long_context_threshold,
+        long_context_input_per_million=p.long_context_input_per_million,
+        long_context_output_per_million=p.long_context_output_per_million,
+        long_context_cache_read_per_million=p.long_context_cache_read_per_million,
         is_free=p.is_free,
     )
 

@@ -42,6 +42,20 @@ export async function submitHITLConfirm(
 }
 
 /**
+ * 上下文窗口扩展确认（V12）
+ * 执行器发出 context_expansion_confirm 后，用户选择是否扩展时调用
+ * @param choice "expand" 扩展窗口 | "optimize" 不扩展，启动上下文优化
+ */
+export async function submitContextExpansionConfirm(
+  sessionId: string,
+  choice: 'expand' | 'optimize'
+): Promise<void> {
+  await api.post(`/v1/session/${sessionId}/context_expansion_confirm`, null, {
+    params: { choice }
+  })
+}
+
+/**
  * 确认长任务处理方式（V11 终止策略）
  * 执行器发出 long_running_confirm 后，用户选择「继续」或「转后台」时调用
  * @param action "continue" 前台继续 | "background" 转后台执行

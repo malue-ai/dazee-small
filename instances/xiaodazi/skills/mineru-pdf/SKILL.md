@@ -18,10 +18,10 @@ metadata:
 
 - 用户说「帮我把这个 PDF 转成 Markdown」「提取这个 PDF 的内容」
 - 需要从 PDF 中提取结构化文本用于后续分析
-- 扫描件 PDF 需要 OCR 提取文字（配合 multi-lang-ocr）
+- 扫描件 PDF 需要 OCR 提取文字（配合 OCR 类 Skill）
 - 批量处理多个 PDF 文件
 
-## 与 pdf-toolkit / nano-pdf 的区别
+## 与其他 PDF 处理 Skill 的区别
 
 | 工具 | 擅长 | 局限 |
 |---|---|---|

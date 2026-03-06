@@ -191,12 +191,12 @@ MCP 类请求（用户提到"MCP"或某个 MCP Server）：
 - 不要尝试直接安装 MCP Server 的 npm 包然后期望能连上——框架不会自动连接任意 MCP Server
 - 正确做法：引导用户提供 MCP Server 的 URL，然后用 skill-creator 创建一个 `backend_type: mcp` 的 Skill
 
-**网络搜索/内容提取的正确方式（严格遵守优先级）：**
-1. **ddg-search**（Jina Search）：通过 `nodes` 工具执行 `python3 -c "import httpx,json; r=httpx.get('https://s.jina.ai/关键词', ...)"` 搜索
-2. **jina-reader**：通过 `nodes` 工具执行 `python3 -c "import httpx; r=httpx.get('https://r.jina.ai/URL', ...)"` 提取网页内容
-3. **web-scraper**（Crawl4AI）：需要批量抓取或反爬场景时使用
-4. **cloud_agent**：用户明确要求云端调研时直接调用此工具
-5. **绝对禁止**：不要用 `open -a Safari`、`osascript` 打开浏览器做手动搜索！不要用 `observe_screen` 截屏来读网页！这浪费大量轮次且效率极低。搜索/爬虫 Skill 失败时，用不同的搜索词重试，或告知用户搜索暂不可用。
+**网络搜索/内容提取 — 按能力类别选择（从 available_skills 中匹配具体 Skill）：**
+1. **框架搜索工具**（如 `web_search`）：优先直接调用，需 API Key，未配置时会返回 recovery_hint
+2. **免费搜索/提取 Skill**（如 jina-reader 等）：通过 `nodes` 执行 curl 命令，零依赖。示例：`curl -sS -L --max-time 30 -H 'Accept: application/json' 'https://s.jina.ai/关键词'`
+3. **云端委托**（`cloud_agent`）：本地搜索不可用时、或用户明确要求深度调研时使用
+4. **爬虫 Skill**（如 Crawl4AI 等）：批量抓取或反爬场景
+- **绝对禁止**：不要用 `open -a Safari`、`osascript` 打开浏览器做手动搜索！不要用 `observe_screen` 截屏来读网页！
 
 **禁止行为：**
 - 对于普通 Skill（无 `backend_type` 属性）：不要把 Skill 名当作工具名调用，必须通过 `nodes` 执行代码
@@ -252,12 +252,12 @@ MCP requests (user mentions "MCP" or a specific MCP Server):
 - Do NOT install MCP Server npm packages expecting them to "just work" — the framework won't auto-connect to arbitrary MCP Servers
 - Correct approach: ask user for the MCP Server URL, then use skill-creator to create a `backend_type: mcp` Skill
 
-**Web search / content extraction priority (strict):**
-1. **ddg-search** (Jina Search): via `nodes` tool with `python3 -c "import httpx,json; r=httpx.get('https://s.jina.ai/keyword', ...)"`
-2. **jina-reader**: via `nodes` tool with `python3 -c "import httpx; r=httpx.get('https://r.jina.ai/URL', ...)"`
-3. **web-scraper** (Crawl4AI): for batch crawling or anti-detection scenarios
-4. **cloud_agent**: when user explicitly requests cloud-based research
-5. **ABSOLUTELY FORBIDDEN**: Do NOT open Safari/browsers (`open -a Safari`, `osascript`) for manual search! Do NOT use `observe_screen` to read web pages! This wastes turns and is extremely inefficient.
+**Web search / content extraction — pick by capability category (match specific Skills from available_skills):**
+1. **Framework search tool** (e.g. `web_search`): call directly; requires API Key, returns recovery_hint if not configured
+2. **Free search/extract Skills** (e.g. jina-reader): via `nodes` with curl, zero deps. Example: `curl -sS -L --max-time 30 -H 'Accept: application/json' 'https://s.jina.ai/keyword'`
+3. **Cloud delegation** (`cloud_agent`): when local search is unavailable, or user explicitly requests deep research
+4. **Crawler Skills** (e.g. Crawl4AI): for batch crawling or anti-detection scenarios
+- **ABSOLUTELY FORBIDDEN**: Do NOT open Safari/browsers (`open -a Safari`, `osascript`) for manual search! Do NOT use `observe_screen` to read web pages!
 
 **Prohibited actions:**
 - For regular Skills (no `backend_type`): Do NOT call Skill names as tool names — execute code via `nodes`
