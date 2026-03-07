@@ -393,7 +393,7 @@ async def get_embedding_status() -> Dict[str, Any]:
     检测 embedding 提供商可用性
 
     自动检测：
-    1. sentence-transformers 是否安装（本地模型）
+    1. GGUF (llama-cpp-python) 是否安装（本地模型）
     2. OPENAI_API_KEY 是否配置（云端模型）
     3. 当前选择的提供商
 
@@ -412,7 +412,6 @@ async def get_embedding_status() -> Dict[str, Any]:
     semantic_enabled = knowledge_config.get("semantic_enabled", False)
     provider_setting = knowledge_config.get("embedding_provider", "auto")
 
-    # Check local availability (GGUF preferred, sentence-transformers fallback)
     from utils.dependency_registry import check_dependency
 
     local_available = False
@@ -422,12 +421,6 @@ async def get_embedding_status() -> Dict[str, Any]:
     if llama_status.available:
         local_available = True
         local_backend = "gguf"
-
-    if not local_available:
-        st_status = check_dependency("sentence_transformers")
-        if st_status.available:
-            local_available = True
-            local_backend = "sentence-transformers"
 
     hf_status = check_dependency("huggingface_hub")
     download_available = hf_status.available and local_available

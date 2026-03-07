@@ -1,16 +1,15 @@
 """
 Embedding 提供商抽象层
 
-支持三种 Embedding 模型，统一接口：
+支持多种 Embedding 模型，统一接口：
 - 本地 GGUF（推荐）: BGE-M3 Q4 量化，424MB，中英文双语，离线可用
-- 本地 sentence-transformers（备选）: 需要 PyTorch，体积更大
 - OpenAI 云端: text-embedding-3-small，需要 API Key 和网络
+- sentence-transformers（仅手动指定 'local-st' 时使用，不参与 auto 链）
 
 模型存储位置：
 - GGUF 模型: data/shared/models/ （首次使用自动下载，多实例共享）
-- sentence-transformers: ~/.cache/huggingface/hub/
 
-Auto 模式优先级：GGUF 本地 → sentence-transformers → OpenAI 云端
+Auto 模式优先级：GGUF 本地 → OpenAI 云端
 
 使用示例：
     provider = await create_embedding_provider("auto")
@@ -740,9 +739,12 @@ async def create_embedding_provider(
     Create an embedding provider with auto-detection and fallback.
 
     Auto mode priority:
-    1. GGUF local (llama-cpp-python) — lightest, ~500MB total
-    2. sentence-transformers local — heavier, ~1.8GB total
-    3. OpenAI cloud — needs API key + internet
+    1. GGUF local (llama-cpp-python) — lightweight, ~500MB total
+    2. OpenAI cloud — needs API key + internet
+
+    Also supports explicit provider selection:
+    - 'local-st': sentence-transformers (heavy, ~1.8GB, kept for
+      platforms where llama-cpp-python cannot compile)
 
     Args:
         provider: 'auto' | 'openai' | 'local' | 'local-gguf' | 'local-st'
@@ -765,11 +767,11 @@ async def create_embedding_provider(
     if provider == "local-st":
         return SentenceTransformerProvider(model=model or "BAAI/bge-m3")
 
-    # Auto mode: gguf → sentence-transformers → openai
+    # Auto mode: gguf → openai
     if provider == "auto":
         errors: List[str] = []
 
-        # 1. Try GGUF (lightest)
+        # 1. Try GGUF (local, lightweight, recommended)
         try:
             gguf_provider = GGUFEmbeddingProvider()
             gguf_provider._ensure_model()
@@ -784,26 +786,10 @@ async def create_embedding_provider(
             errors.append(f"GGUF: {e}")
             logger.debug(f"GGUF embedding failed: {e}")
 
-        # 2. Try sentence-transformers (heavier but stable)
-        try:
-            st_provider = SentenceTransformerProvider(
-                model=model or "BAAI/bge-m3"
-            )
-            st_provider._ensure_model()
-            logger.info(
-                f"Auto-selected sentence-transformers: "
-                f"{st_provider.model_name}"
-            )
-            return st_provider
-        except ImportError as e:
-            errors.append(f"sentence-transformers: {e}")
-        except Exception as e:
-            errors.append(f"sentence-transformers: {e}")
-
-        # 3. Try OpenAI
+        # 2. Try OpenAI (cloud fallback)
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
-            logger.info("Auto-selected OpenAI embedding")
+            logger.info("Auto-selected OpenAI embedding (GGUF unavailable)")
             return OpenAIEmbeddingProvider(
                 model=model or "text-embedding-3-small"
             )
@@ -816,9 +802,7 @@ async def create_embedding_provider(
             "  1. pip install llama-cpp-python + enable semantic search in settings\n"
             "     Model: BGE-M3 Q4 (438MB, Chinese+English)\n"
             f"     Stored at: {get_models_dir()}\n"
-            "  2. pip install sentence-transformers   "
-            "← Heavier (~1.8GB, needs PyTorch)\n"
-            "  3. Set OPENAI_API_KEY   "
+            "  2. Set OPENAI_API_KEY   "
             "← Cloud, needs internet\n"
             "\nDetails:\n" + "\n".join(f"  - {e}" for e in errors)
         )

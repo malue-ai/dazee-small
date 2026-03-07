@@ -9,6 +9,7 @@ before users trigger actions that would fail with ImportError.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -66,12 +67,6 @@ OPTIONAL_DEPENDENCIES: Dict[str, DependencyInfo] = {
         pip_name="llama-cpp-python",
         purpose="GGUF local embedding inference",
         features=["semantic_search_local"],
-    ),
-    "sentence_transformers": DependencyInfo(
-        import_name="sentence_transformers",
-        pip_name="sentence-transformers",
-        purpose="Sentence-transformers embedding (fallback)",
-        features=["semantic_search_local_fallback"],
     ),
     # ---- memory / vector ----
     "sqlite_vec": DependencyInfo(
@@ -181,10 +176,16 @@ def _check_single(name: str, info: DependencyInfo) -> DependencyStatus:
     available = False
     version: Optional[str] = None
     try:
-        mod = importlib.import_module(info.import_name)
-        available = True
-        version = getattr(mod, "__version__", None)
-    except ImportError:
+        if info.import_name in sys.modules:
+            mod = sys.modules[info.import_name]
+            available = True
+            version = getattr(mod, "__version__", None)
+        else:
+            spec = importlib.util.find_spec(info.import_name)
+            available = spec is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        pass
+    except Exception:
         pass
 
     st = DependencyStatus(
@@ -243,6 +244,14 @@ def get_all_status() -> Dict[str, DependencyStatus]:
     }
 
 
+def _is_fallback_only(name: str) -> bool:
+    """Check if a dependency is only used as a fallback."""
+    info = OPTIONAL_DEPENDENCIES.get(name)
+    if not info:
+        return False
+    return all("fallback" in f for f in info.features)
+
+
 def log_dependency_report() -> None:
     """Log a summary of all optional dependencies at startup."""
     all_status = get_all_status()
@@ -254,10 +263,16 @@ def log_dependency_report() -> None:
     )
     if missing:
         for s in missing:
-            logger.warning(
-                f"  Missing: {s.pip_name} — {s.purpose} "
-                f"(install: pip install {s.pip_name})"
-            )
+            if _is_fallback_only(s.name):
+                logger.debug(
+                    f"  Optional fallback not installed: {s.pip_name} — "
+                    f"{s.purpose}"
+                )
+            else:
+                logger.warning(
+                    f"  Missing: {s.pip_name} — {s.purpose} "
+                    f"(install: pip install {s.pip_name})"
+                )
 
 
 def invalidate_cache() -> None:

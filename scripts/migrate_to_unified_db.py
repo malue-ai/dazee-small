@@ -10,7 +10,7 @@
 安全机制：
   - 每个源 DB 迁移后写入 marker 文件 (.migrated_to_unified_db)
   - 使用 INSERT OR IGNORE 保证幂等
-  - 旧文件保留不删除
+  - 已迁移的旧文件 + 废弃的向量 DB 启动时自动清理
   - 失败时记录日志，不中断其他迁移
 """
 
@@ -37,6 +37,23 @@ def _is_migrated(db_path: Path) -> bool:
 def _mark_migrated(db_path: Path, count: int) -> None:
     marker = db_path.parent / f"{db_path.stem}{MIGRATION_MARKER}"
     marker.write_text(f"migrated {count} rows\n")
+
+
+def _delete_db_and_marker(db_path: Path) -> None:
+    """Delete a DB file, its WAL/SHM sidecars, and its migration marker."""
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        p = db_path.parent / (db_path.name + suffix)
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    marker = db_path.parent / f"{db_path.stem}{MIGRATION_MARKER}"
+    if marker.exists():
+        try:
+            marker.unlink()
+        except OSError:
+            pass
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -197,6 +214,9 @@ def auto_migrate_to_unified_db() -> bool:
             migrated_any = True
         except Exception as e:
             logger.error(f"instance_config 迁移失败: {e}", exc_info=True)
+    elif ic_path.exists() and _is_migrated(ic_path):
+        _delete_db_and_marker(ic_path)
+        logger.info("清理已迁移的 instance_config.db")
 
     # 2-4. Per-instance stores
     instances_dir = user_data / "data" / "instances"
@@ -221,6 +241,8 @@ def auto_migrate_to_unified_db() -> bool:
                 migrated_any = True
             except Exception as e:
                 logger.error(f"[{instance_name}] fragments 迁移失败: {e}", exc_info=True)
+        elif frag_path.exists() and _is_migrated(frag_path):
+            _delete_db_and_marker(frag_path)
 
         # memory_fts.db
         fts_path = store_dir / "memory_fts.db"
@@ -232,6 +254,8 @@ def auto_migrate_to_unified_db() -> bool:
                 migrated_any = True
             except Exception as e:
                 logger.error(f"[{instance_name}] memory_fts 迁移失败: {e}", exc_info=True)
+        elif fts_path.exists() and _is_migrated(fts_path):
+            _delete_db_and_marker(fts_path)
 
         # mem0_history.db
         hist_path = store_dir / "mem0_history.db"
@@ -243,19 +267,23 @@ def auto_migrate_to_unified_db() -> bool:
                 migrated_any = True
             except Exception as e:
                 logger.error(f"[{instance_name}] mem0_history 迁移失败: {e}", exc_info=True)
+        elif hist_path.exists() and _is_migrated(hist_path):
+            _delete_db_and_marker(hist_path)
 
-        # Log skipped vector DBs
-        for vec_db in store_dir.glob("mem0_vectors_*.db"):
-            if not _is_migrated(vec_db):
-                logger.warning(
-                    f"[{instance_name}] 跳过向量 DB {vec_db.name}（向量数据需重建）"
-                )
+        # Obsolete vector DBs: data already rebuilt in zenflux.db, delete directly
+        for vec_db in store_dir.glob("mem0_vectors*.db"):
+            _delete_db_and_marker(vec_db)
 
         pb_vec = store_dir / "playbook_vectors.db"
-        if pb_vec.exists() and not _is_migrated(pb_vec):
-            logger.warning(
-                f"[{instance_name}] 跳过 playbook_vectors.db（向量数据需重建）"
-            )
+        if pb_vec.exists():
+            _delete_db_and_marker(pb_vec)
+
+        # Remove empty store dir
+        if store_dir.exists() and not any(store_dir.iterdir()):
+            try:
+                store_dir.rmdir()
+            except OSError:
+                pass
 
     return migrated_any
 
