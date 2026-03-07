@@ -330,13 +330,14 @@ def get_bundle_instances_dir() -> Path:
 
 def ensure_instances_initialized() -> bool:
     """
-    确保用户 instances 目录已初始化（仅打包模式需要）
+    Ensure user instances directory is initialized and up-to-date.
 
-    首次启动时，将 bundle 内的种子实例（_template、xiaodazi 等）
-    复制到用户数据目录。后续启动跳过已存在的实例。
+    - First launch: copy all seed instances from bundle to user data dir.
+    - Subsequent launches: selectively update framework-owned files while
+      preserving user-owned data (config.yaml, prompt.md, skills/, etc.).
 
     Returns:
-        True if any instances were copied, False if already initialized
+        True if any files were copied or updated.
     """
     if not is_frozen():
         return False
@@ -349,16 +350,75 @@ def ensure_instances_initialized() -> bool:
     if not bundle_instances.exists():
         return False
 
-    copied = False
+    changed = False
     for item in bundle_instances.iterdir():
         if not item.is_dir():
             continue
         target = user_instances / item.name
+
         if not target.exists():
             shutil.copytree(item, target)
-            copied = True
+            changed = True
+            continue
 
-    return copied
+        if item.name.startswith("_"):
+            shutil.rmtree(target)
+            shutil.copytree(item, target)
+            changed = True
+            continue
+
+        if _sync_framework_files(item, target):
+            changed = True
+
+    return changed
+
+
+# Files that belong to the framework and should be refreshed on every upgrade.
+# User data (config.yaml, prompt.md, skills/, config/memory.yaml) is never touched.
+_FRAMEWORK_OWNED_FILES = [
+    "config/skills.yaml",
+    "config/llm_profiles.yaml",
+]
+
+# Directories regenerated at runtime; safe to overwrite from bundle.
+_FRAMEWORK_OWNED_DIRS = [
+    "prompt_results",
+    ".cache",
+]
+
+
+def _sync_framework_files(bundle_dir: Path, user_dir: Path) -> bool:
+    """
+    Selectively update framework-owned files in an existing user instance.
+
+    Preserves user-owned files (config.yaml, prompt.md, skills/, config/memory.yaml).
+    """
+    import shutil
+
+    updated = False
+
+    for rel_path in _FRAMEWORK_OWNED_FILES:
+        src = bundle_dir / rel_path
+        dst = user_dir / rel_path
+        if not src.exists():
+            continue
+        if dst.exists() and src.read_bytes() == dst.read_bytes():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        updated = True
+
+    for rel_dir in _FRAMEWORK_OWNED_DIRS:
+        src = bundle_dir / rel_dir
+        dst = user_dir / rel_dir
+        if not src.exists():
+            continue
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        updated = True
+
+    return updated
 
 
 def get_logs_dir() -> Path:

@@ -634,7 +634,7 @@ info "检查 Python 依赖..."
 
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai anthropic mem0 apscheduler llama_cpp; do
     if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
@@ -799,7 +799,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
 
   # 安装 x86_64 依赖
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai; do
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai anthropic mem0 apscheduler llama_cpp; do
     if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
