@@ -95,10 +95,10 @@ class Agent:
 
     def __init__(
         self,
-        executor: "ExecutorProtocol" = None,
-        llm: "BaseLLMService" = None,
-        tool_executor: "ToolExecutor" = None,
-        broadcaster: "EventBroadcaster" = None,
+        executor: Optional["ExecutorProtocol"] = None,
+        llm: Optional["BaseLLMService"] = None,
+        tool_executor: Optional["ToolExecutor"] = None,
+        broadcaster: Optional["EventBroadcaster"] = None,
         schema=None,
         prompt_cache=None,
         context_strategy=None,
@@ -151,6 +151,14 @@ class Agent:
         # E2E Tracer（由 Service 层通过 session_context 传入）
         self._tracer = None
 
+        # chat generator 引用，供 _move_agent_to_background 后台继续消费
+        self.chat_generator_ref: Optional[Any] = None
+
+        # 克隆时复制的实例级属性（在 clone_for_session 中赋值）
+        self._skills_loader: Optional[Any] = None
+        self._state_consistency_manager: Optional[Any] = None
+        self._state_consistency_enabled: bool = False
+
         # 工具配置
         self.allow_parallel_tools = (
             getattr(schema, "allow_parallel_tools", True) if schema else True
@@ -197,19 +205,25 @@ class Agent:
     # ==================== 属性 ====================
 
     @property
-    def executor(self) -> "ExecutorProtocol":
+    def executor(self) -> Optional["ExecutorProtocol"]:
         return self._executor
 
     @property
-    def llm(self) -> "BaseLLMService":
+    def llm(self) -> Optional["BaseLLMService"]:
         return self._llm
 
     @property
-    def tool_executor(self) -> "ToolExecutor":
+    def tool_executor(self) -> Optional["ToolExecutor"]:
         return self._tool_executor
 
     @property
-    def broadcaster(self) -> "EventBroadcaster":
+    def broadcaster(self) -> Optional["EventBroadcaster"]:
+        return self._broadcaster
+
+    def get_broadcaster(self) -> "EventBroadcaster":
+        """Non-optional broadcaster accessor (raises if not initialized)."""
+        if self._broadcaster is None:
+            raise RuntimeError("EventBroadcaster not initialized")
         return self._broadcaster
 
     @property
@@ -266,7 +280,7 @@ class Agent:
         logger.debug(f"📦 Session context 已注入: {list(session_context.keys())}")
 
     def set_context(
-        self, session_id: str = None, user_id: str = None, conversation_id: str = None
+        self, session_id: Optional[str] = None, user_id: Optional[str] = None, conversation_id: Optional[str] = None
     ) -> None:
         """设置执行上下文"""
         if session_id is not None:
@@ -308,7 +322,7 @@ class Agent:
         session_id: str,
         intent: Optional["IntentResult"] = None,
         enable_stream: bool = True,
-        message_id: str = None,
+        message_id: Optional[str] = None,
         **kwargs,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -342,7 +356,7 @@ class Agent:
         self._injected_session_context = None
 
         conversation_id = session_context.get("conversation_id", "default")
-        user_id = session_context.get("user_id")
+        user_id = session_context.get("user_id", "")
         self._current_conversation_id = conversation_id
         self._current_user_id = user_id
         self._current_session_id = session_id
@@ -374,7 +388,7 @@ class Agent:
         system_prompt = await build_system_blocks_with_injector(
             intent=intent,
             prompt_cache=self._prompt_cache,
-            context_strategy=self._context_strategy,
+            context_strategy=self._context_strategy,  # type: ignore[arg-type]
             user_id=user_id,
             user_query=user_query,
             available_tools=tools_for_llm,
@@ -396,13 +410,11 @@ class Agent:
         # 策略路由：根据 LLM 意图识别的 complexity 选择执行器
         # complexity 由 IntentAnalyzer（LLM）语义判断，此处仅做确定性映射
         executor = self._executor
+        if not executor:
+            raise ValueError("executor 未初始化")
         if intent and hasattr(intent, "complexity"):
             complexity = getattr(intent, "complexity", "medium")
-            if complexity == "simple" and not executor.supports_backtrack():
-                # 已经是 RVR，无需切换
-                pass
-            elif complexity == "simple" and executor.supports_backtrack():
-                # 简单任务不需要回溯开销，降级到 RVR
+            if complexity == "simple" and executor.supports_backtrack():
                 from core.agent.execution import RVRExecutor
 
                 executor = RVRExecutor()
@@ -427,13 +439,15 @@ class Agent:
         state_mgr_ref = getattr(self, "_state_consistency_manager", None)
 
         # 执行上下文（V10.1: 传递所有依赖，不再依赖 agent 引用）
+        if not self._llm:
+            raise ValueError("LLM 服务未初始化")
         execution_context = ExecutionContext(
             llm=self._llm,
             session_id=session_id,
             conversation_id=conversation_id,
-            tool_executor=self._tool_executor,
+            tool_executor=self._tool_executor,  # type: ignore[arg-type]
             tools_for_llm=tools_for_llm,
-            broadcaster=self._broadcaster,
+            broadcaster=self._broadcaster,  # type: ignore[arg-type]
             system_prompt=system_prompt,
             intent=intent,
             runtime_ctx=ctx,
@@ -503,7 +517,7 @@ class Agent:
 
         execution_error = None
         try:
-            async for event in executor.execute(
+            async for event in executor.execute(  # type: ignore[misc]
                 messages=messages,
                 context=execution_context,
                 config=executor_config,
@@ -625,18 +639,18 @@ class Agent:
                     logger.error(f"状态提交兜底也失败: session={session_id}")
 
         # Usage
-        stats = self.usage_stats
-        await self._broadcaster.accumulate_usage(
-            session_id,
-            {
-                "input_tokens": stats.get("total_input_tokens", 0),
-                "output_tokens": stats.get("total_output_tokens", 0),
-                "cache_read_tokens": stats.get("total_cache_read_tokens", 0),
-                "cache_creation_tokens": stats.get("total_cache_creation_tokens", 0),
-            },
-        )
+        if self._broadcaster:
+            stats = self.usage_stats
+            await self._broadcaster.accumulate_usage(
+                session_id,
+                {
+                    "input_tokens": stats.get("total_input_tokens", 0),
+                    "output_tokens": stats.get("total_output_tokens", 0),
+                    "cache_read_tokens": stats.get("total_cache_read_tokens", 0),
+                    "cache_creation_tokens": stats.get("total_cache_creation_tokens", 0),
+                },
+            )
 
-        # Usage
         usage_response = UsageResponse.from_tracker(tracker=self._usage_tracker, latency=0)
 
         yield {
@@ -645,9 +659,12 @@ class Agent:
         }
 
         # Stop
-        yield await self._broadcaster.emit_message_stop(
-            session_id=session_id, message_id=message_id
-        )
+        if self._broadcaster:
+            stop_event = await self._broadcaster.emit_message_stop(
+                session_id=session_id, message_id=message_id or ""
+            )
+            if stop_event is not None:
+                yield stop_event
 
         logger.info(f"✅ Agent 执行完成: executor={executor.name}")
 
@@ -670,9 +687,9 @@ class Agent:
 
     async def chat(
         self,
-        messages: List[Dict[str, str]] = None,
-        session_id: str = None,
-        message_id: str = None,
+        messages: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None,
+        message_id: Optional[str] = None,
         enable_stream: bool = True,
         intent: Optional["IntentResult"] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -849,7 +866,7 @@ class Agent:
     # ==================== 克隆 ====================
 
     def clone_for_session(
-        self, event_manager, workspace_dir: str = None, conversation_service=None,
+        self, event_manager, workspace_dir: Optional[str] = None, conversation_service=None,
         **extra,
     ) -> "Agent":
         """
@@ -862,7 +879,7 @@ class Agent:
         from core.tool import create_tool_context, create_tool_executor
 
         # 创建新 broadcaster
-        broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
+        broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)  # type: ignore[arg-type]
 
         # 自动注入 BackgroundTaskManager（如调用方未传入）
         if "background_task_manager" not in extra:
@@ -873,7 +890,8 @@ class Agent:
                 extra["background_task_manager"] = bg_mgr
 
         # 创建独立的 ToolExecutor（并发安全，保留 instance_id）
-        _instance_id = getattr(self._tool_executor, "tool_context", None) and self._tool_executor.tool_context.instance_id or ""
+        _tc = getattr(self._tool_executor, "tool_context", None) if self._tool_executor else None
+        _instance_id = _tc.instance_id if _tc else ""
         tool_context = create_tool_context(
             event_manager=event_manager,
             workspace_dir=workspace_dir or getattr(self, "workspace_dir", None),
@@ -932,9 +950,8 @@ class Agent:
         # V11: 终止策略
         clone._terminator = getattr(self, "_terminator", None)
 
-        logger.debug(f"🚀 Agent 克隆完成: executor={self._executor.name}")
+        executor_name = self._executor.name if self._executor else "None"
+        logger.debug(f"🚀 Agent 克隆完成: executor={executor_name}")
 
         return clone
 
-
-# V10.3: BaseAgent 别名已删除，统一使用 Agent

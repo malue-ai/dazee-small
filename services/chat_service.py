@@ -104,7 +104,7 @@ class PreprocessingHandler:
             history_messages=history_messages,
             session_id=session_id,
             message_id=assistant_message_id,
-            broadcaster=agent.broadcaster,
+            broadcaster=agent.get_broadcaster(),
             tracker=shared_tracker,
             router=router,
             enable_intent=True,
@@ -824,62 +824,12 @@ class ChatService:
             user_id=user_id, conversation_id=conversation_id, message_id=assistant_message_id
         )
 
-        # 4. 处理文件
-        files_metadata = None
-        raw_message = message
-        if files:
-            with log_execution_time("文件处理", logger):
-                files_data = []
-                for f in files:
-                    if isinstance(f, dict):
-                        files_data.append(f)
-                    elif hasattr(f, "model_dump"):
-                        files_data.append(f.model_dump())  # type: ignore[union-attr]
-                if files_data:
-                    # 先做按模型的图片限制校验（仅在 PIL 不可用、无法自动压缩时才严格拦截）
-                    # 若 PIL 可用，process_files 会自动压缩超出限制的图片
-                    from utils.image_constraints import PIL_AVAILABLE as _pil_ok
-                    if not _pil_ok:
-                        try:
-                            await validate_image_files_for_model(
-                                files=files_data,
-                                model_name=effective_model_name,
-                            )
-                        except ValueError as e:
-                            raise AttachmentValidationError(str(e)) from e
+        # 4-7: 文件处理 + 消息标准化 + 消息保存
+        # 流式模式下，这些步骤延迟到 _create_stream_generator() 中执行（emit_session_start 之后），
+        # 避免大文件解析（如 4MB PDF 通过 Unstructured API）阻塞 WebSocket 导致前端超时断连。
+        # 非流式模式仍在此同步执行。
 
-                    processed_files = await self.file_processor.process_files(
-                        files_data, model_name=effective_model_name
-                    )
-                    if processed_files:
-                        files_metadata = [
-                            {
-                                "file_url": pf.file_url,
-                                "file_name": pf.filename,
-                                "file_type": pf.mime_type,
-                                "file_size": pf.file_size,
-                            }
-                            for pf in processed_files
-                            if pf.file_url or pf.filename
-                        ]
-                        original_text = (
-                            raw_message if isinstance(raw_message, str) else str(raw_message)
-                        )
-                        if isinstance(raw_message, list):
-                            original_text = "".join(
-                                b.get("text", "")
-                                for b in raw_message
-                                if isinstance(b, dict) and b.get("type") == "text"
-                            )
-                        raw_message = self.file_processor.build_message_content(
-                            processed_files, original_text
-                        )
-                        logger.info("文件处理完成", extra={"file_count": len(files_metadata)})
-
-        # 5. 标准化消息
-        normalized_message = normalize_message_format(raw_message)
-
-        # 6. 检查并发 + 创建 Session（移到消息保存之前，避免额外的 UPDATE 操作）
+        # 6. 检查并发 + 创建 Session（不依赖文件处理，提前执行）
         await self.session_pool.check_can_create_session(user_id)
 
         session_id = await self.session_service.create_session(
@@ -890,112 +840,22 @@ class ChatService:
         )
         logger.info("Session 已创建", extra={"session_id": session_id})
 
-        # 7. 查询历史 + 保存用户消息 + 创建 Assistant 占位（合并到一个 session）
-        content_json = json.dumps(normalized_message, ensure_ascii=False)
-        user_message_id = None
-        history_messages = []  # 在 chat() 中构建，传递给 _run_agent()
+        files_metadata = None
+        history_messages = []
 
-        try:
-            with log_execution_time("查询历史+保存消息", logger):
-                factory = await get_local_session_factory()
-                async with factory() as db_session:
-                    # 7.1 先查询历史消息（不包含当前这条）
-                    db_messages = await local_crud.list_messages(
-                        session=db_session, conversation_id=conversation_id, limit=1000, order="asc"
-                    )
-
-                    # 转换为 LLM 格式
-                    history_messages = []
-                    for db_msg in db_messages:
-                        if db_msg.role == "assistant" and db_msg.status == "processing":
-                            continue
-
-                        content = db_msg.content
-                        try:
-                            if isinstance(content, str):
-                                content = json.loads(content) if content else []
-                            elif content is None:
-                                content = []
-                        except json.JSONDecodeError:
-                            logger.warning("JSON 解析失败", extra={"message_id": db_msg.id})
-                            content = []
-
-                        # 如果 content 是单个 dict，包装成 list
-                        if isinstance(content, dict):
-                            content = [content]
-
-                        # 按 index 排序，移除 index 字段，过滤 thinking 块
-                        # thinking/redacted_thinking 块不保留在历史中：
-                        # - 无 signature 会导致 Claude API 400 错误
-                        # - 官方文档允许省略: "You may omit thinking blocks from previous assistant turns"
-                        if isinstance(content, list):
-                            content = sorted(
-                                content,
-                                key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999,
-                            )
-                            content = [
-                                {k: v for k, v in b.items() if k != "index"}
-                                for b in content
-                                if isinstance(b, dict)
-                                and b.get("type") not in ("thinking", "redacted_thinking")
-                            ]
-
-                        history_messages.append({"role": db_msg.role, "content": content})
-
-                    # 🛡️ 确保 tool_use/tool_result 配对（DB 可能存有崩溃前的不完整数据）
-                    from core.llm.adaptor import ClaudeAdaptor
-
-                    history_messages = ClaudeAdaptor.ensure_tool_pairs(history_messages)
-
-                    logger.info(
-                        "历史消息已加载",
-                        extra={"conversation_id": conversation_id, "count": len(history_messages)},
-                    )
-
-                    # 7.2 保存用户消息
-                    user_metadata: Dict[str, Any] = {"session_id": session_id}
-                    if files_metadata:
-                        user_metadata["files"] = files_metadata
-
-                    user_msg = await local_crud.create_message(
-                        session=db_session,
-                        conversation_id=conversation_id,
-                        role="user",
-                        content=content_json,
-                        metadata=user_metadata,
-                    )
-                    user_message_id = user_msg.id
-                    logger.info(
-                        "用户消息已保存",
-                        extra={
-                            "conversation_id": conversation_id,
-                            "message_id": user_message_id,
-                            "session_id": session_id,
-                            "file_count": len(files_metadata) if files_metadata else 0,
-                        },
-                    )
-
-                    # 7.3 创建 Assistant 占位
-                    await local_crud.create_message(
-                        session=db_session,
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content="[]",
-                        message_id=assistant_message_id,
-                        status="processing",
-                        metadata={"session_id": session_id},
-                    )
-                    logger.debug("Assistant 占位已创建", extra={"message_id": assistant_message_id})
-
-                    # 7.4 把当前用户消息追加到 history（内存操作，不再查 DB）
-                    history_messages.append({"role": "user", "content": normalized_message})
-        except Exception as e:
-            logger.error("消息保存失败", extra={"error": str(e)}, exc_info=True)
-            try:
-                await self.session_service.end_session(session_id, status="failed")
-            except Exception as cleanup_err:
-                logger.warning("清理 Session 失败", extra={"error": str(cleanup_err)})
-            raise ValueError(f"消息保存失败: {e}") from e
+        if stream:
+            # 流式模式：延迟文件处理到 generator 内部，chat() 快速返回
+            pass
+        else:
+            # 非流式模式：同步执行文件处理和消息保存（原有逻辑）
+            files_metadata, history_messages = await self._process_files_and_save_messages(
+                files=files,
+                message=message,
+                effective_model_name=effective_model_name,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
+            )
 
         # 9. 获取 Agent
         pool_key = effective_agent_id
@@ -1094,6 +954,7 @@ class ChatService:
             }
 
         # 流式模式：返回事件流
+        # 文件处理在 generator 内部 emit_session_start 之后执行，避免阻塞 WebSocket
         return self._create_stream_generator(
             session_id=session_id,
             agent=agent,
@@ -1106,7 +967,178 @@ class ChatService:
             background_tasks=background_tasks,
             variables=variables,
             output_format=output_format,
+            deferred_files=files,
+            deferred_message=message,
+            effective_model_name=effective_model_name,
         )
+
+    async def _process_files_and_save_messages(
+        self,
+        files: Optional[List[Any]],
+        message: Any,
+        effective_model_name: Optional[str],
+        session_id: str,
+        conversation_id: str,
+        assistant_message_id: str,
+        on_progress: Optional[Any] = None,
+    ) -> tuple:
+        """
+        文件处理 + 消息标准化 + 历史查询 + 消息保存。
+
+        Args:
+            on_progress: ProgressCallback — (stage, status, detail) 进度回调。
+
+        Returns:
+            (files_metadata, history_messages)
+        """
+        files_metadata = None
+        raw_message = message
+
+        if files:
+            with log_execution_time("文件处理", logger):
+                files_data = []
+                for f in files:
+                    if isinstance(f, dict):
+                        files_data.append(f)
+                    elif hasattr(f, "model_dump"):
+                        files_data.append(f.model_dump())
+                if files_data:
+                    from utils.image_constraints import PIL_AVAILABLE as _pil_ok
+                    if not _pil_ok:
+                        try:
+                            await validate_image_files_for_model(
+                                files=files_data,
+                                model_name=effective_model_name,
+                            )
+                        except ValueError as e:
+                            raise AttachmentValidationError(str(e)) from e
+
+                    processed_files = await self.file_processor.process_files(
+                        files_data, model_name=effective_model_name,
+                        on_progress=on_progress,
+                    )
+                    if processed_files:
+                        files_metadata = [
+                            {
+                                "file_url": pf.file_url,
+                                "file_name": pf.filename,
+                                "file_type": pf.mime_type,
+                                "file_size": pf.file_size,
+                            }
+                            for pf in processed_files
+                            if pf.file_url or pf.filename
+                        ]
+                        original_text = (
+                            raw_message if isinstance(raw_message, str) else str(raw_message)
+                        )
+                        if isinstance(raw_message, list):
+                            original_text = "".join(
+                                b.get("text", "")
+                                for b in raw_message
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            )
+                        raw_message = self.file_processor.build_message_content(
+                            processed_files, original_text
+                        )
+                        logger.info("文件处理完成", extra={"file_count": len(files_metadata)})
+                        if on_progress:
+                            await on_progress("file_processing", "completed", {
+                                "message": f"文件处理完成，共 {len(files_metadata)} 个文件",
+                                "file_count": len(files_metadata),
+                            })
+
+        normalized_message = normalize_message_format(raw_message)
+        content_json = json.dumps(normalized_message, ensure_ascii=False)
+        history_messages: List[Dict[str, Any]] = []
+
+        try:
+            with log_execution_time("查询历史+保存消息", logger):
+                factory = await get_local_session_factory()
+                async with factory() as db_session:
+                    db_messages = await local_crud.list_messages(
+                        session=db_session, conversation_id=conversation_id, limit=1000, order="asc"
+                    )
+
+                    for db_msg in db_messages:
+                        if db_msg.role == "assistant" and db_msg.status == "processing":
+                            continue
+
+                        content = db_msg.content
+                        try:
+                            if isinstance(content, str):
+                                content = json.loads(content) if content else []
+                            elif content is None:
+                                content = []
+                        except json.JSONDecodeError:
+                            logger.warning("JSON 解析失败", extra={"message_id": db_msg.id})
+                            content = []
+
+                        if isinstance(content, dict):
+                            content = [content]
+
+                        if isinstance(content, list):
+                            content = sorted(
+                                content,
+                                key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999,
+                            )
+                            content = [
+                                {k: v for k, v in b.items() if k != "index"}
+                                for b in content
+                                if isinstance(b, dict)
+                                and b.get("type") not in ("thinking", "redacted_thinking")
+                            ]
+
+                        history_messages.append({"role": db_msg.role, "content": content})
+
+                    from core.llm.adaptor import ClaudeAdaptor
+                    history_messages = ClaudeAdaptor.ensure_tool_pairs(history_messages)
+
+                    logger.info(
+                        "历史消息已加载",
+                        extra={"conversation_id": conversation_id, "count": len(history_messages)},
+                    )
+
+                    user_metadata: Dict[str, Any] = {"session_id": session_id}
+                    if files_metadata:
+                        user_metadata["files"] = files_metadata
+
+                    user_msg = await local_crud.create_message(
+                        session=db_session,
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=content_json,
+                        metadata=user_metadata,
+                    )
+                    logger.info(
+                        "用户消息已保存",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "message_id": user_msg.id,
+                            "session_id": session_id,
+                            "file_count": len(files_metadata) if files_metadata else 0,
+                        },
+                    )
+
+                    await local_crud.create_message(
+                        session=db_session,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content="[]",
+                        message_id=assistant_message_id,
+                        status="processing",
+                        metadata={"session_id": session_id},
+                    )
+
+                    history_messages.append({"role": "user", "content": normalized_message})
+        except Exception as e:
+            logger.error("消息保存失败", extra={"error": str(e)}, exc_info=True)
+            try:
+                await self.session_service.end_session(session_id, status="failed")
+            except Exception as cleanup_err:
+                logger.warning("清理 Session 失败", extra={"error": str(cleanup_err)})
+            raise ValueError(f"消息保存失败: {e}") from e
+
+        return files_metadata, history_messages
 
     async def _create_stream_generator(
         self,
@@ -1121,35 +1153,27 @@ class ChatService:
         background_tasks: Optional[List[str]],
         variables: Optional[Dict[str, Any]],
         output_format: str = "zenflux",
+        deferred_files: Optional[List[Any]] = None,
+        deferred_message: Any = None,
+        effective_model_name: Optional[str] = None,
     ):
         """
         创建流式事件生成器
 
-        Args:
-            session_id: Session ID
-            agent: Agent 实例
-            agent_id: Agent ID
-            user_id: 用户 ID
-            conversation_id: 对话 ID
-            assistant_message_id: Assistant 消息 ID（在 chat() 中生成）
-            history_messages: 完整历史消息（包含当前用户消息，从 chat() 传入）
-            is_new_conversation: 是否新对话
-            background_tasks: 后台任务列表
-            variables: 前端上下文变量
-            output_format: 输出事件格式
+        文件处理在 emit_session_start 之后执行（deferred_files 不为空时），
+        避免大文件解析阻塞 WebSocket 导致前端超时断连。
         """
-        agent_task = None  # 提前声明，避免 except 块中 NameError
+        agent_task = None
 
         try:
             store = self.session_service.store
 
-            # 设置输出格式（EventManager 和 EventBroadcaster 都会使用）
             events = self.session_service.events
             events.set_output_format(output_format, conversation_id)
-            if hasattr(agent, "broadcaster") and agent.broadcaster:
+            if agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
 
-            # 发送初始事件
+            # 发送初始事件（前端立即收到，WebSocket 保持连接）
             await events.session.emit_session_start(
                 session_id=session_id,
                 user_id=user_id,
@@ -1173,9 +1197,28 @@ class ChatService:
                     adapter=events.adapter,
                 )
 
-            # 启动 Agent 任务
-            agent_task = asyncio.create_task(
-                self._run_agent(
+            # 通用进度回调：通过 event store 实时推送到前端
+            async def _emit_progress(stage: str, status: str, detail: dict) -> None:
+                await store.buffer_event(session_id, {
+                    "type": "processing_status",
+                    "data": {"stage": stage, "status": status, "detail": detail},
+                })
+
+            # 文件处理 + Agent 执行合并为一个后台任务，
+            # 让事件订阅循环立即启动 → session_start 和进度事件实时推送到前端
+            async def _deferred_init_and_run():
+                nonlocal history_messages
+                if deferred_message is not None:
+                    _, history_messages = await self._process_files_and_save_messages(
+                        files=deferred_files,
+                        message=deferred_message,
+                        effective_model_name=effective_model_name,
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        assistant_message_id=assistant_message_id,
+                        on_progress=_emit_progress,
+                    )
+                await self._run_agent(
                     session_id=session_id,
                     agent=agent,
                     agent_id=agent_id,
@@ -1188,7 +1231,8 @@ class ChatService:
                     variables=variables,
                     output_format=output_format,
                 )
-            )
+
+            agent_task = asyncio.create_task(_deferred_init_and_run())
 
             # 订阅事件流
             # ⚠️ 不能用 agent_task.done() 作为退出条件！
@@ -1322,7 +1366,7 @@ class ChatService:
             f"🔄 Agent 已转后台: task_id={task.task_id}, session_id={session_id}"
         )
 
-        await agent.broadcaster.emit_message_delta(
+        await agent.get_broadcaster().emit_message_delta(
             session_id=session_id,
             delta={
                 "type": "moved_to_background",
@@ -1335,7 +1379,7 @@ class ChatService:
             persist=False,
         )
 
-        await agent.broadcaster.emit_message_stop(
+        await agent.get_broadcaster().emit_message_stop(
             session_id=session_id, message_id=assistant_message_id
         )
 
@@ -1564,7 +1608,7 @@ class ChatService:
             shared_tracker = agent.usage_tracker
 
             # 初始化 broadcaster 的消息累积
-            agent.broadcaster.start_message(session_id, assistant_message_id)
+            agent.get_broadcaster().start_message(session_id, assistant_message_id)
 
             # 创建 tracer（用于 E2E 可观测性）
             from core.orchestration import create_pipeline_tracer
@@ -1613,7 +1657,7 @@ class ChatService:
                 session_id=session_id,
                 message_id=assistant_message_id,
                 agent_schema=agent.schema,
-                broadcaster=agent.broadcaster,
+                broadcaster=agent.get_broadcaster(),
                 tracker=shared_tracker,
                 router=router,
                 enable_intent=self.enable_routing and enable_intent,
@@ -1638,7 +1682,7 @@ class ChatService:
                 self.session_service.get_stop_event(session_id).set()
 
             # 设置输出格式（必须在事件发送前完成，回滚也需要）
-            if hasattr(agent, "broadcaster") and agent.broadcaster:
+            if agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
 
             # 更新 Session context（必须在事件发送前完成）
@@ -1698,36 +1742,36 @@ class ChatService:
                                 # 通过 broadcaster 发送确认（走正确的 content 累积流程，确保持久化）
                                 try:
                                     # 1. 初始化累积器（关键：不调则 content 无法持久化）
-                                    agent.broadcaster.start_message(session_id, assistant_message_id)
+                                    agent.get_broadcaster().start_message(session_id, assistant_message_id)
 
                                     # 2. 发送 message_start SSE 事件
-                                    await agent.broadcaster.emit_message_start(
+                                    await agent.get_broadcaster().emit_message_start(
                                         session_id=session_id,
                                         message_id=assistant_message_id,
                                         model=getattr(agent, "model", "system"),
                                     )
 
                                     # 3. 通过 content 事件流发送文本（会被 accumulator 累积并持久化）
-                                    await agent.broadcaster.emit_content_start(
+                                    await agent.get_broadcaster().emit_content_start(
                                         session_id=session_id,
                                         index=0,
                                         content_block={"type": "text", "text": ""},
                                         message_id=assistant_message_id,
                                     )
-                                    await agent.broadcaster.emit_content_delta(
+                                    await agent.get_broadcaster().emit_content_delta(
                                         session_id=session_id,
                                         index=0,
                                         delta=confirm_text,
                                         message_id=assistant_message_id,
                                     )
-                                    await agent.broadcaster.emit_content_stop(
+                                    await agent.get_broadcaster().emit_content_stop(
                                         session_id=session_id,
                                         index=0,
                                         message_id=assistant_message_id,
                                     )
 
                                     # 4. 完成消息（持久化 content 到数据库 + 发送 message_stop SSE）
-                                    await agent.broadcaster.emit_message_stop(
+                                    await agent.get_broadcaster().emit_message_stop(
                                         session_id=session_id,
                                         message_id=assistant_message_id,
                                     )
@@ -1801,7 +1845,7 @@ class ChatService:
                 routing_intent.complexity == Complexity.COMPLEX
                 and not routing_intent.is_follow_up
             ):
-                await agent.broadcaster.emit_message_delta(
+                await agent.get_broadcaster().emit_message_delta(
                     session_id=session_id,
                     delta={
                         "type": "recommend_background",
@@ -1841,7 +1885,7 @@ class ChatService:
                                 latency=int((time.time() - start_time) * 1000),
                             )
 
-                            await agent.broadcaster.emit_message_delta(
+                            await agent.get_broadcaster().emit_message_delta(
                                 session_id=session_id,
                                 delta={
                                     "type": "billing",
@@ -1855,7 +1899,7 @@ class ChatService:
                                 extra={"total_tokens": usage_response.total_tokens},
                             )
 
-                            await agent.broadcaster.accumulate_usage(
+                            await agent.get_broadcaster().accumulate_usage(
                                 session_id=session_id, usage=usage_response.model_dump(mode="json")
                             )
                         except Exception as e:
@@ -1865,7 +1909,7 @@ class ChatService:
                                 exc_info=True,
                             )
 
-                        await agent.broadcaster.emit_message_stop(
+                        await agent.get_broadcaster().emit_message_stop(
                             session_id=session_id, message_id=assistant_message_id
                         )
                         logger.debug("中止时已发送 message_stop 事件")
@@ -1902,7 +1946,7 @@ class ChatService:
                                 message=current_message,
                                 is_new_conversation=is_new_conversation,
                                 events=events,
-                                broadcaster=agent.broadcaster,
+                                broadcaster=agent.get_broadcaster(),
                                 routing_intent=routing_intent,
                             )
                             background_tasks = []
@@ -1945,7 +1989,7 @@ class ChatService:
 
             # 统一从 accumulator 获取 assistant_text，避免为空的问题
             if not _assistant_text_for_tasks:
-                accumulator = agent.broadcaster.get_accumulator(session_id)
+                accumulator = agent.get_broadcaster().get_accumulator(session_id)
                 if accumulator:
                     _assistant_text_for_tasks = extract_text_from_message(
                         accumulator.build_for_db()
@@ -1967,7 +2011,7 @@ class ChatService:
                         message=current_message,
                         is_new_conversation=is_new_conversation,
                         events=events,
-                        broadcaster=agent.broadcaster,
+                        broadcaster=agent.get_broadcaster(),
                         routing_intent=routing_intent,
                     )
 

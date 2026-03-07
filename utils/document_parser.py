@@ -14,6 +14,7 @@
     将 PDF/DOCX 解析为结构化 ParsedDocument，供 file_processor 和 Skill 使用。
 """
 
+import asyncio
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -211,7 +212,7 @@ class DocumentParser:
 
         params = PartitionParameters(**kw)
         req = PartitionRequest(partition_parameters=params)
-        resp = client.general.partition(request=req)
+        resp = await asyncio.to_thread(client.general.partition, request=req)
 
         raw_elements = resp.elements or []
 

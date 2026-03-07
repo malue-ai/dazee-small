@@ -125,7 +125,7 @@ _native_packages = [
     # 'jsonschema_specifications',
     # 'grpc',          # gRPC（仅开发用，桌面端不需要）
     # 'grpc_tools',    # gRPC 代码生成（仅开发用）
-    # 'lxml',          # XML 处理（未直接使用）
+    'lxml',            # XML 处理（python-docx 硬依赖，含 C 扩展）
 ]
 
 for _pkg in _native_packages:
@@ -189,6 +189,7 @@ hiddenimports += [
     # docling 已移至 requirements-optional.txt，不再打包
     # .env 文件加载（utils/instance_loader.py、services/settings_service.py 延迟导入）
     'dotenv',
+    # json_repair: 由 core/memory/mem0/ 顶层导入，collect_submodules('core') 自动发现，无需显式声明
 ]
 
 # --- 延迟导入 / 条件导入的第三方库 ---
@@ -252,7 +253,7 @@ excludes = [
     'transformers', 'accelerate', 'safetensors',
     'sympy', 'mpmath', 'networkx',
     'rapidocr', 'onnxruntime',
-    'lxml',
+    # 注意：不排除 lxml（python-docx 依赖 lxml 解析 XML，排除会导致 DOCX 解析 ImportError）
     'rtree', 'shapely',
     'Faker',
     'tokenizers',
