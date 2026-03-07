@@ -59,7 +59,7 @@ def get_bundle_dir() -> Path:
 
     if is_frozen():
         # PyInstaller 打包模式：资源解压到临时目录
-        _bundle_dir = Path(sys._MEIPASS)
+        _bundle_dir = Path(getattr(sys, "_MEIPASS"))
     else:
         # 开发模式：项目根目录（utils/app_paths.py -> 上两级）
         _bundle_dir = Path(__file__).parent.parent
@@ -380,11 +380,10 @@ _FRAMEWORK_OWNED_FILES = [
     "config/llm_profiles.yaml",
 ]
 
-# Directories regenerated at runtime; safe to overwrite from bundle.
-_FRAMEWORK_OWNED_DIRS = [
-    "prompt_results",
-    ".cache",
-]
+# Directories that are regenerated at runtime.
+# NOT overwritten from bundle — LLM-generated caches are expensive to rebuild
+# and the hash-based change detection in prompt_results_writer handles staleness.
+_FRAMEWORK_OWNED_DIRS: list[str] = []
 
 
 def _sync_framework_files(bundle_dir: Path, user_dir: Path) -> bool:

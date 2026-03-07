@@ -1043,6 +1043,11 @@ class SkillsLoader:
         """
         all_names = {e.name for e in self._entries}
         available_names = {e.name for e in self._entries if e.is_available()}
+        installable_statuses = {SkillStatus.NEED_SETUP, SkillStatus.NEED_AUTH}
+        installable_names = {
+            e.name for e in self._entries
+            if e.enabled and e.status in installable_statuses
+        }
 
         for entry in self._entries:
             if not entry.skill_path:
@@ -1069,7 +1074,7 @@ class SkillsLoader:
                                 f"Skill '{entry.name}' depends_on '{dep}' "
                                 f"which is not registered"
                             )
-                        elif dep not in available_names:
+                        elif dep not in available_names and dep not in installable_names:
                             logger.warning(
                                 f"Skill '{entry.name}' depends_on '{dep}' "
                                 f"which is not available (status: "

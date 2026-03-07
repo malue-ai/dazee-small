@@ -44,7 +44,8 @@ const SIDECAR_PORT_RANGE: u16 = 10;
 const DEV_PORT: u16 = 8000;
 
 /// 后端启动超时（秒）
-const BACKEND_STARTUP_TIMEOUT_SECS: u64 = 60;
+/// 首次启动需要 LLM 生成 prompt_results（~60s），加上 embedding 预热（~15s）
+const BACKEND_STARTUP_TIMEOUT_SECS: u64 = 120;
 
 /// 健康检查轮询间隔（毫秒）
 const BACKEND_HEALTH_POLL_MS: u64 = 500;
