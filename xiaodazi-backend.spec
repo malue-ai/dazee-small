@@ -198,7 +198,10 @@ hiddenimports += [
 
 
 # 记忆系统 mem0（core/memory/mem0/pool.py 全部 lazy import）
-hiddenimports += collect_submodules('mem0')
+_mem0_mods = collect_submodules('mem0')
+if not _mem0_mods:
+    print("  [WARN] mem0 未安装或无子模块，记忆系统将不可用！请执行: pip install mem0ai")
+hiddenimports += _mem0_mods
 
 # sqlite-vec Python 模块（配合上方 binaries/datas 一起打包）
 try:
