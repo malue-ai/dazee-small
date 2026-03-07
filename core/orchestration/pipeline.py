@@ -248,8 +248,11 @@ class PipelineExecutor:
         self.approval_fn = approval_fn
         self.progress_fn = progress_fn
         self.max_concurrency = max_concurrency
-        self.storage_dir = storage_dir or Path("storage/pipelines")
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        if storage_dir:
+            self.storage_dir = storage_dir
+        else:
+            from utils.app_paths import get_workspace_storage_dir
+            self.storage_dir = get_workspace_storage_dir("pipelines")
 
     # ================================================================
     # 核心执行

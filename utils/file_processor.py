@@ -17,7 +17,15 @@ import base64
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+
+ProgressCallback = Callable[[str, str, Dict[str, Any]], Awaitable[None]]
+"""通用进度回调: (stage, status, detail) → awaitable.
+
+stage:  "file_processing" | "tool_execution" | "cloud_agent" | ...
+status: "started" | "progress" | "completed" | "error"
+detail: {"message": ..., "filename": ..., "current": 1, "total": 3, ...}
+"""
 
 import aiofiles
 import httpx
@@ -106,10 +114,8 @@ class FileProcessor:
     # 最大文本大小（10KB）— 超出走 scratchpad
     MAX_TEXT_SIZE = 10 * 1024
 
-    PARSEABLE_DOC_TYPES = {
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    }
+    # LLM-First: 文档类型识别仅用于分类（IMAGE/AUDIO/TEXT/DOCUMENT），
+    # 不触发框架层预解析，由 Agent 用工具/Skill 按需解析。
 
     # 预览文本最大字符数
     MAX_PREVIEW_CHARS = 500
@@ -148,6 +154,7 @@ class FileProcessor:
         self,
         files: List[Dict[str, Any]],
         model_name: Optional[str] = None,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> List[ProcessedFile]:
         """
         处理文件列表
@@ -155,15 +162,23 @@ class FileProcessor:
         Args:
             files: 文件引用列表，每个元素包含 file_url + 元数据
             model_name: 模型名称，用于图片压缩约束（可选）
+            on_progress: 进度回调（可选），用于向前端推送处理状态
 
         Returns:
             处理后的文件列表
         """
+        total = len(files)
         processed = []
 
-        for file_ref in files:
+        if on_progress and total > 0:
+            await on_progress("file_processing", "started", {
+                "message": f"正在处理 {total} 个文件...",
+                "total": total,
+                "current": 0,
+            })
+
+        for idx, file_ref in enumerate(files):
             try:
-                # 优先使用 local_path（真实文件系统路径），其次 file_url
                 local_path = file_ref.get("local_path")
                 file_url = file_ref.get("file_url")
 
@@ -171,10 +186,18 @@ class FileProcessor:
                     logger.warning("文件引用无效：缺少 local_path 和 file_url")
                     continue
 
-                # 从文件引用中获取元数据（前端已传递）
-                file_name = file_ref.get("file_name") or file_ref.get("filename")
+                file_name = file_ref.get("file_name") or file_ref.get("filename") or ""
                 file_type = file_ref.get("file_type") or file_ref.get("mime_type")
                 file_size = file_ref.get("file_size")
+
+                if on_progress:
+                    size_str = self._format_file_size(file_size) if file_size else ""
+                    await on_progress("file_processing", "progress", {
+                        "message": f"正在处理: {file_name}" + (f" ({size_str})" if size_str else ""),
+                        "filename": file_name,
+                        "current": idx + 1,
+                        "total": total,
+                    })
 
                 result = await self._process_file(
                     local_path=local_path,
@@ -183,6 +206,7 @@ class FileProcessor:
                     mime_type=file_type,
                     file_size=file_size,
                     model_name=model_name,
+                    on_progress=on_progress,
                 )
 
                 if result:
@@ -190,7 +214,11 @@ class FileProcessor:
 
             except Exception as e:
                 logger.error(f"处理文件失败: {str(e)}", exc_info=True)
-                # 继续处理其他文件，不要因为一个失败就全部失败
+                if on_progress:
+                    await on_progress("file_processing", "error", {
+                        "message": f"文件处理失败: {file_ref.get('file_name', '未知')}",
+                        "error": str(e),
+                    })
                 continue
 
         return processed
@@ -203,6 +231,7 @@ class FileProcessor:
         mime_type: Optional[str] = None,
         file_size: Optional[int] = None,
         model_name: Optional[str] = None,
+        on_progress: Optional[ProgressCallback] = None,
     ) -> Optional[ProcessedFile]:
         """
         Process a file. Prefers local_path (direct filesystem read),
@@ -393,26 +422,7 @@ class FileProcessor:
                     logger.warning(f"读取文本失败，降级为文档处理: {str(e)}")
                     category = FileCategory.DOCUMENT
 
-        # Document: for parseable types (PDF/DOCX), attempt pre-parse
-        # Tauri/browsers may identify .docx as application/octet-stream instead of the official MIME
-        is_parseable = mime_type in self.PARSEABLE_DOC_TYPES
-        if not is_parseable and mime_type == "application/octet-stream" and filename:
-            ext = Path(filename).suffix.lower()
-            if ext in (".docx", ".pdf"):
-                is_parseable = True
-                logger.info(f"MIME 为 octet-stream 但扩展名为 {ext}，视为可解析文档")
-        if is_parseable and resolved_path:
-            preparsed = await self._preparse_document(str(resolved_path), filename)
-            if preparsed:
-                return ProcessedFile(
-                    category=FileCategory.DOCUMENT,
-                    filename=filename,
-                    mime_type=mime_type,
-                    text_content=preparsed,
-                    file_url=display_path,
-                    file_size=file_size,
-                )
-
+        # LLM-First: 文档以路径+元数据传给 Agent，由 Agent 按需解析
         return ProcessedFile(
             category=FileCategory.DOCUMENT,
             filename=filename,
@@ -420,32 +430,6 @@ class FileProcessor:
             file_url=display_path,
             file_size=file_size,
         )
-
-    async def _preparse_document(self, local_path: str, filename: str) -> str:
-        """对 PDF/DOCX 调用 DocumentParser 预解析，返回适合注入上下文的摘要。"""
-        logger.info(f"开始文档预解析: {filename} (path={local_path})")
-        try:
-            from utils.document_parser import DocumentParser
-
-            parser = DocumentParser()
-            result = await parser.parse(local_path)
-            if not result.markdown:
-                return ""
-
-            if len(result.markdown) <= 2000:
-                return f"[文档预解析] {filename}\n{result.summary}\n\n{result.markdown}"
-
-            scratchpad_dir = Path("workspace/scratchpad")
-            scratchpad_dir.mkdir(parents=True, exist_ok=True)
-            scratchpad_file = scratchpad_dir / f"{Path(filename).stem}_parsed.md"
-            scratchpad_file.write_text(result.markdown, encoding="utf-8")
-            return (
-                f"[文档预解析] {filename}\n{result.summary}\n"
-                f"完整解析内容已保存: {scratchpad_file}"
-            )
-        except Exception as e:
-            logger.warning(f"文档预解析失败 ({filename}): {type(e).__name__}: {e}", exc_info=True)
-            return ""
 
     def _categorize_mime_type(self, mime_type: str) -> FileCategory:
         """根据 MIME 类型分类"""

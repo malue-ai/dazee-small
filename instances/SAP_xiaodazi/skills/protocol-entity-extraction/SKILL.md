@@ -1,29 +1,38 @@
 ---
 name: protocol-entity-extraction
-description: Extract structured entities from clinical trial Protocol PDF/DOCX for SAP authoring. Multi-pass parsing with Unstructured API, entity merging, and confidence scoring.
-requires:
-  env: [UNSTRUCTURED_API_KEY]
+description: Extract structured entities from clinical trial Protocol PDF/DOCX for SAP authoring. Use when user uploads a Protocol and requests SAP generation.
 ---
 # Protocol 实体抽取
+
 从 Protocol PDF/DOCX 中抽取 SAP 所需的全部关键实体，输出结构化 JSON。
+
 ## Quick Start
-```python
-from utils.document_parser import get_document_parser
-parser = get_document_parser()
-synopsis = await parser.parse(protocol_path, page_range=[1, 15])
-stats = await parser.parse(protocol_path, page_range=[90, 115])
+
+你收到的是文件路径，用脚本解析（内部自动走 Unstructured API 优先，降级 pdfplumber/PyPDF2）：
+
+```bash
+python scripts/parse_protocol.py <protocol_path> <output_dir>
 ```
-## 解析策略
-多段定向解析：Synopsis(p1-15,高表格) -> Design(p30-50) -> Statistics(p90-115,纯文本) -> SAP Appendix(p240+)
 
-## 解析引擎（四级降级）
-DocumentParser 自动选择最优引擎：
-1. **Unstructured API** (云端) — 需要 UNSTRUCTURED_API_KEY，表格+OCR 最强
-2. **Docling** (本地 AI) — IBM 开源，视觉+语言模型做表格识别，无需 API Key，推荐本地首选
-3. **pdfplumber** (本地) — 文本+简单表格
-4. **PyPDF2** (本地) — 仅纯文本兜底
+## 执行流程
 
-如果 UNSTRUCTURED_API_KEY 未配置且 Docling 已安装，会自动使用 Docling（表格识别精度远高于 pdfplumber）。
+1. **先读目录**：解析前 20-30 页获取 Table of Contents，确定各章节的实际页码范围
+2. **按目录定向解析**：只解析需要的章节，不全文解析
+3. 对每段解析结果，用 [prompts/](prompts/) 中的专用 Prompt 抽取实体
+4. 运行 `scripts/merge_entities.py` 合并实体、交叉验证
+5. 输出 `protocol_entities.json`
+
+## 需要抽取的章节
+
+根据目录定位以下章节（页码因文档而异，必须从 TOC 动态确定）：
+
+| 目标章节 | 常见标题关键词 | 目标实体 |
+|---------|-------------|---------|
+| 试验概要 | Synopsis, Summary, Study Overview | study_id, design, endpoints |
+| 目标与设计 | Objectives, Study Design, Treatment Arms | treatment_arms, populations |
+| 统计方法 | Statistical Considerations, Sample Size, Analysis | stat_methods, sample_size, multiplicity |
+| SAP 附录 | SAP, Statistical Analysis Plan (如有) | 层次检验表、分析方法表 |
+
 ## References
 - [prompts/](prompts/) — 6 个专用抽取 Prompt
 - [scripts/parse_protocol.py](scripts/parse_protocol.py) — 多段解析编排
