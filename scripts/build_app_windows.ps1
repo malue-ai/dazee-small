@@ -274,7 +274,7 @@ $criticalPkgs = @(
     # Core utilities
     "yaml", "tiktoken", "numpy", "json5",
     # Memory system
-    "sqlite_vec",
+    "sqlite_vec", "mem0",
     # File processing
     "PIL",
     # Scheduling

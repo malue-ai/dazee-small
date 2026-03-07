@@ -86,6 +86,7 @@ class UserTaskScheduler:
 
         self._scheduler.start()
         self._running = True
+        self._stagger_offset = 0
 
         # 从数据库加载活跃任务
         loaded = await self._load_active_tasks()
@@ -222,13 +223,34 @@ class UserTaskScheduler:
                     f"🔄 [Scheduler] 时区转换: 原始={task.next_run_at} → naive={run_at}"
                 )
 
-            # 已过期的任务立即执行（延迟 2 秒避免调度竞争）
+            # 过期任务处理：错峰执行，避免启动瞬间资源爆发
             if run_at <= now:
                 from datetime import timedelta
+
                 old_run_at = run_at
-                run_at = now + timedelta(seconds=2)
+                overdue_seconds = (now - run_at).total_seconds()
+
+                if overdue_seconds > 3600:
+                    # 过期超过 1 小时：跳过本次，等下一个周期
+                    logger.info(
+                        f"⏭️ [Scheduler] 任务过期超过 1 小时，跳过本次: id={task.id}, "
+                        f"原定={old_run_at:%H:%M:%S}, 过期={overdue_seconds/3600:.1f}h"
+                    )
+                    # 对 cron/interval 类型，直接跳到下一周期
+                    if task.trigger_type in ("cron", "interval"):
+                        return False
+                    # once 类型过期超 1 小时也跳过
+                    return False
+
+                # 过期不超过 1 小时：延迟错峰执行
+                # 每个过期任务间隔 15 秒，避免同时触发
+                if not hasattr(self, '_stagger_offset'):
+                    self._stagger_offset = 0
+                self._stagger_offset += 15
+                stagger = max(10, self._stagger_offset)
+                run_at = now + timedelta(seconds=stagger)
                 logger.info(
-                    f"⏩ [Scheduler] 任务已过期，立即调度: id={task.id}, "
+                    f"⏩ [Scheduler] 任务已过期，延迟 {stagger}s 错峰调度: id={task.id}, "
                     f"原定={old_run_at:%H:%M:%S} → 改为={run_at:%H:%M:%S}"
                 )
 
