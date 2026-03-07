@@ -136,6 +136,22 @@ def get_shared_models_dir() -> Path:
     return d
 
 
+def get_scratchpad_dir(session_id: str = "default") -> Path:
+    """Session-scoped scratchpad directory for intermediate artifacts."""
+    d = get_user_data_dir() / "workspace" / "scratchpad" / session_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_workspace_storage_dir(subdir: str = "") -> Path:
+    """Writable workspace storage directory (pipelines, tool results, etc.)."""
+    d = get_user_data_dir() / "workspace" / "storage"
+    if subdir:
+        d = d / subdir
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_storage_dir() -> Path:
     """
     Convenience wrapper: get instance-scoped storage dir from AGENT_INSTANCE env var.

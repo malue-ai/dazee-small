@@ -644,6 +644,11 @@ export function useChat() {
       handleMessageDelta(data.delta, msg)
     }
 
+    // 处理长任务进度事件（文件解析、工具执行等）
+    if (type === 'processing_status') {
+      handleProcessingStatus(data, msg)
+    }
+
     // 处理内容块开始事件
     if (type === 'content_start') {
       handleContentStart(data, msg)
@@ -1056,6 +1061,25 @@ export function useChat() {
           // delta is not JSON, ignore
         }
         break
+    }
+  }
+
+  /**
+   * 处理长任务进度状态（文件解析、工具执行、云端调用等）
+   */
+  function handleProcessingStatus(data: { stage: string; status: string; detail: any }, msg: UIMessage): void {
+    if (!data) return
+    msg.processingStatus = {
+      stage: data.stage,
+      status: data.status as any,
+      detail: data.detail || {},
+    }
+    if (data.status === 'completed' || data.status === 'error') {
+      setTimeout(() => {
+        if (msg.processingStatus?.status === data.status) {
+          msg.processingStatus = null
+        }
+      }, 2000)
     }
   }
 
