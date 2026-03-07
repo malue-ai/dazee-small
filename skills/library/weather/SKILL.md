@@ -3,6 +3,8 @@ name: weather
 description: Get current weather and forecasts (no API key required).
 homepage: https://wttr.in/:help
 metadata: {"moltbot":{"emoji":"🌤️","requires":{"bins":["curl"]}}}
+capabilities: [weather_query, information_retrieval]
+
 ---
 
 # Weather

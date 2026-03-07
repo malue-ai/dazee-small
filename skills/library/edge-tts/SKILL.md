@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     python_packages: ["edge-tts"]
+capabilities: [tts, speech_synthesis]
+
 ---
 
 # Edge TTS 免费语音合成

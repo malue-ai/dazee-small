@@ -424,6 +424,9 @@ async def lifespan(app: FastAPI):
             from utils.app_paths import get_instances_dir
             print(f"📦 首次启动：已初始化实例目录 → {get_instances_dir()}")
     
+    from utils.dependency_registry import log_dependency_report
+    log_dependency_report()
+
     await _init_resilience_config()
     await _init_local_store()
     await _preload_capability_registry()  # 加载工具注册表（必须在 Agent 之前）

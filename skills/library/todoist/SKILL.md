@@ -7,6 +7,8 @@ metadata:
     os: [common]
     backend_type: local
     user_facing: true
+capabilities: [task_management, todo_management]
+
 ---
 
 # Todoist 任务管理

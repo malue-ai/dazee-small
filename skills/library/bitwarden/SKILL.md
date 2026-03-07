@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     bins: ["bw"]
+capabilities: [password_management, credential_management]
+
 ---
 
 # Bitwarden 密码管理

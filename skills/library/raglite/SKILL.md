@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     python_packages: ["raglite"]
+capabilities: [knowledge_retrieval, document_indexing]
+
 ---
 
 # RAGLite 本地知识检索

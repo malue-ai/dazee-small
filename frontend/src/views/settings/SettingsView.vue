@@ -318,9 +318,29 @@
 
               <!-- 当前模式与选择模式不同时显示"应用"按钮 -->
               <template v-if="downloadState === 'idle' && semanticModeChanged">
-                <!-- local 模式且模型未下载 → 下载提示 -->
+                <!-- local 模式且依赖缺失 → 安装指引 -->
                 <div
-                  v-if="selectedSemanticMode === 'local' && embeddingStatus && !embeddingStatus.model_downloaded"
+                  v-if="selectedSemanticMode === 'local' && embeddingStatus && embeddingStatus.missing_deps?.length"
+                  class="bg-destructive/5 border border-destructive/20 rounded-lg p-3"
+                >
+                  <div class="flex items-center gap-2 mb-1">
+                    <AlertTriangle class="w-3.5 h-3.5 text-destructive" />
+                    <p class="text-xs text-destructive font-medium">缺少依赖</p>
+                  </div>
+                  <div class="space-y-1">
+                    <p
+                      v-for="dep in embeddingStatus.missing_deps"
+                      :key="dep.name"
+                      class="text-[11px] text-muted-foreground leading-relaxed font-mono"
+                    >
+                      {{ dep.install }}
+                    </p>
+                  </div>
+                </div>
+
+                <!-- local 模式且依赖就绪但模型未下载 → 下载提示 -->
+                <div
+                  v-else-if="selectedSemanticMode === 'local' && embeddingStatus && !embeddingStatus.model_downloaded"
                   class="bg-amber-50 border border-amber-200 rounded-lg p-3"
                 >
                   <div class="flex items-center gap-2 mb-1">
@@ -335,16 +355,16 @@
                 <!-- cloud 模式 → 提示需要 API Key -->
                 <div
                   v-if="selectedSemanticMode === 'cloud' && !embeddingStatus?.openai_available"
-                  class="bg-blue-50 border border-blue-200 rounded-lg p-3"
+                  class="bg-amber-50 border border-amber-200 rounded-lg p-3"
                 >
-                  <p class="text-[11px] text-blue-700 leading-relaxed">
+                  <p class="text-[11px] text-amber-700 leading-relaxed">
                     请先在上方 API Providers 中配置 OpenAI 的 API Key，才能使用云端语义搜索。
                   </p>
                 </div>
 
                 <button
                   @click="applySemanticMode"
-                  :disabled="semanticOperating || (selectedSemanticMode === 'cloud' && !embeddingStatus?.openai_available)"
+                  :disabled="semanticOperating || (selectedSemanticMode === 'cloud' && !embeddingStatus?.openai_available) || (selectedSemanticMode === 'local' && !!embeddingStatus?.missing_deps?.length)"
                   class="px-4 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 w-fit"
                 >
                   <span v-if="semanticOperating" class="flex items-center gap-1.5">
@@ -1401,6 +1421,11 @@ async function validateProviderKey(providerName: string) {
     const customBaseUrl = providerBaseUrls[providerName]?.trim()
     const result = await modelApi.validateKey(providerName, key, customBaseUrl)
     validateResults[providerName] = result
+    if (result.valid && result.detected_base_url) {
+      providerBaseUrls[providerName] = result.detected_base_url
+      const host = new URL(result.detected_base_url).hostname
+      result.message = `${result.message}（已自动检测到 ${host}）`
+    }
     if (!result.valid) {
       providerKeys[providerName] = ''
     }

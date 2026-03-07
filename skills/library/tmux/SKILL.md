@@ -2,6 +2,8 @@
 name: tmux
 description: Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output.
 metadata: {"moltbot":{"emoji":"🧵","os":["darwin","linux"],"requires":{"bins":["tmux"]}}}
+capabilities: [terminal_management, session_management]
+
 ---
 
 # tmux Skill (Moltbot)

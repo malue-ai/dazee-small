@@ -53,52 +53,47 @@ async def sync_message_to_fts(
     if not text_content or not text_content.strip():
         return
 
-    # 先删除旧记录（幂等）
-    await session.execute(
-        text("DELETE FROM messages_fts WHERE message_id = :mid"),
-        {"mid": message_id},
-    )
-    # 插入新记录
-    await session.execute(
-        text("""
-            INSERT INTO messages_fts(message_id, conversation_id, role, text_content)
-            VALUES (:mid, :cid, :role, :text)
-        """),
-        {
-            "mid": message_id,
-            "cid": conversation_id,
-            "role": role,
-            "text": text_content,
-        },
-    )
+    try:
+        await session.execute(
+            text("DELETE FROM messages_fts WHERE message_id = :mid"),
+            {"mid": message_id},
+        )
+        await session.execute(
+            text("""
+                INSERT INTO messages_fts(message_id, conversation_id, role, text_content)
+                VALUES (:mid, :cid, :role, :text)
+            """),
+            {
+                "mid": message_id,
+                "cid": conversation_id,
+                "role": role,
+                "text": text_content,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"FTS 同步失败 (mid={message_id}), 不影响消息保存: {e}")
 
 
 async def delete_message_from_fts(session: AsyncSession, message_id: str):
-    """
-    从 FTS5 索引中删除消息
-
-    Args:
-        session: 数据库会话
-        message_id: 消息 ID
-    """
-    await session.execute(
-        text("DELETE FROM messages_fts WHERE message_id = :mid"),
-        {"mid": message_id},
-    )
+    """从 FTS5 索引中删除消息（best-effort，不中断主流程）"""
+    try:
+        await session.execute(
+            text("DELETE FROM messages_fts WHERE message_id = :mid"),
+            {"mid": message_id},
+        )
+    except Exception as e:
+        logger.warning(f"FTS 删除失败 (mid={message_id}): {e}")
 
 
 async def delete_conversation_from_fts(session: AsyncSession, conversation_id: str):
-    """
-    从 FTS5 索引中删除整个对话的消息
-
-    Args:
-        session: 数据库会话
-        conversation_id: 对话 ID
-    """
-    await session.execute(
-        text("DELETE FROM messages_fts WHERE conversation_id = :cid"),
-        {"cid": conversation_id},
-    )
+    """从 FTS5 索引中删除对话消息（best-effort，不中断主流程）"""
+    try:
+        await session.execute(
+            text("DELETE FROM messages_fts WHERE conversation_id = :cid"),
+            {"cid": conversation_id},
+        )
+    except Exception as e:
+        logger.warning(f"FTS 删除失败 (cid={conversation_id}): {e}")
 
 
 async def search_messages(
@@ -133,9 +128,14 @@ async def search_messages(
     if not query or not query.strip():
         return []
 
-    # 构建查询条件
+    from infra.local_store.generic_fts import GenericFTS5
+
+    sanitized = GenericFTS5._sanitize_query(query)
+    if not sanitized:
+        return []
+
     conditions = ["messages_fts MATCH :query"]
-    params = {"query": query, "limit": limit, "offset": offset}
+    params: dict = {"query": sanitized, "limit": limit, "offset": offset}
 
     if conversation_id:
         conditions.append("conversation_id = :cid")
@@ -160,7 +160,12 @@ async def search_messages(
         LIMIT :limit OFFSET :offset
     """
 
-    result = await session.execute(text(sql), params)
+    try:
+        result = await session.execute(text(sql), params)
+    except Exception as e:
+        logger.warning(f"FTS5 消息搜索失败 (query={query[:50]}): {e}")
+        return []
+
     rows = result.fetchall()
 
     return [
@@ -196,8 +201,14 @@ async def search_messages_count(
     if not query or not query.strip():
         return 0
 
+    from infra.local_store.generic_fts import GenericFTS5
+
+    sanitized = GenericFTS5._sanitize_query(query)
+    if not sanitized:
+        return 0
+
     conditions = ["messages_fts MATCH :query"]
-    params = {"query": query}
+    params: dict = {"query": sanitized}
 
     if conversation_id:
         conditions.append("conversation_id = :cid")
@@ -210,8 +221,12 @@ async def search_messages_count(
     where_clause = " AND ".join(conditions)
 
     sql = f"SELECT COUNT(*) FROM messages_fts WHERE {where_clause}"
-    result = await session.execute(text(sql), params)
-    return result.scalar() or 0
+    try:
+        result = await session.execute(text(sql), params)
+        return result.scalar() or 0
+    except Exception as e:
+        logger.warning(f"FTS5 消息计数失败: {e}")
+        return 0
 
 
 async def rebuild_fts_index(session: AsyncSession):

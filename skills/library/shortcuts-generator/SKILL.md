@@ -7,6 +7,8 @@ metadata:
     os: [darwin]
     backend_type: local
     user_facing: true
+capabilities: [shortcut_creation, automation]
+
 ---
 
 # 快捷指令生成器

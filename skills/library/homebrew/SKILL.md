@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     bins: ["brew"]
+capabilities: [package_management, software_install]
+
 ---
 
 # Homebrew 包管理

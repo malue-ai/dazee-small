@@ -17,6 +17,8 @@ priority: high
 references_tools:
   - slidespeak_render  # 实际执行PPT生成的工具
   - web_search  # 用于收集内容素材
+capabilities: [ppt_generation, presentation]
+
 ---
 
 # SlideSpeak Presentation Generator
