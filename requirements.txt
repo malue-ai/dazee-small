@@ -70,6 +70,9 @@ pyobjc-core>=12.0; sys_platform == "darwin"
 pyobjc-framework-Vision>=12.0; sys_platform == "darwin"
 pyobjc-framework-Quartz>=12.0; sys_platform == "darwin"
 
+# 浏览器自动化（browser tool 基础依赖，二进制由首次使用时自动安装）
+playwright>=1.49.0
+
 # 系统监控
 psutil>=5.9.0
 
