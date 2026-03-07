@@ -3,6 +3,8 @@ name: things-mac
 description: Manage Things 3 via the `things` CLI on macOS (add/update projects+todos via URL scheme; read/search/list from the local Things database). Use when a user asks Moltbot to add a task to Things, list inbox/today/upcoming, search tasks, or inspect projects/areas/tags.
 homepage: https://github.com/ossianhempel/things3-cli
 metadata: {"moltbot":{"emoji":"✅","os":["darwin"],"requires":{"bins":["things"]},"install":[{"id":"go","kind":"go","module":"github.com/ossianhempel/things3-cli/cmd/things@latest","bins":["things"],"label":"Install things3-cli (go)"}]}}
+capabilities: [task_management, todo_management]
+
 ---
 
 # Things 3 CLI

@@ -2,6 +2,8 @@
 name: slidespeak-editor
 description: Edit existing PowerPoint presentations by replacing content in specified shapes using SlideSpeak API
 priority: high
+capabilities: [ppt_generation, presentation]
+
 ---
 
 # SlideSpeak Presentation Editor

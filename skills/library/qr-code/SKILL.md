@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     python_packages: ["qrcode", "Pillow"]
+capabilities: [qr_code_generation, qr_code_reading]
+
 ---
 
 # QR 码生成与识别

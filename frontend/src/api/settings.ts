@@ -41,6 +41,12 @@ export interface SettingsStatus {
   }
 }
 
+export interface MissingDep {
+  name: string
+  purpose: string
+  install: string
+}
+
 export interface EmbeddingStatus {
   semantic_enabled: boolean
   current_provider: string | null
@@ -48,7 +54,9 @@ export interface EmbeddingStatus {
   local_available: boolean
   local_backend: string
   model_downloaded: boolean
+  download_available: boolean
   openai_available: boolean
+  missing_deps: MissingDep[]
   local_install_hint: string
   local_model_name: string
   local_model_size: string

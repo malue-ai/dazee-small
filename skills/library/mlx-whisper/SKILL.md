@@ -7,6 +7,8 @@ metadata:
     os: [darwin]
     backend_type: local
     user_facing: true
+capabilities: [stt, speech_recognition]
+
 ---
 
 # MLX Whisper 语音转文字

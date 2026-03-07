@@ -1,6 +1,8 @@
 ---
 name: canvas
 description: "Display HTML content on connected Moltbot nodes (Mac app, iOS, Android)."
+capabilities: [content_display, html_rendering]
+
 ---
 
 # Canvas Skill

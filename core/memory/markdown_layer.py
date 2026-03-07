@@ -110,28 +110,23 @@ class MarkdownMemoryLayer:
     # ==================== 全局记忆 ====================
 
     async def read_global_memory(self) -> str:
-        """
-        读取 MEMORY.md 全文
-
-        首次访问时自动创建模板文件。
-
-        Returns:
-            MEMORY.md 的完整内容
-        """
-        await self._ensure_memory_file()
-        async with aiofiles.open(self._memory_file, "r", encoding="utf-8") as f:
-            return await f.read()
+        """读取 MEMORY.md 全文，首次访问时自动创建模板文件。"""
+        try:
+            await self._ensure_memory_file()
+            async with aiofiles.open(self._memory_file, "r", encoding="utf-8") as f:
+                return await f.read()
+        except Exception as e:
+            logger.warning(f"读取 MEMORY.md 失败: {e}")
+            return ""
 
     async def write_global_memory(self, content: str) -> None:
-        """
-        覆写 MEMORY.md 全文
-
-        Args:
-            content: 新的完整内容
-        """
-        await self._ensure_dir(self._base_dir)
-        async with aiofiles.open(self._memory_file, "w", encoding="utf-8") as f:
-            await f.write(content)
+        """覆写 MEMORY.md 全文"""
+        try:
+            await self._ensure_dir(self._base_dir)
+            async with aiofiles.open(self._memory_file, "w", encoding="utf-8") as f:
+                await f.write(content)
+        except Exception as e:
+            logger.error(f"写入 MEMORY.md 失败: {e}", exc_info=True)
         logger.debug("MEMORY.md 已更新")
 
     async def append_to_section(
@@ -354,28 +349,24 @@ class MarkdownMemoryLayer:
     async def append_daily_log(
         self, entry: str, date: Optional[str] = None
     ) -> None:
-        """
-        向每日日志追加条目
+        """向每日日志追加条目"""
+        try:
+            date = date or datetime.now().strftime("%Y-%m-%d")
+            log_file = self._log_dir / f"{date}.md"
 
-        Args:
-            entry: 日志条目内容
-            date: 日期字符串（YYYY-MM-DD），默认今天
-        """
-        date = date or datetime.now().strftime("%Y-%m-%d")
-        log_file = self._log_dir / f"{date}.md"
+            await self._ensure_dir(self._log_dir)
 
-        await self._ensure_dir(self._log_dir)
+            if not log_file.exists():
+                async with aiofiles.open(log_file, "w", encoding="utf-8") as f:
+                    await f.write(f"# {date} 日志\n\n")
 
-        # 如果文件不存在，先写标题
-        if not log_file.exists():
-            async with aiofiles.open(log_file, "w", encoding="utf-8") as f:
-                await f.write(f"# {date} 日志\n\n")
+            timestamp = datetime.now().strftime("%H:%M")
+            async with aiofiles.open(log_file, "a", encoding="utf-8") as f:
+                await f.write(f"- [{timestamp}] {entry}\n")
 
-        timestamp = datetime.now().strftime("%H:%M")
-        async with aiofiles.open(log_file, "a", encoding="utf-8") as f:
-            await f.write(f"- [{timestamp}] {entry}\n")
-
-        logger.debug(f"每日日志已追加: {date} - {entry[:50]}...")
+            logger.debug(f"每日日志已追加: {date} - {entry[:50]}...")
+        except Exception as e:
+            logger.warning(f"每日日志写入失败: {e}")
 
     # ==================== 项目级记忆 ====================
 

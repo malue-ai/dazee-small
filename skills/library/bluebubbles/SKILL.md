@@ -1,6 +1,8 @@
 ---
 name: bluebubbles
 description: Build or update the BlueBubbles external channel plugin for Moltbot (extension package, REST send/probe, webhook inbound).
+capabilities: [communication, messaging]
+
 ---
 
 # BlueBubbles plugin

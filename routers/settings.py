@@ -387,6 +387,47 @@ async def put_instance_config(body: InstanceConfigBody) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+@router.get("/health/dependencies")
+async def check_dependencies() -> Dict[str, Any]:
+    """Return availability status of all optional dependencies."""
+    from utils.dependency_registry import get_all_status, check_feature_deps
+
+    all_deps = get_all_status()
+    features = {}
+    for feature_name in (
+        "semantic_search_local", "memory", "document_parsing",
+        "image_processing", "channel_feishu", "channel_telegram",
+    ):
+        fs = check_feature_deps(feature_name)
+        features[feature_name] = {
+            "ready": fs.ready,
+            "missing": [
+                {"name": s.pip_name, "purpose": s.purpose}
+                for s in fs.missing
+            ],
+        }
+
+    deps_list = [
+        {
+            "name": s.name,
+            "available": s.available,
+            "pip_name": s.pip_name,
+            "purpose": s.purpose,
+            "version": s.version,
+        }
+        for s in all_deps.values()
+    ]
+    available_count = sum(1 for s in all_deps.values() if s.available)
+
+    return {
+        "total": len(deps_list),
+        "available": available_count,
+        "missing": len(deps_list) - available_count,
+        "dependencies": deps_list,
+        "features": features,
+    }
+
+
 class CloudTestRequest(BaseModel):
     url: str = "https://agent.dazee.ai"
 

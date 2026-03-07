@@ -70,6 +70,7 @@ export interface ValidateKeyResult {
   message: string
   models: string[]
   model_details: ValidatedModelInfo[]
+  detected_base_url?: string | null
 }
 
 /** Provider 批量激活结果 */

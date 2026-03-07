@@ -13,6 +13,7 @@ metadata:
     tool_name: browser
     bins: []
     pip: ["playwright"]
+
 ---
 
 # Browser Automation

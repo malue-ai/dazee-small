@@ -7,6 +7,8 @@ metadata:
     os: [darwin]
     backend_type: local
     user_facing: true
+capabilities: [photo_management, media_organization]
+
 ---
 
 # Apple 照片
