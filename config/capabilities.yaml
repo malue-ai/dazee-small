@@ -627,6 +627,8 @@ capabilities:
         description: Accept/dismiss dialog (handle_dialog, default true)
       paths:
         type: array
+        items:
+          type: string
         description: File paths to upload (upload_file)
       expression:
         type: string
