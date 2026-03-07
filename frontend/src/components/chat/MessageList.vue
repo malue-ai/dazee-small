@@ -137,6 +137,16 @@
                   :content="message.content"
                   :final="!isMessageStreaming(message)"
                 />
+                <!-- 长任务进度状态（文件解析、工具执行等） -->
+                <div v-else-if="message.processingStatus && isLastMessage(message)" class="flex items-center gap-2 py-2">
+                  <Loader2 class="w-4 h-4 text-primary animate-spin" />
+                  <span class="text-xs text-muted-foreground">
+                    {{ message.processingStatus.detail?.message || '处理中...' }}
+                  </span>
+                  <span v-if="message.processingStatus.detail?.current && message.processingStatus.detail?.total" class="text-xs text-muted-foreground/60">
+                    ({{ message.processingStatus.detail.current }}/{{ message.processingStatus.detail.total }})
+                  </span>
+                </div>
                 <!-- 空消息且正在加载（仅最后一条消息显示） -->
                 <div v-else-if="loading && isLastMessage(message)" class="flex items-center gap-1.5 py-2 text-muted-foreground/50">
                   <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0ms"></span>

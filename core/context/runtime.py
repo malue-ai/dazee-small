@@ -192,7 +192,7 @@ class ContentAccumulator:
             content_block: {"type": "thinking|text|tool_use|tool_result", ...}
             index: block 索引（必需）
         """
-        block_type = content_block.get("type")
+        block_type: str = content_block.get("type", "")
         ctx = BlockContext(block_type=block_type, index=index)
 
         if block_type == "thinking":
@@ -790,9 +790,8 @@ class RuntimeContext:
     # ==================== Scratchpad（会话级中间产物存储）====================
 
     def _scratchpad_dir(self) -> Path:
-        d = Path("workspace") / "scratchpad" / (self.session_id or "default")
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        from utils.app_paths import get_scratchpad_dir
+        return get_scratchpad_dir(self.session_id or "default")
 
     def write_scratchpad(self, filename: str, content: str) -> str:
         """写入 scratchpad 文件，返回路径字符串。"""

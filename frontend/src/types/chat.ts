@@ -235,6 +235,19 @@ export interface PlanData {
 /**
  * 前端 UI 消息（用于展示）
  */
+export interface ProcessingStatus {
+  stage: string
+  status: 'started' | 'progress' | 'completed' | 'error'
+  detail: {
+    message?: string
+    filename?: string
+    current?: number
+    total?: number
+    elapsed_ms?: number
+    [key: string]: any
+  }
+}
+
 export interface UIMessage {
   id: number | string
   role: 'user' | 'assistant'
@@ -246,6 +259,7 @@ export interface UIMessage {
   recommendedQuestions?: string[]
   planResult?: PlanData | null
   playbookSuggestion?: PlaybookSuggestion | null
+  processingStatus?: ProcessingStatus | null
   timestamp: Date
 }
 
