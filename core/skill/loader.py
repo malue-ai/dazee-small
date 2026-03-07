@@ -20,7 +20,10 @@ import os
 import platform
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from core.skill.group_registry import SkillGroupRegistry
 
 import aiofiles
 
@@ -384,6 +387,7 @@ class SkillsLoader:
             allowed_names = group_registry.get_skills_for_groups(relevant_skill_groups)
 
             before_count = len(injectable)
+            assert allowed_names is not None
             injectable = [e for e in injectable if e.name in allowed_names]
             logger.info(
                 f"Skills 按 intent 过滤: {before_count} → {len(injectable)} "
@@ -404,6 +408,8 @@ class SkillsLoader:
 
         summaries: list[SkillSummary] = []
         for entry in injectable:
+            if not entry.skill_path:
+                continue
             skill_md_path = Path(entry.skill_path) / "SKILL.md"
             if not skill_md_path.exists():
                 continue
@@ -769,12 +775,12 @@ class SkillsLoader:
                 return False
             try:
                 import objc
-                bundle = objc.loadBundle(
+                bundle = objc.loadBundle(  # type: ignore[attr-defined]
                     'ApplicationServices', {},
                     '/System/Library/Frameworks/ApplicationServices.framework',
                 )
                 funcs: dict = {}
-                objc.loadBundleFunctions(
+                objc.loadBundleFunctions(  # type: ignore[attr-defined]
                     bundle, funcs, [('AXIsProcessTrusted', b'Z')]
                 )
                 ax_func = funcs.get('AXIsProcessTrusted')
@@ -787,7 +793,7 @@ class SkillsLoader:
             if importlib.util.find_spec("Quartz") is None:
                 return False
             try:
-                from Quartz import CGPreflightScreenCaptureAccess
+                from Quartz import CGPreflightScreenCaptureAccess  # type: ignore[import-not-found]
                 return bool(CGPreflightScreenCaptureAccess())
             except Exception as e:
                 logger.debug(f"Screen recording 检查失败: {e}")
@@ -1007,7 +1013,7 @@ class SkillsLoader:
         try:
             from core.tool.registry import create_capability_registry
             registry = create_capability_registry()
-            registered_tools = {cap.name for cap in registry.all()}
+            registered_tools = set(registry.list_all())
         except Exception as e:
             logger.debug(f"工具引用校验跳过（registry 不可用）: {e}")
             return
@@ -1075,11 +1081,20 @@ class SkillsLoader:
                                 f"which is not registered"
                             )
                         elif dep not in available_names and dep not in installable_names:
-                            logger.warning(
-                                f"Skill '{entry.name}' depends_on '{dep}' "
-                                f"which is not available (status: "
-                                f"{next((e.status.value for e in self._entries if e.name == dep), '?')})"
+                            dep_status = next(
+                                (e.status.value for e in self._entries if e.name == dep), "?"
                             )
+                            if entry.is_available():
+                                logger.warning(
+                                    f"Skill '{entry.name}' depends_on '{dep}' "
+                                    f"which is not available (status: {dep_status})"
+                                )
+                            else:
+                                logger.debug(
+                                    f"Skill '{entry.name}' depends_on '{dep}' "
+                                    f"(both not ready: self={entry.status.value}, "
+                                    f"dep={dep_status})"
+                                )
 
                 # conflicts_with check
                 conflicts_with = meta.get("conflicts_with") or []

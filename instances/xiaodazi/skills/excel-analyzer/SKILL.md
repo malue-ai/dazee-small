@@ -21,6 +21,7 @@ metadata:
     python_packages:
       - pandas
       - openpyxl
+    auto_install: true
 ---
 
 # Excel 分析
