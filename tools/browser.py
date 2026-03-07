@@ -179,6 +179,12 @@ class BrowserTool(BaseTool):
         self._active_tab: Optional[str] = None
         self._ref_cache: Dict[str, Dict[str, Any]] = {}
         self._launch_lock = asyncio.Lock()
+        self._listened_pages: set = set()
+        self._dialog_history: List[Dict[str, str]] = []
+        self._next_dialog_action: Optional[Dict[str, Any]] = None
+        self._console_messages: List[Dict[str, str]] = []
+        self._network_log: List[Dict[str, Any]] = []
+        self._pending_file_chooser: Any = None
 
     @property
     def name(self) -> str:
@@ -186,26 +192,29 @@ class BrowserTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return """Automate browser interactions: navigate, read page content, click, type, scroll.
-Login state persists — user only needs to log in once per site.
+        return """Automate browser: navigate, read, click, type, and more. Login persists across sessions.
 
 Actions:
-- navigate: Open a URL. Returns page title.
-- snapshot: Get page content as text with interactive element refs [e1], [e2]...
-  Use this FIRST to understand the page before acting.
-- click: Click an element by ref (e.g. ref="e3"). Run snapshot first to get refs.
-- type: Type text into an input field by ref. Use clear=true to replace existing text.
-- fill: Clear and fill text in one step (more reliable than type for forms).
-- select: Select a dropdown option by ref + option text.
-- scroll: Scroll page or element. scroll_y=500 (down), scroll_y=-300 (up).
-- hover: Hover over element by ref (triggers dropdowns/tooltips).
-- drag: Drag source_ref to target_ref.
-- screenshot: Capture page image (only when snapshot is insufficient).
-- tabs: List open tabs or switch to a tab by id.
-- close: Close browser.
+- navigate: Open a URL. go_back / go_forward: history navigation.
+- snapshot: Page as text with refs [e1],[e2]... Use FIRST before acting.
+- click: Click ref. double_click=true for double-click.
+- type: Type text by ref. submit=true to press Enter. clear=true to replace.
+- fill: Clear and fill text (reliable for forms).
+- select: Select dropdown option by ref + text.
+- press_key: Press key (Enter, Escape, Tab, ArrowDown, Control+a...).
+- hover: Hover ref (triggers menus/tooltips). drag: Drag source_ref to target_ref.
+- scroll: scroll_y=500 (down), -300 (up). Supports ref for element scroll.
+- handle_dialog: Pre-set accept/dismiss for next alert/confirm/prompt.
+- upload_file: Upload files via ref (clicks input) or after clicking input manually.
+- wait_for: Wait for text/text_gone/time (seconds).
+- evaluate: Run JavaScript on the page and return result.
+- screenshot: Capture image (only when text insufficient). pdf_save: Save as PDF.
+- console: Browser console messages. network: Network requests with status codes.
+- resize: Resize viewport (width, height).
+- tabs: List/switch tabs. new_tab: Open new tab. close: Close browser.
 
-Workflow: navigate → snapshot → identify ref → click/type/select → snapshot to verify.
-Use snapshot (text) instead of screenshot (image) whenever possible."""
+Workflow: navigate → snapshot → identify ref → act → snapshot to verify.
+Prefer snapshot (text) over screenshot (image)."""
 
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -215,47 +224,100 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                 "action": {
                     "type": "string",
                     "enum": [
-                        "navigate", "snapshot", "click", "type",
-                        "select", "screenshot", "tabs", "close",
-                        "scroll", "hover", "drag", "fill",
+                        "navigate", "go_back", "go_forward",
+                        "snapshot", "click", "type", "fill",
+                        "select", "press_key", "hover", "drag", "scroll",
+                        "handle_dialog", "upload_file", "wait_for",
+                        "evaluate", "screenshot", "pdf_save",
+                        "console", "network", "resize",
+                        "tabs", "new_tab", "close",
                     ],
                     "description": "Browser action to perform",
                 },
                 "url": {
                     "type": "string",
-                    "description": "URL to navigate to (navigate action)",
+                    "description": "URL (navigate/new_tab)",
                 },
                 "ref": {
                     "type": "string",
-                    "description": "Element ref from snapshot, e.g. 'e3' (click/type/select/hover/fill)",
+                    "description": "Element ref from snapshot, e.g. 'e3'",
                 },
                 "text": {
                     "type": "string",
-                    "description": "Text to type (type action), option to select (select action), or text to fill (fill action)",
+                    "description": "Text to type/fill/select, or text to wait for (wait_for)",
                 },
                 "clear": {
                     "type": "boolean",
-                    "description": "Clear existing text before typing (type action, default false)",
+                    "description": "Clear before typing (type, default false)",
+                },
+                "submit": {
+                    "type": "boolean",
+                    "description": "Press Enter after typing (type, default false)",
+                },
+                "double_click": {
+                    "type": "boolean",
+                    "description": "Double-click (click, default false)",
+                },
+                "key": {
+                    "type": "string",
+                    "description": "Key to press (press_key), e.g. 'Enter', 'Escape', 'Control+a'",
+                },
+                "accept": {
+                    "type": "boolean",
+                    "description": "Accept or dismiss dialog (handle_dialog, default true)",
+                },
+                "prompt_text": {
+                    "type": "string",
+                    "description": "Text for prompt dialog (handle_dialog)",
+                },
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File paths to upload (upload_file)",
+                },
+                "text_gone": {
+                    "type": "string",
+                    "description": "Text to wait for disappearance (wait_for)",
+                },
+                "time": {
+                    "type": "number",
+                    "description": "Seconds to wait (wait_for)",
+                },
+                "expression": {
+                    "type": "string",
+                    "description": "JavaScript to evaluate (evaluate)",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Output filename (pdf_save/screenshot)",
+                },
+                "width": {
+                    "type": "number",
+                    "description": "Viewport width (resize, default 1280)",
+                },
+                "height": {
+                    "type": "number",
+                    "description": "Viewport height (resize, default 900)",
                 },
                 "tab_id": {
                     "type": "string",
-                    "description": "Tab ID to switch to (tabs action)",
+                    "description": "Tab ID to switch to (tabs)",
                 },
                 "scroll_x": {
                     "type": "number",
-                    "description": "Horizontal scroll pixels (scroll action, default 0)",
+                    "description": "Horizontal scroll pixels (scroll)",
                 },
                 "scroll_y": {
                     "type": "number",
-                    "description": "Vertical scroll pixels (scroll action, positive=down negative=up, default 300)",
+                    "description": "Vertical scroll pixels (scroll, positive=down)",
                 },
                 "source_ref": {
                     "type": "string",
-                    "description": "Source element ref for drag action",
+                    "description": "Source element ref (drag)",
                 },
                 "target_ref": {
                     "type": "string",
-                    "description": "Target element ref for drag action",
+                    "description": "Target element ref (drag)",
                 },
             },
             "required": ["action"],
@@ -263,31 +325,25 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
 
     # ==================== Lifecycle ====================
 
-    # Browser detection order:
-    #   1. Google Chrome  (channel="chrome")   — most users have it
-    #   2. Microsoft Edge (channel="msedge")   — pre-installed on Windows
-    #   3. Bundled Chromium (no channel)       — fallback, requires download
-    #
-    # Safari/WebKit: Playwright's WebKit is a custom build, not real Safari.
-    # We skip it — Chrome/Edge cover 95%+ of users on both macOS and Windows.
+    # Browser detection: Chrome → Edge.
+    # macOS/Linux users almost always have Chrome; Windows ships with Edge.
+    # No auto-download of Chromium — users should install Chrome or Edge.
 
     _BROWSER_CANDIDATES = [
         {"channel": "chrome", "label": "Google Chrome"},
         {"channel": "msedge", "label": "Microsoft Edge"},
-        {"channel": None, "label": "Chromium (bundled)"},
     ]
 
     async def _detect_browser(self) -> Optional[Dict[str, Any]]:
         """
-        Detect the best available browser.
+        Detect the best available browser (Chrome or Edge).
 
-        Tries Chrome → Edge → bundled Chromium, returns the first that launches.
         Result is cached for the process lifetime.
         """
         if hasattr(self, "_detected_browser") and self._detected_browser:
             return self._detected_browser
 
-        from playwright.async_api import async_playwright
+        from playwright.async_api import async_playwright  # type: ignore[import-untyped]
 
         pw = await async_playwright().start()
         try:
@@ -309,59 +365,6 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
             return None
         finally:
             await pw.stop()
-
-    async def _auto_install_chromium(self) -> bool:
-        """
-        Auto-install bundled Chromium as last resort.
-
-        Returns True on success.
-        """
-        try:
-            # Use subprocess.run in thread-pool for Windows compatibility
-            # (asyncio.create_subprocess_exec may raise NotImplementedError
-            #  on Windows SelectorEventLoop)
-            from utils.subprocess_env import make_clean_env
-            clean_env = make_clean_env()
-
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "playwright", "install", "chromium",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=clean_env,
-                )
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
-                rc, err_text = proc.returncode, stderr.decode()[:500]
-            except NotImplementedError:
-                import subprocess as _sp
-
-                def _run():
-                    return _sp.run(
-                        ["playwright", "install", "chromium"],
-                        capture_output=True, timeout=180,
-                        env=clean_env,
-                    )
-
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(None, _run)
-                rc, err_text = result.returncode, result.stderr.decode()[:500]
-
-            if rc == 0:
-                logger.info("Chromium auto-installed successfully")
-                return True
-            logger.warning(
-                f"Chromium auto-install failed (rc={rc}): {err_text}"
-            )
-            return False
-        except FileNotFoundError:
-            logger.warning("playwright CLI not found in PATH")
-            return False
-        except asyncio.TimeoutError:
-            logger.warning("Chromium auto-install timed out (180s)")
-            return False
-        except Exception as e:
-            logger.warning(f"Chromium auto-install error: {e}")
-            return False
 
     def _get_profile_dir(self) -> str:
         """
@@ -403,7 +406,9 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
 
         Uses launch_persistent_context with a dedicated profile directory
         so that cookies/login sessions persist across agent sessions.
-        Detection order: Chrome → Edge → bundled Chromium → auto-install Chromium.
+        Detection order: Chrome → Edge.
+
+        Raises RuntimeError if playwright is missing or no browser is found.
         """
         if self._is_alive():
             return
@@ -413,38 +418,23 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                 return
 
             try:
-                import playwright  # noqa: F401
+                import playwright  # noqa: F401  # type: ignore[import-untyped]
             except ImportError:
-                from core.tool.types import ToolError, ToolErrorType
-                return ToolError(
-                    error_type=ToolErrorType.DEPENDENCY_MISSING,
-                    message="playwright package not installed",
-                    recovery_hint="pip install playwright && playwright install chromium",
-                ).to_dict()
+                raise RuntimeError(
+                    "playwright package not installed. "
+                    "Run: pip install playwright"
+                )
 
             candidate = await self._detect_browser()
 
             if not candidate:
-                logger.info(
-                    "No Chrome/Edge/Chromium found. "
-                    "Attempting Chromium auto-install..."
+                raise RuntimeError(
+                    "No browser found. Please install Google Chrome: "
+                    "https://www.google.com/chrome/"
                 )
-                if await self._auto_install_chromium():
-                    candidate = {"channel": None, "label": "Chromium (bundled)"}
-                else:
-                    from core.tool.types import ToolError, ToolErrorType
-                    return ToolError(
-                        error_type=ToolErrorType.DEPENDENCY_MISSING,
-                        message=(
-                            "No compatible browser found (Chrome, Edge, or Chromium). "
-                            "Please install Google Chrome, or run: "
-                            "playwright install chromium"
-                        ),
-                        recovery_hint="playwright install chromium",
-                    ).to_dict()
 
             try:
-                from playwright.async_api import async_playwright
+                from playwright.async_api import async_playwright  # type: ignore[import-untyped]
 
                 self._playwright = await async_playwright().start()
 
@@ -475,6 +465,57 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                 logger.error(f"Browser launch failed: {e}", exc_info=True)
                 raise
 
+    def _setup_page_listeners(self, page) -> None:
+        """Attach dialog/console/network/filechooser listeners to a page."""
+        page_id = id(page)
+        if page_id in self._listened_pages:
+            return
+        self._listened_pages.add(page_id)
+
+        async def _on_dialog(dialog):
+            info = {"type": dialog.type, "message": dialog.message[:200]}
+            if dialog.default_value:
+                info["default_value"] = dialog.default_value
+            self._dialog_history.append(info)
+            if len(self._dialog_history) > 20:
+                self._dialog_history = self._dialog_history[-20:]
+            if self._next_dialog_action:
+                action = self._next_dialog_action
+                self._next_dialog_action = None
+                if action["accept"]:
+                    await dialog.accept(action.get("prompt_text", ""))
+                else:
+                    await dialog.dismiss()
+            else:
+                await dialog.dismiss()
+
+        def _on_console(msg):
+            try:
+                text = msg.text
+            except Exception:
+                text = "(unreadable)"
+            self._console_messages.append({"type": msg.type, "text": text[:500]})
+            if len(self._console_messages) > 200:
+                self._console_messages = self._console_messages[-200:]
+
+        def _on_response(response):
+            self._network_log.append({
+                "method": response.request.method,
+                "url": response.url[:200],
+                "status": response.status,
+                "resource_type": response.request.resource_type,
+            })
+            if len(self._network_log) > 500:
+                self._network_log = self._network_log[-500:]
+
+        def _on_filechooser(file_chooser):
+            self._pending_file_chooser = file_chooser
+
+        page.on("dialog", _on_dialog)
+        page.on("console", _on_console)
+        page.on("response", _on_response)
+        page.on("filechooser", _on_filechooser)
+
     async def _get_active_page(self):
         """Get the currently active page, creating one if needed."""
         await self._ensure_browser()
@@ -482,21 +523,26 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         if self._active_tab and self._active_tab in self._pages:
             page = self._pages[self._active_tab]
             if not page.is_closed():
+                self._setup_page_listeners(page)
                 return page
 
-        # Persistent context may already have a blank page from launch
-        existing = self._context.pages if self._context else []
+        if not self._context:
+            raise RuntimeError("Browser context not initialized")
+
+        existing = self._context.pages
         if existing and not self._pages:
             page = existing[-1]
             tab_id = "tab_1"
             self._pages[tab_id] = page
             self._active_tab = tab_id
+            self._setup_page_listeners(page)
             return page
 
         page = await self._context.new_page()
         tab_id = f"tab_{len(self._pages) + 1}"
         self._pages[tab_id] = page
         self._active_tab = tab_id
+        self._setup_page_listeners(page)
         return page
 
     async def _cleanup(self) -> None:
@@ -519,6 +565,12 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
             self._pages.clear()
             self._active_tab = None
             self._ref_cache.clear()
+            self._listened_pages.clear()
+            self._dialog_history.clear()
+            self._next_dialog_action = None
+            self._console_messages.clear()
+            self._network_log.clear()
+            self._pending_file_chooser = None
 
     # ==================== Ref Resolution ====================
 
@@ -632,8 +684,10 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         page = await self._get_active_page()
         try:
             locator = self._resolve_ref(page, ref)
-            await locator.click(timeout=DEFAULT_TIMEOUT_MS)
-            # Brief wait for UI reaction
+            if params.get("double_click"):
+                await locator.dblclick(timeout=DEFAULT_TIMEOUT_MS)
+            else:
+                await locator.click(timeout=DEFAULT_TIMEOUT_MS)
             await page.wait_for_timeout(300)
             return {"success": True, "clicked": ref}
         except ValueError as e:
@@ -646,6 +700,7 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         ref = params.get("ref", "")
         text = params.get("text", "")
         clear = params.get("clear", False)
+        submit = params.get("submit", False)
 
         if not ref:
             return {"success": False, "error": "ref is required for type action"}
@@ -660,6 +715,9 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
             else:
                 await locator.click(timeout=DEFAULT_TIMEOUT_MS)
                 await locator.press_sequentially(text, delay=30)
+            if submit:
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(300)
             return {"success": True, "typed": text[:50], "ref": ref}
         except ValueError as e:
             return {"success": False, "error": str(e)}
@@ -707,15 +765,16 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         """
         page = await self._get_active_page()
         try:
-            fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="browser_")
-            os.close(fd)
+            out_path = params.get("filename")
+            if not out_path:
+                fd, out_path = tempfile.mkstemp(suffix=".png", prefix="browser_")
+                os.close(fd)
 
-            await page.screenshot(path=tmp_path, full_page=False)
+            await page.screenshot(path=out_path, full_page=False)
             return {
                 "success": True,
-                "path": tmp_path,
+                "path": out_path,
                 "hint": "Screenshot saved. Prefer snapshot (text) for most tasks.",
-                # Security: page content is untrusted external input.
                 "content_source": "external_webpage",
                 "content_trusted": False,
             }
@@ -822,6 +881,230 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         await locator.fill(text, timeout=DEFAULT_TIMEOUT_MS)
         return {"success": True, "filled": ref, "text": text}
 
+    # ==================== Advanced Actions ====================
+
+    async def _press_key(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Press a keyboard key or key combination."""
+        key = params.get("key", "")
+        if not key:
+            return {
+                "success": False,
+                "error": "key is required, e.g. 'Enter', 'Escape', 'Control+a'",
+            }
+        page = await self._get_active_page()
+        try:
+            await page.keyboard.press(key)
+            return {"success": True, "pressed": key}
+        except Exception as e:
+            return {"success": False, "error": f"Press key failed: {e}"}
+
+    async def _handle_dialog(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Pre-set handler for the next browser dialog (alert/confirm/prompt).
+
+        Dialogs are auto-dismissed by default. Call this BEFORE the action
+        that triggers the dialog to control accept/dismiss behavior.
+        """
+        accept = params.get("accept", True)
+        prompt_text = params.get("prompt_text", "")
+        self._next_dialog_action = {"accept": accept, "prompt_text": prompt_text}
+        return {
+            "success": True,
+            "handler_set": "accept" if accept else "dismiss",
+            "recent_dialogs": self._dialog_history[-3:],
+        }
+
+    async def _upload_file(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Upload files to a file input element.
+
+        Two patterns supported:
+          1. Provide ref → clicks the file input and uploads in one step.
+          2. Click a file input first, then call upload_file with just paths.
+        """
+        paths = params.get("paths", [])
+        ref = params.get("ref")
+        page = await self._get_active_page()
+
+        try:
+            if self._pending_file_chooser:
+                fc = self._pending_file_chooser
+                self._pending_file_chooser = None
+                await fc.set_files(paths if paths else [])
+                names = [os.path.basename(p) for p in paths]
+                return {"success": True, "uploaded": names}
+
+            if ref:
+                locator = self._resolve_ref(page, ref)
+                async with page.expect_file_chooser(
+                    timeout=DEFAULT_TIMEOUT_MS
+                ) as fc_info:
+                    await locator.click(timeout=DEFAULT_TIMEOUT_MS)
+                fc = await fc_info.value
+                await fc.set_files(paths if paths else [])
+                names = [os.path.basename(p) for p in paths]
+                return {"success": True, "uploaded": names}
+
+            return {
+                "success": False,
+                "error": (
+                    "No file chooser pending. Provide ref to click a file input, "
+                    "or click it first then call upload_file."
+                ),
+            }
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"File upload failed: {e}"}
+
+    async def _wait_for(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Wait for text to appear/disappear, or a specified time."""
+        text = params.get("text")
+        text_gone = params.get("text_gone")
+        time_s = params.get("time")
+        page = await self._get_active_page()
+
+        try:
+            if time_s is not None:
+                ms = int(float(time_s) * 1000)
+                await page.wait_for_timeout(ms)
+                return {"success": True, "waited_seconds": time_s}
+            if text:
+                await page.get_by_text(text).wait_for(
+                    state="visible", timeout=30000
+                )
+                return {"success": True, "text_found": text}
+            if text_gone:
+                await page.get_by_text(text_gone).wait_for(
+                    state="hidden", timeout=30000
+                )
+                return {"success": True, "text_gone": text_gone}
+            return {
+                "success": False,
+                "error": "Provide text, text_gone, or time",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Wait failed: {e}"}
+
+    async def _go_back(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Navigate back in browser history."""
+        page = await self._get_active_page()
+        try:
+            await page.go_back(timeout=30000, wait_until="domcontentloaded")
+            await page.wait_for_timeout(500)
+            return {
+                "success": True,
+                "title": await page.title(),
+                "url": page.url,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Go back failed: {e}"}
+
+    async def _go_forward(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Navigate forward in browser history."""
+        page = await self._get_active_page()
+        try:
+            await page.go_forward(timeout=30000, wait_until="domcontentloaded")
+            await page.wait_for_timeout(500)
+            return {
+                "success": True,
+                "title": await page.title(),
+                "url": page.url,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Go forward failed: {e}"}
+
+    async def _console(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return collected browser console messages."""
+        recent = self._console_messages[-50:]
+        return {
+            "success": True,
+            "messages": recent,
+            "total": len(self._console_messages),
+        }
+
+    async def _network(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return collected network requests (excludes static resources)."""
+        static_types = {"image", "font", "media", "stylesheet"}
+        filtered = [
+            r for r in self._network_log
+            if r.get("resource_type") not in static_types
+        ]
+        recent = filtered[-50:]
+        return {
+            "success": True,
+            "requests": recent,
+            "total": len(filtered),
+        }
+
+    async def _pdf_save(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Save the current page as PDF."""
+        page = await self._get_active_page()
+        out_path = params.get("filename")
+        try:
+            if not out_path:
+                fd, out_path = tempfile.mkstemp(suffix=".pdf", prefix="browser_")
+                os.close(fd)
+            await page.pdf(path=out_path)
+            return {"success": True, "path": out_path}
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"PDF save failed: {e}. PDF requires headless mode (Chrome).",
+            }
+
+    async def _resize(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Resize the browser viewport."""
+        width = int(params.get("width", 1280))
+        height = int(params.get("height", 900))
+        page = await self._get_active_page()
+        try:
+            await page.set_viewport_size({"width": width, "height": height})
+            return {"success": True, "viewport": {"width": width, "height": height}}
+        except Exception as e:
+            return {"success": False, "error": f"Resize failed: {e}"}
+
+    async def _evaluate(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute JavaScript on the page and return the result."""
+        expression = params.get("expression", "")
+        if not expression:
+            return {"success": False, "error": "expression is required"}
+        page = await self._get_active_page()
+        try:
+            result = await page.evaluate(expression)
+            result_str = str(result)
+            if len(result_str) > 3000:
+                result_str = result_str[:3000] + "\n[...TRUNCATED]"
+            return {"success": True, "result": result_str}
+        except Exception as e:
+            return {"success": False, "error": f"Evaluate failed: {e}"}
+
+    async def _new_tab(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Open a new browser tab, optionally navigating to a URL."""
+        url = params.get("url", "about:blank")
+        if url != "about:blank" and not url.startswith(
+            ("http://", "https://", "file://")
+        ):
+            url = f"https://{url}"
+        try:
+            await self._ensure_browser()
+            if not self._context:
+                return {"success": False, "error": "Browser context not available"}
+            page = await self._context.new_page()
+            tab_id = f"tab_{len(self._pages) + 1}"
+            self._pages[tab_id] = page
+            self._active_tab = tab_id
+            self._setup_page_listeners(page)
+            if url != "about:blank":
+                await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            title = await page.title()
+            return {
+                "success": True,
+                "tab_id": tab_id,
+                "title": title,
+                "url": page.url,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"New tab failed: {e}"}
+
     # ==================== Main Dispatch ====================
 
     async def execute(
@@ -831,17 +1114,29 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
 
         dispatch = {
             "navigate": self._navigate,
+            "go_back": self._go_back,
+            "go_forward": self._go_forward,
             "snapshot": self._snapshot,
             "click": self._click,
             "type": self._type,
+            "fill": self._fill,
             "select": self._select,
-            "screenshot": self._screenshot,
-            "tabs": self._tabs,
-            "close": self._close,
-            "scroll": self._scroll,
+            "press_key": self._press_key,
             "hover": self._hover,
             "drag": self._drag,
-            "fill": self._fill,
+            "scroll": self._scroll,
+            "handle_dialog": self._handle_dialog,
+            "upload_file": self._upload_file,
+            "wait_for": self._wait_for,
+            "evaluate": self._evaluate,
+            "screenshot": self._screenshot,
+            "pdf_save": self._pdf_save,
+            "console": self._console,
+            "network": self._network,
+            "resize": self._resize,
+            "tabs": self._tabs,
+            "new_tab": self._new_tab,
+            "close": self._close,
         }
 
         handler = dispatch.get(action)
@@ -861,7 +1156,7 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
                     "success": False,
                     "error": err_msg,
                     "needs_install": True,
-                    "install_command": "pip install playwright && playwright install chromium",
+                    "install_command": "pip install playwright",
                 }
             return {"success": False, "error": err_msg}
         except Exception as e:
