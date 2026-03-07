@@ -26,7 +26,10 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from core.prompt.instance_cache import InstancePromptCache
 
 import aiofiles
 import yaml
@@ -903,6 +906,32 @@ class AgentRegistry:
         self._configs[agent_id] = agent_config
 
         logger.info(f"✅ Agent '{agent_id}' 加载完成 (耗时 {load_time_ms:.0f}ms)")
+
+        if prompt_cache.needs_background_update:
+            asyncio.create_task(
+                self._background_regenerate_prompt_cache(
+                    agent_id, prompt_cache, config.raw_config
+                )
+            )
+
+    async def _background_regenerate_prompt_cache(
+        self,
+        agent_id: str,
+        prompt_cache: "InstancePromptCache",
+        raw_config: Optional[Dict[str, Any]],
+    ) -> None:
+        """Run prompt_results regeneration in background after startup."""
+        try:
+            success = await prompt_cache.background_regenerate(config=raw_config)
+            if success:
+                logger.info(
+                    f"🔄 [后台] Agent '{agent_id}' prompt_cache 已热更新"
+                )
+        except Exception as e:
+            logger.error(
+                f"❌ [后台] Agent '{agent_id}' prompt_cache 更新失败: {e}",
+                exc_info=True,
+            )
 
     async def _try_on_demand_load(self, agent_id: str) -> bool:
         """

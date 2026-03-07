@@ -284,6 +284,8 @@ class InstancePromptCache:
 
         # 加载状态
         self.is_loaded: bool = False
+        self.needs_background_update: bool = False
+        self._pending_regen_flags: Optional[Dict[str, bool]] = None
         self._load_lock = asyncio.Lock()
 
         # 🆕 V5.0: 持久化存储后端
@@ -430,38 +432,67 @@ class InstancePromptCache:
                     self.metrics.disk_misses += 1
                     logger.debug(f"📁 磁盘缓存未命中或已失效")
 
-            # 缓存未命中，执行 LLM 分解任务
+            # 缓存未命中，使用 fallback 立即启动，后台异步生成
             self.metrics.cache_misses += 1
-            logger.info(f"🔄 开始 LLM 场景化分解: {self.instance_name}")
 
-            try:
-                # 🆕 V5.5: 分解 LLM 任务生成场景化提示词
-                llm_start = time.time()
-                await self._generate_decomposed_prompts(raw_prompt, config, progress_callback)
-                self.metrics.llm_analysis_time_ms = (time.time() - llm_start) * 1000
+            logger.info(
+                f"⚡ 缓存未命中，使用 fallback 快速启动: {self.instance_name}"
+            )
+            await self._load_fallback(raw_prompt)
+            self.needs_background_update = True
+            self._pending_regen_flags = None
+            self.metrics.load_time_ms = (time.time() - start_time) * 1000
+            return True
 
-                self.is_loaded = True
-                self.metrics.load_time_ms = (time.time() - start_time) * 1000
+    async def background_regenerate(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Background regeneration: called after startup to update stale cache.
 
-                # 🆕 V5.5: 写入 prompt_results/ 供运营查看
-                if self._prompt_results_writer:
-                    await self._save_to_prompt_results()
+        Runs LLM decomposition, writes results to disk, and clears
+        the needs_background_update flag. Safe to call concurrently
+        with normal agent operations (old cache remains usable).
+        """
+        if not self.needs_background_update:
+            return True
 
-                # 🆕 V5.0: 同时写入 .cache/ 磁盘缓存
-                if self._storage_backend:
-                    await self._save_to_disk(combined_hash)
+        raw_prompt = self._raw_prompt
+        if not raw_prompt:
+            logger.warning(f"⚠️ 后台更新跳过（无原始提示词）: {self.instance_name}")
+            return False
 
-                logger.info(f"✅ InstancePromptCache 加载完成: {self.instance_name}")
-                logger.info(f"   LLM 分解生成: {self.metrics.llm_analysis_time_ms:.0f}ms")
-                logger.info(f"   总耗时: {self.metrics.load_time_ms:.0f}ms")
+        logger.info(f"🔄 [后台] 开始 LLM 场景化分解: {self.instance_name}")
+        try:
+            llm_start = time.time()
+            await self._generate_decomposed_prompts(raw_prompt, config)
+            elapsed = (time.time() - llm_start) * 1000
 
-                return True
+            if self._prompt_results_writer:
+                await self._save_to_prompt_results()
 
-            except Exception as e:
-                logger.error(f"❌ 加载 InstancePromptCache 失败: {e}", exc_info=True)
-                # 使用 fallback
-                await self._load_fallback(raw_prompt)
-                return False
+            prompt_hash = self._compute_hash(raw_prompt)
+            config_hash = self._compute_hash(json.dumps(config or {}, sort_keys=True))
+            combined_hash = self._compute_hash(prompt_hash + config_hash)
+            if self._storage_backend:
+                await self._save_to_disk(combined_hash)
+
+            self.needs_background_update = False
+            self._pending_regen_flags = None
+
+            logger.info(
+                f"✅ [后台] prompt_results 更新完成: {self.instance_name} "
+                f"({elapsed:.0f}ms)"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"❌ [后台] prompt_results 更新失败: {self.instance_name}: {e}",
+                exc_info=True,
+            )
+            return False
 
     # ============================================================
     # 🆕 V5.5: prompt_results/ 目录加载和保存
@@ -491,15 +522,18 @@ class InstancePromptCache:
                     logger.debug(f"📂 从 prompt_results/ 加载完成（无需更新）")
                     return True
 
-            # 如果部分文件需要重新生成，先加载现有的（保护手动编辑的）
+            # 部分文件需要重新生成：加载全部旧缓存，标记后台更新
             if self._prompt_results_writer.is_valid():
                 existing = await self._prompt_results_writer.load_existing()
                 if existing:
-                    # 只加载不需要重新生成的部分
-                    self._load_partial_from_prompt_results(existing, regen_flags)
-                    logger.debug(f"📂 从 prompt_results/ 部分加载（需要更新部分文件）")
-                    # 返回 False 触发重新生成缺失的部分
-                    return False
+                    self._load_from_prompt_results(existing)
+                    self.needs_background_update = True
+                    self._pending_regen_flags = regen_flags
+                    stale_keys = [k for k, v in regen_flags.items() if v]
+                    logger.info(
+                        f"📂 从 prompt_results/ 加载旧缓存（后台更新: {stale_keys}）"
+                    )
+                    return True
 
             return False
 
