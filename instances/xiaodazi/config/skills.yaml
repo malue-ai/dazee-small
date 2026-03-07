@@ -220,7 +220,7 @@ skills:
     lightweight:
       - { name: code-sandbox,        backend_type: local, skill_source: instance, description: "安全代码沙箱：在 Docker/E2B 隔离环境中执行 AI 生成的代码，保护用户系统" }
       - { name: web-scraper,         backend_type: local, skill_source: instance, python_packages: ["crawl4ai"], auto_install: true, post_install: "crawl4ai-setup", description: "Crawl4AI 高性能爬虫：Playwright 反爬 + 异步并发 + LLM 优化 Markdown (59k Stars, 完全免费)" }
-      - { name: browser,             backend_type: tool,  tool_name: browser, skill_source: library, python_packages: ["playwright"], description: "Playwright browser automation: navigate, snapshot, click/type by ref" }
+      - { name: browser,             backend_type: tool,  tool_name: browser, skill_source: library, python_packages: ["playwright"], description: "Playwright browser automation: navigate, snapshot, click/type/key/dialog/upload/evaluate/console/network/PDF" }
       - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
       - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }
       - { name: excel-fixer,         backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel 格式自动修复" }

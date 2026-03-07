@@ -579,6 +579,7 @@ capabilities:
   capabilities:
     - web_interaction
     - browser_automation
+    - browser_debugging
   priority: 80
   cost:
     time: fast
@@ -587,30 +588,52 @@ capabilities:
     requires_api: false
   metadata:
     description: |
-      Playwright browser automation: navigate, text snapshot, click/type by ref.
+      Playwright browser automation: navigate, text snapshot, click/type by ref,
+      keyboard, dialogs, file upload, JS eval, console/network debug, PDF export.
       For web pages. Desktop apps use observe_screen + peekaboo instead.
   input_schema:
     type: object
     properties:
       action:
         type: string
-        enum: [navigate, snapshot, click, type, select, screenshot, tabs, close]
+        enum: [navigate, go_back, go_forward, snapshot, click, type, fill,
+               select, press_key, hover, drag, scroll, handle_dialog,
+               upload_file, wait_for, evaluate, screenshot, pdf_save,
+               console, network, resize, tabs, new_tab, close]
         description: Browser action to perform
       url:
         type: string
-        description: URL to navigate to (navigate action)
+        description: URL (navigate/new_tab)
       ref:
         type: string
-        description: Element ref from snapshot, e.g. 'e3' (click/type/select)
+        description: Element ref from snapshot, e.g. 'e3'
       text:
         type: string
-        description: Text to type or option to select
+        description: Text to type/fill/select, or text to wait for
       clear:
         type: boolean
-        description: Clear field before typing (type action, default false)
+        description: Clear before typing (type, default false)
+      submit:
+        type: boolean
+        description: Press Enter after typing (type, default false)
+      double_click:
+        type: boolean
+        description: Double-click (click, default false)
+      key:
+        type: string
+        description: Key to press (press_key), e.g. 'Enter', 'Escape'
+      accept:
+        type: boolean
+        description: Accept/dismiss dialog (handle_dialog, default true)
+      paths:
+        type: array
+        description: File paths to upload (upload_file)
+      expression:
+        type: string
+        description: JavaScript to evaluate (evaluate)
       tab_id:
         type: string
-        description: Tab ID to switch to (tabs action)
+        description: Tab ID to switch to (tabs)
     required: [action]
 
 - name: observe_screen
