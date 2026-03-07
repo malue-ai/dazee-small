@@ -141,8 +141,7 @@ async def _preload_capability_registry() -> None:
         await registry.initialize()
         print(f"✅ 已加载 {len(registry.capabilities)} 个工具能力")
     except Exception as e:
-        print(f"❌ 工具注册表加载失败: {e}", flush=True)
-        raise
+        print(f"❌ 工具注册表加载失败（服务仍可启动，但工具不可用）: {e}", flush=True)
 
 
 def _is_hash_instance(name: str) -> bool:
@@ -424,8 +423,11 @@ async def lifespan(app: FastAPI):
             from utils.app_paths import get_instances_dir
             print(f"📦 首次启动：已初始化实例目录 → {get_instances_dir()}")
     
-    from utils.dependency_registry import log_dependency_report
-    log_dependency_report()
+    try:
+        from utils.dependency_registry import log_dependency_report
+        log_dependency_report()
+    except Exception as e:
+        print(f"⚠️ 依赖检查跳过: {e}")
 
     await _init_resilience_config()
     await _init_local_store()
