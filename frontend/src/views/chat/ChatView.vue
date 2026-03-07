@@ -848,8 +848,8 @@ async function initTauriDragDrop() {
                 const lastSep = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
                 const fileName = lastSep >= 0 ? p.substring(lastSep + 1) : p
 
-                // 读取文件为 base64
-                const base64Data = await invoke<string>('read_local_file_binary', { path: p })
+                // 读取文件为 base64（提升限制至 50MB，与 nginx client_max_body_size 对齐）
+                const base64Data = await invoke<string>('read_local_file_binary', { path: p, maxSize: 50_000_000 })
                 const binaryStr = atob(base64Data)
                 const bytes = new Uint8Array(binaryStr.length)
                 for (let i = 0; i < binaryStr.length; i++) {
@@ -958,6 +958,10 @@ watch(() => route.params.agentId, async (newAgentId, oldAgentId) => {
         // 新项目没有历史会话，清空聊天区域
         conversationStore.reset()
       }
+
+      // 切换项目后强制滚动到底部
+      await nextTick()
+      messageListRef.value?.scrollToBottom(true)
     }
   } else {
     agentStore.reset()
@@ -1191,6 +1195,10 @@ async function handleSelectAgent(selectedAgentId: string): Promise<void> {
       conversationStore.reset()
       router.push({ name: 'agent', params: { agentId: selectedAgentId } })
     }
+
+    // 切换项目后强制滚动到底部
+    await nextTick()
+    messageListRef.value?.scrollToBottom(true)
   } catch (error) {
     console.warn('⚠️ 加载项目失败:', error)
     await agentStore.fetchList()
@@ -1385,8 +1393,8 @@ async function handleWorkspaceFileDropped(fileInfo: { path: string; name: string
 
   fileUpload.isUploading.value = true
   try {
-    // 通过 Tauri 读取本地文件为 base64
-    const base64Data = await invoke<string>('read_local_file_binary', { path: fileInfo.path })
+    // 通过 Tauri 读取本地文件为 base64（提升限制至 50MB，与 nginx client_max_body_size 对齐）
+    const base64Data = await invoke<string>('read_local_file_binary', { path: fileInfo.path, maxSize: 50_000_000 })
 
     // 解码 base64 为二进制
     const binaryStr = atob(base64Data)

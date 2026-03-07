@@ -267,9 +267,10 @@ excludes = [
     'pyinstaller', 'PyInstaller',
 
     # 构建/包管理工具（运行时不需要）
-    # pkg_resources 依赖 jaraco.text（setuptools 80.x），项目代码不使用，直接排除
     # 注意：保留 setuptools（Python 3.12 的 distutils 来自 setuptools）
-    'pkg_resources', 'jaraco',
+    # 注意：不排除 jaraco（setuptools 80.x 的命名空间包），PyInstaller 的 setuptools
+    #       hook 需要在分析阶段为其创建别名，排除会导致 ValueError 冲突
+    'pkg_resources',
     'pip', '_distutils_hack',
     'ensurepip', 'venv',
 
