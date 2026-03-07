@@ -171,10 +171,19 @@ class SkillPromptBuilder:
 **需安装的 Skill（description 含 [需安装: ...]）：**
 1. 先用 hitl 工具请求用户确认安装（说明安装什么、为什么需要）
 2. 用户同意 → 用 nodes 执行安装命令（如 pip install xxx），然后正常使用
-3. 用户拒绝 → 放弃该 Skill，寻找替代方案完成任务（如用 browser 工具、用 nodes 执行 httpx 等轻量方案）
+3. 用户拒绝 → 放弃该 Skill，寻找替代方案完成任务（如用 browser 工具、用 nodes 执行 curl 或 Python 标准库方案）
 
 **Skill 执行失败且原因是依赖缺失时：**
 不要直接跳到替代方案。先用 hitl 工具告知用户缺失了什么依赖并询问是否安装，用户同意后安装并重试，用户拒绝后再寻找替代方案。
+
+**通过 nodes 执行 Python 脚本时的依赖规则：**
+- nodes 在用户机器上使用系统 Python 执行，**不是**项目虚拟环境，第三方包（httpx、requests 等）通常不可用
+- 优先使用 Python 标准库：`urllib.request`（HTTP）、`json`、`os`、`subprocess`、`pathlib` 等
+- 需要第三方包时，必须先通过 hitl 询问用户是否同意安装
+
+**通过 nodes 调用本地 API 时：**
+- 本地服务（127.0.0.1:18900）不需要认证，直接发送请求，不要调用 auth/token 端点
+- 使用 curl 或 Python urllib 发起请求，不要依赖 httpx
 
 **用户提到的 Skill 不在 `<available_skills>` 中时：**
 不要说"找不到"或编造替代方案。尝试用 nodes 工具读取 `{skills_path}/{{skill-name}}/SKILL.md`（将 skill-name 替换为用户提到的名称）。如果文件存在，按其中的指引执行；如果文件不存在，用 hitl 工具告知用户该 Skill 未安装，询问是否需要用其他方式完成任务。
@@ -232,10 +241,19 @@ Scan `<available_skills>` `<description>` entries, choose the best match.
 **Skills requiring setup (description contains [needs setup: ...]):**
 1. Use hitl tool to ask user to confirm installation (explain what and why)
 2. User approves → run install command via nodes (e.g. pip install xxx), then use normally
-3. User declines → abandon that Skill, find alternative approaches (e.g. browser tool, httpx via nodes)
+3. User declines → abandon that Skill, find alternative approaches (e.g. browser tool, curl or Python stdlib via nodes)
 
 **Skill execution fails due to missing dependency:**
 Do NOT jump to alternatives immediately. First use hitl tool to inform user what dependency is missing and ask whether to install. Install and retry if approved, find alternatives only if declined.
+
+**Dependency rules when running Python scripts via nodes:**
+- nodes uses the system Python on the user's machine, NOT the project virtualenv — third-party packages (httpx, requests, etc.) are usually unavailable
+- Prefer Python standard library: `urllib.request` (HTTP), `json`, `os`, `subprocess`, `pathlib`, etc.
+- If a third-party package is needed, ask user via hitl before installing
+
+**When calling local API via nodes:**
+- Local service (127.0.0.1:18900) requires NO authentication — send requests directly, do NOT call auth/token endpoints
+- Use curl or Python urllib for requests, do NOT depend on httpx
 
 **User mentions a Skill not in `<available_skills>`:**
 Do NOT say "not found" or make up alternatives. Try reading `{skills_path}/{{skill-name}}/SKILL.md` via nodes tool (replace skill-name with what user mentioned). If the file exists, follow its instructions; if not, use hitl to inform user the Skill is not installed and ask if they want to use an alternative approach.
