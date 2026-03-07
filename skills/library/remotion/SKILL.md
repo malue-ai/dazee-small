@@ -2,6 +2,8 @@
 name: remotion
 description: 使用 React 编程方式创建视频，支持动态图表、数据可视化视频、产品演示与教学视频
 homepage: https://remotion.dev
+capabilities: [video_production, data_visualization]
+
 ---
 
 # Remotion Skill

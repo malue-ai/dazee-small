@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     bins: ["magick"]
+capabilities: [image_processing, image_editing]
+
 ---
 
 # 图片处理（ImageMagick）

@@ -2,6 +2,8 @@
 name: slidespeak-slide-editor
 description: Edit slides in existing SlideSpeak presentations - insert, regenerate, or remove slides using AI
 priority: high
+capabilities: [ppt_generation, presentation]
+
 ---
 
 # SlideSpeak Slide Editor

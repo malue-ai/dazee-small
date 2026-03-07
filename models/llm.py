@@ -83,10 +83,12 @@ class ModelRegisterRequest(BaseModel):
     display_name: Optional[str] = Field(None, description="显示名称")
     description: Optional[str] = Field(None, description="模型描述")
     capabilities: ModelCapabilitiesRequest = Field(
-        default_factory=ModelCapabilitiesRequest, description="模型能力配置"
+        default_factory=ModelCapabilitiesRequest,  # type: ignore[arg-type]
+        description="模型能力配置",
     )
     pricing: ModelPricingRequest = Field(
-        default_factory=ModelPricingRequest, description="定价信息"
+        default_factory=ModelPricingRequest,  # type: ignore[arg-type]
+        description="定价信息",
     )
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
@@ -124,10 +126,12 @@ class ModelActivateRequest(BaseModel):
     display_name: Optional[str] = Field(None, description="显示名称")
     description: Optional[str] = Field(None, description="模型描述")
     capabilities: ModelCapabilitiesRequest = Field(
-        default_factory=ModelCapabilitiesRequest, description="模型能力（自定义模型可配置）"
+        default_factory=ModelCapabilitiesRequest,  # type: ignore[arg-type]
+        description="模型能力（自定义模型可配置）",
     )
     pricing: ModelPricingRequest = Field(
-        default_factory=ModelPricingRequest, description="定价信息"
+        default_factory=ModelPricingRequest,  # type: ignore[arg-type]
+        description="定价信息",
     )
 
 
@@ -238,4 +242,8 @@ class ProviderValidateKeyResponse(BaseModel):
     model_details: List[ValidatedModelInfo] = Field(
         default_factory=list,
         description="匹配目录后的模型详情（含能力、上下文窗口）",
+    )
+    detected_base_url: Optional[str] = Field(
+        None,
+        description="自动探测到的 base_url（多端点 provider 验证时返回）",
     )

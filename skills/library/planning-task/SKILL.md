@@ -9,6 +9,8 @@ metadata:
     - task breakdown
     - work organization
     - multi-step tasks
+capabilities: [task_planning, project_management]
+
 ---
 
 # Task Planning Skill

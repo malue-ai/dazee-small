@@ -92,8 +92,8 @@ class SqliteVecVectorStore(VectorStoreBase):
 
     def __init__(
         self,
-        collection_name: str = "mem0_memories",
-        embedding_model_dims: int = 1536,
+        collection_name: str,
+        embedding_model_dims: int,
         db_path: Optional[str] = None,
     ):
         self.collection_name = collection_name
@@ -267,21 +267,21 @@ class SqliteVecVectorStore(VectorStoreBase):
             return []
 
         try:
-            # CJK 单字分词 + 转义
-            segmented = _cjk_segmenter(query.strip())
+            import re
+
+            cleaned = re.sub(r"[^\w\s]", " ", query.strip(), flags=re.UNICODE)
+            segmented = _cjk_segmenter(cleaned)
             tokens = [t for t in segmented.split() if t.strip()]
             if not tokens:
                 return []
 
-            # 构建 FTS5 查询：token 之间空格分隔 = 隐式 AND
-            # 参考: https://www.sqlite.org/fts5.html#fts5_boolean_operators
-            fts_query = " ".join(t.replace('"', '""') for t in tokens)
+            fts_query = " ".join(tokens)
 
             results = self._execute_fts_query(fts_query, user_id, limit)
 
             # AND 无结果 → 降级为 OR（扩大召回）
             if not results and len(tokens) > 1:
-                or_query = " OR ".join(t.replace('"', '""') for t in tokens)
+                or_query = " OR ".join(tokens)
                 results = self._execute_fts_query(or_query, user_id, limit)
 
             if results:
@@ -395,6 +395,18 @@ class SqliteVecVectorStore(VectorStoreBase):
         a = abs(rank)
         return a / (1.0 + a)
 
+    @staticmethod
+    def _validate_vector(vector: List[float]) -> bool:
+        """Reject malformed vectors before they reach sqlite-vec C layer."""
+        if not vector or not isinstance(vector, (list, tuple)):
+            return False
+        for v in vector:
+            if not isinstance(v, (int, float)):
+                return False
+            if not math.isfinite(v):
+                return False
+        return True
+
     # ==================== Mem0 VectorStoreBase 接口实现 ====================
 
     def create_col(self, name: str, vector_size: int, distance: str) -> None:
@@ -433,29 +445,36 @@ class SqliteVecVectorStore(VectorStoreBase):
 
         with self._write_lock:
             for vec_id, vector, payload in zip(ids, vectors, payloads):
-                embedding_json = json.dumps(vector)
-                payload_json = json.dumps(payload, ensure_ascii=False)
+                if not self._validate_vector(vector):
+                    logger.warning(f"[SqliteVec] 跳过非法向量: id={vec_id}")
+                    continue
 
-                # 先删除再插入（幂等 upsert）
-                self._conn.execute(
-                    f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vec_id,)
-                )
-                self._conn.execute(
-                    f"INSERT INTO [{self.collection_name}](id, embedding) VALUES (?, ?)",
-                    (vec_id, embedding_json),
-                )
-                # 元数据
-                self._conn.execute(
-                    f"INSERT OR REPLACE INTO [{self.collection_name}_meta](id, payload) "
-                    f"VALUES (?, ?)",
-                    (vec_id, payload_json),
-                )
-                # 同步 FTS5 索引
-                memory_text = payload.get("data", payload.get("memory", ""))
-                user_id = payload.get("user_id", "")
-                self._sync_fts(vec_id, memory_text, user_id)
+                try:
+                    embedding_json = json.dumps(vector)
+                    payload_json = json.dumps(payload, ensure_ascii=False)
 
-            self._conn.commit()
+                    self._conn.execute(
+                        f"DELETE FROM [{self.collection_name}] WHERE id = ?", (vec_id,)
+                    )
+                    self._conn.execute(
+                        f"INSERT INTO [{self.collection_name}](id, embedding) VALUES (?, ?)",
+                        (vec_id, embedding_json),
+                    )
+                    self._conn.execute(
+                        f"INSERT OR REPLACE INTO [{self.collection_name}_meta](id, payload) "
+                        f"VALUES (?, ?)",
+                        (vec_id, payload_json),
+                    )
+                    memory_text = payload.get("data", payload.get("memory", ""))
+                    user_id = payload.get("user_id", "")
+                    self._sync_fts(vec_id, memory_text, user_id)
+                except Exception as e:
+                    logger.warning(f"[SqliteVec] 单条插入失败 (id={vec_id}): {e}")
+
+            try:
+                self._conn.commit()
+            except Exception as e:
+                logger.error(f"[SqliteVec] commit 失败: {e}")
         logger.debug(f"[SqliteVec] 插入成功: {len(vectors)} 条")
 
     def search(
@@ -479,10 +498,11 @@ class SqliteVecVectorStore(VectorStoreBase):
             if not vectors:
                 return []
 
-            # 兼容单个向量（一维）和向量列表（二维）
             query_vector = (
                 vectors[0] if vectors and isinstance(vectors[0], list) else vectors
             )
+            if not self._validate_vector(query_vector):
+                return []
             query_json = json.dumps(query_vector)
 
             # Extract user_id filter (if present) for post-KNN filtering
