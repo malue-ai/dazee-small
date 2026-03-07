@@ -277,8 +277,12 @@ class GenericFTS5:
             result = await session.execute(sa_text(sql), params)
         except Exception as e:
             error_msg = str(e).lower()
+            if "syntax error" in error_msg:
+                logger.warning(
+                    f"FTS5 查询语法错误（已 sanitize 仍残留特殊字符）: {e}"
+                )
+                return []
             if "fts5" in error_msg or "corrupt" in error_msg:
-                # FTS5 索引损坏时自动重建（面向小白用户的容错）
                 logger.warning(
                     f"FTS5 索引可能损坏，尝试自动重建: {e}"
                 )
@@ -342,17 +346,22 @@ class GenericFTS5:
         if not query or not query.strip():
             return 0
 
-        # 无 UNINDEXED 过滤时直接 SQL COUNT
         if not where:
             sanitized_query = self._sanitize_query(query)
+            if not sanitized_query:
+                return 0
             sql = (
                 f"SELECT COUNT(*) FROM {config.table_name} "
                 f"WHERE {config.table_name} MATCH :query"
             )
-            result = await session.execute(
-                sa_text(sql), {"query": sanitized_query}
-            )
-            return result.scalar() or 0
+            try:
+                result = await session.execute(
+                    sa_text(sql), {"query": sanitized_query}
+                )
+                return result.scalar() or 0
+            except Exception as e:
+                logger.warning(f"FTS5 count 失败: {e}")
+                return 0
 
         # 有 UNINDEXED 列过滤时走 search() + len()（Python 后过滤兼容性）
         hits = await self.search(
@@ -486,26 +495,33 @@ class GenericFTS5:
     # FTS5 查询最大 token 数（超出截断，避免超长系统上下文/文件内容传入 FTS5）
     _MAX_QUERY_TOKENS: int = 30
 
+    # 白名单：只允许 Unicode 字母/数字/下划线 和空格通过 FTS5 MATCH
+    # 这比黑名单安全得多 — 黑名单永远有遗漏风险，白名单不会
+    _SAFE_CHAR_RE = None  # lazy compile
+
+    @staticmethod
+    def _get_safe_char_re():
+        if GenericFTS5._SAFE_CHAR_RE is None:
+            import re
+            GenericFTS5._SAFE_CHAR_RE = re.compile(r"[^\w\s]", re.UNICODE)
+        return GenericFTS5._SAFE_CHAR_RE
+
     @staticmethod
     def _sanitize_query(query: str) -> str:
         """
-        预处理 FTS5 查询字符串（面向非技术用户的安全处理）
+        预处理 FTS5 查询字符串（白名单 + 兜底）
 
-        SQLite FTS5 特殊字符（* ^ ( ) : "）如果被用户误输入会导致查询报错，
-        对于面向小白用户的桌面应用需要主动防御。
-
-        策略：
-        1. 截断超长查询（防止系统上下文/完整文件内容灌入 FTS5）
-        2. 无条件移除所有 FTS5 特殊字符（安全第一）
-        3. CJK 字符级分割（与索引时一致）
-        4. 保留用户显式使用的 AND/OR/NOT
+        策略（防御纵深）：
+        1. 白名单过滤：只保留 Unicode 字母/数字/下划线/空格，其他全部删除
+        2. CJK 字符级分割（与索引时一致）
+        3. 保留用户显式使用的 AND/OR/NOT
+        4. 截断超长查询
         5. 多词用 OR 连接（提高召回率）
 
-        Args:
-            query: 原始查询（用户输入的自然语言）
-
-        Returns:
-            FTS5 安全查询字符串
+        安全保证：
+        - FTS5 所有保留字符（* ^ ( ) " ' ` ~ : + - [ ] { } 等）被白名单拦截
+        - 即使出现未知的 FTS5 语法字符，白名单也会拦截
+        - 到达 SQLite C 层的查询只包含 word chars + spaces + AND/OR/NOT
         """
         import re
 
@@ -513,41 +529,32 @@ class GenericFTS5:
         if not query:
             return query
 
-        # 检测用户是否显式使用了 FTS5 布尔操作符
         has_bool_op = any(
             op in query.upper()
             for op in (" AND ", " OR ", " NOT ")
         )
 
-        # 无条件移除 FTS5 特殊字符（安全第一，不做短语搜索猜测）
-        # - * ^ ( ) [ ] { } : " + \ 是 FTS5 查询语法的保留字符
-        # - `-` 在 FTS5 中等价于 NOT，必须移除
-        # - `/` 不是 FTS5 语法字符但会产生无意义 token（如 Asia/Shanghai → Asia Shanghai）
-        # - `.` 在 FTS5 中用于列过滤/隐式短语语法，会导致 syntax error
-        #   （如时间戳 30.725Z → "fts5: syntax error near '.'"）
-        query = re.sub(r'[*^()\[\]{}:"+\\/<>\-.]', " ", query)
+        # 白名单：只保留 \w（Unicode 字母/数字/下划线）和空白
+        query = GenericFTS5._get_safe_char_re().sub(" ", query)
 
-        # 如果用户用了布尔操作符，清洗特殊字符后直接返回
         if has_bool_op:
-            return re.sub(r"\s+", " ", query).strip()
+            cleaned = re.sub(r"\s+", " ", query).strip()
+            tokens = cleaned.split()
+            if len(tokens) > GenericFTS5._MAX_QUERY_TOKENS * 2:
+                tokens = tokens[:GenericFTS5._MAX_QUERY_TOKENS * 2]
+                cleaned = " ".join(tokens)
+            return cleaned
 
-        # CJK 字符级分割（与索引时一致，确保匹配）
         query = GenericFTS5._cjk_aware_split(query)
-
-        # 合并连续空格
         query = re.sub(r"\s+", " ", query).strip()
 
         if not query:
             return ""
 
-        # 按空格分词，过滤无效 token 后用 OR 连接
-        # 无效 token：空字符串、纯标点、纯空白
         terms = [t for t in query.split() if t and re.search(r"\w", t)]
         if not terms:
             return ""
 
-        # 截断超长查询（取前 N 个有效 token）
-        # 防止系统上下文、完整文件内容等超长文本灌入 FTS5
         if len(terms) > GenericFTS5._MAX_QUERY_TOKENS:
             terms = terms[:GenericFTS5._MAX_QUERY_TOKENS]
 

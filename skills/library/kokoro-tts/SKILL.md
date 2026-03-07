@@ -7,6 +7,8 @@ metadata:
     os: [common]
     backend_type: local
     user_facing: true
+capabilities: [tts, speech_synthesis]
+
 ---
 
 # Kokoro TTS 本地语音合成

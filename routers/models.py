@@ -17,6 +17,7 @@ Models 路由层 - LLM 模型管理
 - POST /providers/validate-key → 验证 API Key
 """
 
+import asyncio
 import os
 from typing import List, Optional
 
@@ -457,12 +458,16 @@ SUPPORTED_PROVIDERS = {
     "qwen": {
         "display_name": "通义千问 (Qwen)",
         "icon": "🔵",
-        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "api_key_env": "DASHSCOPE_API_KEY",
         "api_key_url": "https://dashscope.console.aliyun.com/apiKey",
         "description": "阿里云通义千问系列，支持 Thinking 和多模态",
         "adapter": "openai",
         "validate_method": "openai",
+        "endpoints": [
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        ],
     },
     "deepseek": {
         "display_name": "DeepSeek",
@@ -655,6 +660,31 @@ async def _validate_anthropic(
         return True, "API Key 验证通过", models
 
 
+async def _validate_with_endpoint_detection(
+    endpoints: list[str],
+    api_key: str,
+    validate_fn,
+) -> tuple[bool, str, list[str], str | None]:
+    """Try multiple endpoints concurrently, return the first that succeeds.
+
+    Returns (valid, message, models, detected_endpoint).
+    ``detected_endpoint`` is ``None`` when all endpoints fail.
+    """
+    tasks = [validate_fn(ep, api_key) for ep in endpoints]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    last_message = "所有端点验证失败"
+    for ep, result in zip(endpoints, results):
+        if isinstance(result, Exception):
+            continue
+        valid, message, models = result
+        if valid:
+            return valid, message, models, ep
+        last_message = message
+
+    return False, last_message, [], None
+
+
 def _build_model_details(
     api_model_names: list[str], provider: str
 ) -> list[ValidatedModelInfo]:
@@ -732,6 +762,7 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
     meta = SUPPORTED_PROVIDERS[provider]
     base_url = request.base_url or meta["base_url"]
     validate_method = meta["validate_method"]
+    detected_base_url: str | None = None
 
     # "auto": 用户改了 base_url → openai 验证，否则 → anthropic 验证
     if validate_method == "auto":
@@ -743,7 +774,19 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
             validate_method = "anthropic"
 
     try:
-        if validate_method == "anthropic":
+        # Multi-endpoint auto-detection: when user did not specify a base_url
+        # and the provider has multiple candidate endpoints, try them all
+        # concurrently and pick the first one that succeeds.
+        endpoints = meta.get("endpoints")
+        if not request.base_url and endpoints and validate_method == "openai":
+            valid, message, models, detected_base_url = (
+                await _validate_with_endpoint_detection(
+                    endpoints, request.api_key, _validate_openai_compatible,
+                )
+            )
+            if detected_base_url:
+                base_url = detected_base_url
+        elif validate_method == "anthropic":
             valid, message, models = await _validate_anthropic(base_url, request.api_key, provider)
         else:
             valid, message, models = await _validate_openai_compatible(base_url, request.api_key)
@@ -751,7 +794,20 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
         logger.info(
             f"API Key 验证结果: provider={provider}, valid={valid}, "
             f"message={message}, models_count={len(models)}"
+            + (f", detected_endpoint={detected_base_url}" if detected_base_url else "")
         )
+
+        # When auto-detection found a working endpoint, persist it so the
+        # LLM runtime uses the same endpoint without user intervention.
+        if valid and detected_base_url:
+            base_url_env = meta.get("api_key_env", "").replace("_API_KEY", "_BASE_URL")
+            if base_url_env:
+                os.environ[base_url_env] = detected_base_url
+                try:
+                    from services.settings_service import update_settings
+                    await update_settings({base_url_env: detected_base_url})
+                except Exception:
+                    pass
 
         # Match validated model names against catalog for rich details
         model_details = _build_model_details(models, provider) if valid else []
@@ -762,6 +818,7 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
             message=message,
             models=models,
             model_details=model_details,
+            detected_base_url=detected_base_url,
         )
 
     except httpx.TimeoutException:

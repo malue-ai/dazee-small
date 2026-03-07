@@ -413,22 +413,24 @@ async def get_embedding_status() -> Dict[str, Any]:
     provider_setting = knowledge_config.get("embedding_provider", "auto")
 
     # Check local availability (GGUF preferred, sentence-transformers fallback)
+    from utils.dependency_registry import check_dependency
+
     local_available = False
     local_backend = None
-    try:
-        import llama_cpp  # noqa: F401
+
+    llama_status = check_dependency("llama_cpp")
+    if llama_status.available:
         local_available = True
         local_backend = "gguf"
-    except ImportError:
-        pass
 
     if not local_available:
-        try:
-            import sentence_transformers  # noqa: F401
+        st_status = check_dependency("sentence_transformers")
+        if st_status.available:
             local_available = True
             local_backend = "sentence-transformers"
-        except ImportError:
-            pass
+
+    hf_status = check_dependency("huggingface_hub")
+    download_available = hf_status.available and local_available
 
     # Check OpenAI availability
     openai_available = bool(os.getenv("OPENAI_API_KEY"))
@@ -461,11 +463,28 @@ async def get_embedding_status() -> Dict[str, Any]:
     if semantic_enabled and current_provider is None:
         semantic_enabled = False
 
+    # Build missing_deps list for the frontend
+    missing_deps = []
+    if not llama_status.available:
+        missing_deps.append({
+            "name": llama_status.pip_name,
+            "purpose": llama_status.purpose,
+            "install": f"pip install {llama_status.pip_name}",
+        })
+    if not hf_status.available:
+        missing_deps.append({
+            "name": hf_status.pip_name,
+            "purpose": hf_status.purpose,
+            "install": f"pip install {hf_status.pip_name}",
+        })
+
     # Recommendation for user
     if model_downloaded:
         recommendation = "本地模型已就绪，可开启语义搜索"
-    elif local_available and not model_downloaded:
+    elif download_available and not model_downloaded:
         recommendation = "依赖已安装，需要下载模型（438MB）才能使用本地语义搜索"
+    elif local_available and not hf_status.available:
+        recommendation = "缺少 huggingface-hub，无法下载模型"
     elif openai_available:
         recommendation = "可使用 OpenAI 云端语义搜索，或安装本地模型离线使用"
     else:
@@ -478,7 +497,9 @@ async def get_embedding_status() -> Dict[str, Any]:
         "local_available": local_available,
         "local_backend": local_backend,
         "model_downloaded": model_downloaded,
+        "download_available": download_available,
         "openai_available": openai_available,
+        "missing_deps": missing_deps,
         "local_install_hint": "pip install llama-cpp-python",
         "local_model_name": "BGE-M3 Q4 (GGUF)",
         "local_model_size": "438MB",
@@ -581,8 +602,31 @@ async def setup_semantic_search(mode: str) -> Dict[str, Any]:
     # Step 2: If local mode, check and download model
     if mode == "local":
         from core.knowledge.embeddings import is_gguf_model_downloaded
+        from utils.dependency_registry import check_dependency
 
         if not is_gguf_model_downloaded():
+            # Pre-flight: verify download dependencies before launching task
+            hf_check = check_dependency("huggingface_hub")
+            llama_check = check_dependency("llama_cpp")
+            preflight_errors = []
+            if not hf_check.available:
+                preflight_errors.append(
+                    f"{hf_check.pip_name} (install: pip install {hf_check.pip_name})"
+                )
+            if not llama_check.available:
+                preflight_errors.append(
+                    f"{llama_check.pip_name} (install: pip install {llama_check.pip_name})"
+                )
+            if preflight_errors:
+                return {
+                    "success": False,
+                    "mode": mode,
+                    "needs_download": True,
+                    "downloading": False,
+                    "download_result": None,
+                    "error": f"缺少依赖: {', '.join(preflight_errors)}",
+                }
+
             # Launch background download task and return immediately
             _start_background_download(mode)
             return {

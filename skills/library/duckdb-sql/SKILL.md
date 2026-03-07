@@ -8,6 +8,8 @@ metadata:
     backend_type: local
     user_facing: true
     python_packages: ["duckdb"]
+capabilities: [data_analysis, sql_query]
+
 ---
 
 # DuckDB SQL 分析引擎

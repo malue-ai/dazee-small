@@ -32,8 +32,8 @@ binaries = []
 try:
     _sv_datas, _sv_binaries, _sv_hiddenimports = collect_all('sqlite_vec')
     binaries += _sv_binaries
-except Exception:
-    pass  # sqlite-vec 未安装时跳过
+except Exception as _e:
+    print(f"  [WARN] sqlite_vec not available: {_e}")
 
 # ==================== 数据文件（只读资源）====================
 # 这些文件会被打包到临时目录，运行时通过 sys._MEIPASS 访问
@@ -134,8 +134,8 @@ for _pkg in _native_packages:
         datas += _d
         binaries += _b
         hiddenimports += _h
-    except Exception:
-        pass  # 未安装的包跳过
+    except Exception as _e:
+        print(f"  [WARN] collect_all('{_pkg}') failed: {_e}")
 
 # ==================== 隐式导入 ====================
 # 使用 collect_submodules() 自动递归收集，不再手动维护模块列表。

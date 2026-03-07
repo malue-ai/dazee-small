@@ -7,6 +7,8 @@ metadata:
     os: [common]
     backend_type: local
     user_facing: true
+capabilities: [web_search, information_retrieval]
+
 ---
 
 # Tavily AI 搜索

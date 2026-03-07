@@ -149,6 +149,7 @@ class ToolSelector:
         """
         seen: set = set()
         tags: List[str] = []
+        missing: List[str] = []
         for name in tool_names:
             cap = self.registry.get(name)
             if cap and cap.capabilities:
@@ -157,9 +158,12 @@ class ToolSelector:
                         seen.add(tag)
                         tags.append(tag)
             else:
-                logger.warning(
-                    f"工具 '{name}' 无法提取能力标签（未注册或无 capabilities 字段）"
-                )
+                missing.append(name)
+        if missing:
+            logger.debug(
+                f"{len(missing)} 个工具无 capabilities 标签: "
+                f"{', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}"
+            )
         return tags
 
     async def get_core_tools(self) -> List[str]:

@@ -20,8 +20,29 @@ from logger import get_logger
 
 logger = get_logger("local_store.vector")
 
-# 默认向量维度（与常见 embedding 模型对齐）
-DEFAULT_DIMENSIONS = 1536
+_ALLOWED_TABLE_NAMES = frozenset({
+    "message_vectors", "memory_vectors", "knowledge_vectors",
+})
+
+
+def validate_embedding(embedding: List[float], label: str = "embedding") -> bool:
+    """Validate vector before passing to sqlite-vec C layer.
+
+    Prevents SIGSEGV by rejecting malformed inputs that the C extension
+    cannot safely handle (NaN, Inf, wrong types, empty).
+    """
+    if not embedding or not isinstance(embedding, (list, tuple)):
+        logger.warning(f"[vector] {label}: empty or wrong type")
+        return False
+    import math
+    for i, v in enumerate(embedding):
+        if not isinstance(v, (int, float)):
+            logger.warning(f"[vector] {label}[{i}]: not a number ({type(v).__name__})")
+            return False
+        if not math.isfinite(v):
+            logger.warning(f"[vector] {label}[{i}]: NaN/Inf")
+            return False
+    return True
 
 
 @dataclass
@@ -35,8 +56,8 @@ class VectorSearchResult:
 
 async def create_vector_table(
     engine: AsyncEngine,
-    table_name: str = "message_vectors",
-    dimensions: int = DEFAULT_DIMENSIONS,
+    table_name: str,
+    dimensions: int,
 ) -> bool:
     """
     创建向量虚拟表
@@ -82,28 +103,31 @@ async def upsert_vector(
         embedding: 向量数据
         metadata: 元数据 JSON 字符串
     """
-    # sqlite-vec 使用 JSON 数组格式的 embedding
-    import json
+    if not validate_embedding(embedding, "upsert"):
+        return
 
+    import json
     embedding_json = json.dumps(embedding)
 
-    # 先删除（幂等）
-    await session.execute(
-        text(f"DELETE FROM {table_name} WHERE id = :id"),
-        {"id": vector_id},
-    )
-    # 插入
-    await session.execute(
-        text(f"""
-            INSERT INTO {table_name}(id, embedding, metadata)
-            VALUES (:id, :embedding, :metadata)
-        """),
-        {
-            "id": vector_id,
-            "embedding": embedding_json,
-            "metadata": metadata,
-        },
-    )
+    try:
+        await session.execute(
+            text(f"DELETE FROM {table_name} WHERE id = :id"),
+            {"id": vector_id},
+        )
+        await session.execute(
+            text(f"""
+                INSERT INTO {table_name}(id, embedding, metadata)
+                VALUES (:id, :embedding, :metadata)
+            """),
+            {
+                "id": vector_id,
+                "embedding": embedding_json,
+                "metadata": metadata,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"向量 upsert 失败 (id={vector_id}): {e}")
+        raise
 
 
 async def search_vectors(
@@ -126,16 +150,17 @@ async def search_vectors(
     Returns:
         VectorSearchResult 列表（按距离升序）
     """
-    import json
+    if not validate_embedding(query_embedding, "search_query"):
+        return []
 
+    import json
     query_json = json.dumps(query_embedding)
 
     sql = f"""
         SELECT id, distance, metadata
         FROM {table_name}
-        WHERE embedding MATCH :query
+        WHERE embedding MATCH :query AND k = :limit
         ORDER BY distance
-        LIMIT :limit
     """
 
     try:

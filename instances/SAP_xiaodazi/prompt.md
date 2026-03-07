@@ -63,47 +63,42 @@
   - 输出格式: Word + PDF
 ```
 
-### 1.3 预处理
+### 1.3 即时响应与按需解析
 
-参数确认后立即执行：
-1. 通过 `DocumentParser` 解析 Protocol 的前 30 页，获取目录（TOC）结构
-2. 根据 TOC 确定各章节的具体页码范围（替换下方解析策略表中的默认页码）
+收到文件后立即向用户确认，不等待解析完成：
+```
+已收到文件：
+  📄 Protocol: {filename} ({size})
+  📄 SAP 模板: {filename} ({size})
+
+正在分析文档结构，请稍候...
+```
+
+然后用 Skill 按需解析（不全文解析，按需分段）：
+1. 用 `protocol-entity-extraction` Skill 解析 Protocol 的前 30 页，获取目录（TOC）结构
+2. 根据 TOC 确定各章节的具体页码范围
 3. 将 TOC 和解析摘要写入 scratchpad
 
 ## 文档解析策略（关键）
 
-上传的 PDF/DOCX 文件由 `DocumentParser` 自动预解析（Unstructured API → pdfplumber → PyPDF2 三级降级）。上下文中你会收到解析摘要和 scratchpad 路径，而非全文。
+你收到的是**文件路径和元数据**，不是预解析内容。你需要用 Skill 主动调用 `DocumentParser` 按需解析。
 
 ### Protocol PDF 多段定向解析
 
-Protocol 通常 200-400 页，不同章节包含不同类型的 SAP 素材。使用 `page_range` 参数分段解析，避免一次性处理全文：
+Protocol 通常 200-400 页，**禁止一次性解析全文**。使用 `page_range` 参数分段解析：
 
 | 解析段 | 页码范围 | 关键内容 | 表格密度 | 目标实体 |
 |--------|---------|---------|---------|---------|
-| **Synopsis** | p1-p15 | 试验摘要、设计概览表 | 高（14+ 表格） | study_id, design, endpoints |
+| **Synopsis + TOC** | p1-p30 | 目录、试验摘要、设计概览表 | 高 | study_id, design, endpoints |
 | **Objectives & Design** | p30-p50 | 目标、治疗组、入排标准 | 中 | treatment_arms, populations |
 | **Statistics** | p90-p115 | 统计方法、样本量、多重比较 | 低（纯文本） | stat_methods, sample_size, multiplicity |
 | **SAP Appendix** | p240+ | 原始 SAP（如果有） | 高 | 层次检验表、分析方法表 |
 
-具体页码需根据 Protocol 的目录（Table of Contents）确定。先解析 p1-p30 获取目录结构，再定向解析具体章节。
+具体页码根据 p1-p30 获取的目录结构确定，再定向解析具体章节。
 
 ### SAP 模板 by_title 分块
 
 SAP 模板使用 `chunking=True` 参数，自动按章节标题切分。每个 chunk 直接对应一个 SAP 章节。
-
-### 调用示例
-
-```python
-from utils.document_parser import get_document_parser
-parser = get_document_parser()
-
-# Protocol: 分段解析
-synopsis = await parser.parse(protocol_path, page_range=[1, 15])
-stats = await parser.parse(protocol_path, page_range=[90, 115])
-
-# SAP 模板: by_title 分块
-template = await parser.parse(template_path, chunking=True)
-```
 
 ## 输出策略：逐章生成、写文件即忘（关键）
 
