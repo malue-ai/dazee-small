@@ -8,7 +8,6 @@ metadata:
     dependency_level: builtin
     os: [common]
     user_facing: true
-capabilities: [web_search, information_retrieval]
 
 ---
 
