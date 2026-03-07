@@ -267,20 +267,26 @@ $criticalPkgs = @(
     "fastapi", "uvicorn", "pydantic",
     # LLM clients
     "anthropic", "openai",
+    # Config / env
+    "yaml", "dotenv",
     # Async I/O
     "aiofiles", "aiohttp", "httpx",
+    # File detection
+    "filetype", "multipart",
     # Database
-    "aiosqlite", "sqlalchemy",
+    "aiosqlite", "greenlet", "sqlalchemy",
     # Core utilities
-    "yaml", "tiktoken", "numpy", "json5",
-    # Memory system
-    "sqlite_vec", "mem0",
-    # File processing
-    "PIL",
+    "tiktoken", "numpy", "json5", "json_repair",
+    # Memory & embedding
+    "mem0", "sqlite_vec", "huggingface_hub", "llama_cpp",
+    # Document processing
+    "PIL", "PyPDF2", "pypdf", "pdfplumber", "docx", "pptx", "openpyxl", "unstructured_client",
     # Scheduling
-    "apscheduler",
-    # WebSocket
-    "websockets"
+    "apscheduler", "croniter",
+    # System
+    "psutil", "websockets",
+    # Channels
+    "telegram", "lark_oapi"
 )
 $missingPkgs = @()
 foreach ($pkg in $criticalPkgs) {
