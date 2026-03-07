@@ -634,12 +634,24 @@ info "检查 Python 依赖..."
 
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai anthropic mem0 apscheduler llama_cpp; do
+  for pkg in fastapi uvicorn pydantic anthropic openai yaml dotenv aiofiles aiohttp httpx filetype aiosqlite greenlet sqlalchemy tiktoken numpy json5 json_repair mem0 sqlite_vec huggingface_hub llama_cpp PIL PyPDF2 pypdf pdfplumber docx pptx openpyxl unstructured_client apscheduler croniter psutil websockets multipart telegram lark_oapi; do
     if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
     fi
   done
+  # Platform-specific packages (dot-path imports can't use the simple loop)
+  if [ "$(uname)" = "Darwin" ]; then
+    for pkg in objc Vision Quartz; do
+      if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
+        NEEDS_INSTALL=true
+        break
+      fi
+    done
+  fi
+  if ! $PYTHON_CMD -c "import google.genai" 2>/dev/null; then
+    NEEDS_INSTALL=true
+  fi
 
   # 构建时使用 requirements-dev.txt（包含运行时依赖 + PyInstaller 等构建工具）
   DEV_REQ="$PROJECT_ROOT/requirements-dev.txt"
@@ -799,7 +811,7 @@ if [ "$NEED_CROSS_BUILD" = true ] && [ "$NATIVE_ARCH" = "arm64" ]; then
 
   # 安装 x86_64 依赖
   NEEDS_INSTALL=false
-  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken sqlite_vec openai anthropic mem0 apscheduler llama_cpp; do
+  for pkg in fastapi uvicorn pydantic anthropic openai yaml dotenv aiofiles aiohttp httpx filetype aiosqlite greenlet sqlalchemy tiktoken numpy json5 json_repair mem0 sqlite_vec huggingface_hub llama_cpp PIL PyPDF2 pypdf pdfplumber docx pptx openpyxl unstructured_client apscheduler croniter psutil websockets multipart telegram lark_oapi; do
     if ! arch -x86_64 "$X86_PYTHON_CMD" -c "import $pkg" 2>/dev/null; then
       NEEDS_INSTALL=true
       break
