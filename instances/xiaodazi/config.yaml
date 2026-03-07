@@ -5,6 +5,3 @@ instance:
 agent:
   provider: openai
   model: gpt-5.4
-cloud:
-  enabled: true
-  url: https://agent.dazee.ai
