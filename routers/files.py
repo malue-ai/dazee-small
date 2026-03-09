@@ -14,7 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+import aiofiles
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from infra.storage.local import LocalStorage
@@ -61,40 +62,52 @@ def _guess_mime_type(filename: str) -> str:
 
 # ==================== 文件上传 ====================
 
+# Chunk size for streaming file writes (avoid loading large files into RAM)
+_CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+
 
 @router.post("/upload")
-async def upload_file(
-    file: UploadFile = File(...),
-    user_id: str = Form(default="local"),
-) -> Dict[str, Any]:
+async def upload_file(request: Request) -> Dict[str, Any]:
     """
     Upload a file to local storage.
 
-    Args:
-        file: The file to upload.
-        user_id: User identifier (default: "local").
+    Accepts multipart/form-data with fields:
+      - file: the file to upload (required)
+      - user_id: user identifier (optional, default "local")
+
+    No enforced size limit — this is a local desktop app.
+    Files are streamed to disk in chunks to avoid loading large files into RAM.
 
     Returns:
         File metadata including the access URL.
     """
+    # max_part_size set to 100 GB — effectively unlimited for local desktop use.
+    # Starlette's default is 1MB which blocks any file larger than that.
+    form = await request.form(max_part_size=100 * 1024 * 1024 * 1024)
+    file: UploadFile = form.get("file")  # type: ignore[assignment]
+    if file is None:
+        raise HTTPException(status_code=400, detail="缺少 file 字段")
+    user_id: str = form.get("user_id", "local")  # type: ignore[assignment]
+
     filename = file.filename or "unknown"
     content_type = file.content_type or _guess_mime_type(filename)
 
     logger.info(f"📎 文件上传: {filename}, type={content_type}, user={user_id}")
 
-    # Read file content
-    content = await file.read()
-    file_size = len(content)
-
-    # Generate storage path and save
+    # Generate storage path
     storage_path = _generate_storage_path(filename)
+    full_path = _get_storage().resolve_path(storage_path)
+    full_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Use storage backend to save
-    full_path = await _get_storage().save(
-        file=io.BytesIO(content),
-        path=storage_path,
-        content_type=content_type,
-    )
+    # Stream file to disk in chunks — avoids loading the entire file into RAM
+    file_size = 0
+    async with aiofiles.open(full_path, "wb") as dest:
+        while True:
+            chunk = await file.read(_CHUNK_SIZE)
+            if not chunk:
+                break
+            await dest.write(chunk)
+            file_size += len(chunk)
 
     # local_path: 真实文件系统路径（Agent 直接读取）
     # file_url: API URL（前端预览/下载用, 必须使用 /）
@@ -204,7 +217,7 @@ async def download_zip(paths: List[str] = Query(..., description="要打包的�
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for rel_path in paths:
-            storage_dir, resolved = _resolve_file_path(rel_path)
+            storage_dir, resolved = _resolve_instance_storage(rel_path)
             full = storage_dir / resolved
             if full.exists() and full.is_file():
                 zf.write(full, arcname=Path(resolved).name)

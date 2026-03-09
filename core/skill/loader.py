@@ -1080,7 +1080,7 @@ class SkillsLoader:
                                 f"Skill '{entry.name}' depends_on '{dep}' "
                                 f"which is not registered"
                             )
-                        elif dep not in available_names and dep not in installable_names:
+                        elif dep not in available_names:
                             dep_status = next(
                                 (e.status.value for e in self._entries if e.name == dep), "?"
                             )
