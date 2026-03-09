@@ -24,8 +24,12 @@ class LocalStorage(StorageBackend):
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_full_path(self, path: str) -> Path:
-        """获取完整路径"""
+        """Get the absolute filesystem path for a relative storage path."""
         return self.base_dir / path
+
+    def resolve_path(self, path: str) -> Path:
+        """Return the absolute filesystem path for a relative storage path (public API)."""
+        return self._get_full_path(path)
     
     async def save(
         self,

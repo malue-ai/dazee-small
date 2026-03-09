@@ -365,7 +365,7 @@
       ref="fileInputRef" 
       @change="handleFileSelect" 
       multiple 
-      accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv,.json"
+      accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv,.json,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.tar,.gz"
       class="absolute w-px h-px opacity-0 overflow-hidden pointer-events-none"
       style="left: -9999px;"
     />
