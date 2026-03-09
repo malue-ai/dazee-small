@@ -1683,17 +1683,18 @@ class RVRBExecutor(RVRExecutor):
         event_manager=None,
         state_manager=None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """处理工具调用（流式，带回溯，V10.2 使用 ToolExecutionFlow）"""
+        """处理工具调用（流式，带回溯，支持并行执行）"""
+        import time
+
         from core.agent.content_handler import create_content_handler
         from core.agent.tools.flow import (
             ToolExecutionContext,
-            ToolExecutionFlow,
             create_tool_execution_flow,
         )
+        from core.tool.registry_config import get_serial_only_tools
 
         client_tools = [tc for tc in response.tool_calls if tc.get("type") == "tool_use"]
 
-        # 创建 ToolExecutionContext
         tool_context = ToolExecutionContext(
             session_id=session_id,
             conversation_id=conversation_id,
@@ -1705,6 +1706,9 @@ class RVRBExecutor(RVRExecutor):
             plan_cache=plan_cache or {},
             plan_todo_tool=plan_todo_tool,
             state_manager=state_manager,
+            serial_only_tools=get_serial_only_tools(),
+            allow_parallel=True,
+            max_parallel=5,
         )
 
         flow = create_tool_execution_flow()
@@ -1712,33 +1716,44 @@ class RVRBExecutor(RVRExecutor):
         tool_results = []
         _round_failures = []
 
+        t0 = time.monotonic()
+        batch_results = await flow.execute(client_tools, tool_context)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            f"工具批量执行完成: {len(batch_results)} 个, 耗时 {elapsed_ms:.0f}ms"
+        )
+
+        from core.context.compaction import compress_fresh_tool_result
+
         for tool_call in client_tools:
             tool_name = tool_call["name"]
             tool_input = tool_call["input"] or {}
             tool_id = tool_call["id"]
-
             _skip_compress = False
-            try:
-                # 使用 ToolExecutionFlow 执行单个工具
-                result_info = await flow.execute_single(tool_call, tool_context)
+
+            result_info = batch_results.get(tool_id)
+            if result_info is None:
+                logger.error(f"❌ 工具结果缺失: {tool_name} (id={tool_id})")
+                result_content = "工具执行结果缺失"
+                is_error = True
+            else:
                 result = result_info.result
                 _skip_compress = isinstance(result, dict) and result.pop("_skip_fresh_compress", False)
                 result_content = result if isinstance(result, str) else stable_json_dumps(result)
                 is_error = result_info.is_error
 
-                if not is_error:
-                    state.record_execution(f"tool:{tool_name}", True, result_content)
-                else:
-                    error_detail = result_info.error_msg or result_content or "工具执行失败"
-                    raise Exception(error_detail)
+            if not is_error:
+                state.record_execution(f"tool:{tool_name}", True, result_content)
+            else:
+                error = Exception(
+                    (result_info.error_msg if result_info else None)
+                    or result_content or "工具执行失败"
+                )
+                logger.error(f"❌ 工具执行失败: {tool_name} - {error}")
 
-            except Exception as e:
-                logger.error(f"❌ 工具执行失败: {tool_name} - {e}")
-
-                # 带回溯的错误处理（V12: 传入 runtime_ctx 用于回溯↔终止联动）
                 result_content, is_error, backtrack_event = (
                     await self._handle_tool_error_with_backtrack(
-                        error=e,
+                        error=error,
                         tool_name=tool_name,
                         tool_input=tool_input,
                         state=state,
@@ -1750,7 +1765,6 @@ class RVRBExecutor(RVRExecutor):
                     )
                 )
 
-                # 发送回溯事件
                 if backtrack_event:
                     yield backtrack_event
 
@@ -1764,8 +1778,6 @@ class RVRBExecutor(RVRExecutor):
                 content={"tool_use_id": tool_id, "content": result_content, "is_error": is_error},
             )
 
-            # Immediate compression: prevent large tool outputs from bloating context
-            from core.context.compaction import compress_fresh_tool_result
             compressed_content = (
                 result_content if _skip_compress
                 else compress_fresh_tool_result(result_content)
@@ -1780,7 +1792,6 @@ class RVRBExecutor(RVRExecutor):
                 }
             )
 
-            # Record tool call signature for dedup detection
             ctx.record_tool_call(tool_name, tool_input)
 
         append_assistant_message(llm_messages, response.raw_content)
@@ -1869,18 +1880,19 @@ class RVRBExecutor(RVRExecutor):
         event_manager=None,
         state_manager=None,
     ) -> None:
-        """处理工具调用（非流式，带回溯，V10.2 使用 ToolExecutionFlow）"""
+        """处理工具调用（非流式，带回溯，支持并行执行）"""
+        import time
+
         from core.agent.tools.flow import (
             ToolExecutionContext,
-            ToolExecutionFlow,
             create_tool_execution_flow,
         )
+        from core.tool.registry_config import get_serial_only_tools
 
         client_tools = [tc for tc in response.tool_calls if tc.get("type") == "tool_use"]
 
         append_assistant_message(llm_messages, response.raw_content)
 
-        # 创建 ToolExecutionContext
         tool_context = ToolExecutionContext(
             session_id=session_id,
             conversation_id=conversation_id,
@@ -1892,38 +1904,52 @@ class RVRBExecutor(RVRExecutor):
             plan_cache=plan_cache or {},
             plan_todo_tool=plan_todo_tool,
             state_manager=state_manager,
+            serial_only_tools=get_serial_only_tools(),
+            allow_parallel=True,
+            max_parallel=5,
         )
 
         flow = create_tool_execution_flow()
         tool_results = []
         _round_failures = []
 
+        t0 = time.monotonic()
+        batch_results = await flow.execute(client_tools, tool_context)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            f"工具批量执行完成(non-stream): {len(batch_results)} 个, 耗时 {elapsed_ms:.0f}ms"
+        )
+
+        from core.context.compaction import compress_fresh_tool_result
+
         for tool_call in client_tools:
             tool_name = tool_call["name"]
             tool_input = tool_call["input"] or {}
             tool_id = tool_call["id"]
-
             _skip_compress = False
-            try:
-                # 使用 ToolExecutionFlow 执行单个工具
-                result_info = await flow.execute_single(tool_call, tool_context)
+
+            result_info = batch_results.get(tool_id)
+            if result_info is None:
+                logger.error(f"❌ 工具结果缺失: {tool_name} (id={tool_id})")
+                result_content = "工具执行结果缺失"
+                is_error = True
+            else:
                 result = result_info.result
                 _skip_compress = isinstance(result, dict) and result.pop("_skip_fresh_compress", False)
                 result_content = result if isinstance(result, str) else stable_json_dumps(result)
                 is_error = result_info.is_error
 
-                if not is_error:
-                    state.record_execution(f"tool:{tool_name}", True, result_content)
-                else:
-                    error_detail = result_info.error_msg or result_content or "工具执行失败"
-                    raise Exception(error_detail)
+            if not is_error:
+                state.record_execution(f"tool:{tool_name}", True, result_content)
+            else:
+                error = Exception(
+                    (result_info.error_msg if result_info else None)
+                    or result_content or "工具执行失败"
+                )
+                logger.error(f"❌ 工具执行失败: {tool_name} - {error}")
 
-            except Exception as e:
-                logger.error(f"❌ 工具执行失败: {tool_name} - {e}")
-
-                # V12: 传入 runtime_ctx 用于回溯↔终止联动
                 result_content, is_error, _ = await self._handle_tool_error_with_backtrack(
-                    error=e,
+                    error=error,
                     tool_name=tool_name,
                     tool_input=tool_input,
                     state=state,
@@ -1938,8 +1964,6 @@ class RVRBExecutor(RVRExecutor):
             if is_error:
                 _round_failures.append((tool_name, str(result_content)[:500]))
 
-            # Immediate compression (non-stream path, same as stream)
-            from core.context.compaction import compress_fresh_tool_result
             compressed_content = (
                 result_content if _skip_compress
                 else compress_fresh_tool_result(result_content)
@@ -1954,7 +1978,6 @@ class RVRBExecutor(RVRExecutor):
                 }
             )
 
-            # Record tool call signature for dedup detection
             ctx.record_tool_call(tool_name, tool_input)
 
         if tool_results:

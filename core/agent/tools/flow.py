@@ -294,28 +294,35 @@ class ToolExecutionFlow:
 
         # 并行执行
         if parallel_tools and context.allow_parallel and len(parallel_tools) > 1:
+            import time
+
             logger.info(
-                f"⚡ 并行执行 {len(parallel_tools)} 个工具: {[t['name'] for t in parallel_tools]}"
+                f"⚡ 并行执行 {len(parallel_tools)} 个工具: "
+                f"{[t['name'] for t in parallel_tools]}"
             )
 
-            # 限制并行数量
             tools_to_execute = parallel_tools[: context.max_parallel]
             if len(parallel_tools) > context.max_parallel:
                 serial_tools = parallel_tools[context.max_parallel :] + serial_tools
-                logger.warning(f"⚠️ 超出最大并行数 {context.max_parallel}，部分工具将串行执行")
+                logger.warning(
+                    f"⚠️ 超出最大并行数 {context.max_parallel}，部分工具将串行执行"
+                )
 
-            # 追踪
             for tc in tools_to_execute:
                 if context.tracer:
                     context.tracer.log_tool_call(tc["name"])
 
-            # 并行执行
+            t0 = time.monotonic()
             parallel_results = await asyncio.gather(
                 *[self.execute_single(tc, context, inject_context_fn) for tc in tools_to_execute],
                 return_exceptions=True,
             )
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.info(
+                f"⚡ 并行执行完成: {len(tools_to_execute)} 个工具, "
+                f"耗时 {elapsed_ms:.0f}ms"
+            )
 
-            # 处理结果
             for tc, result in zip(tools_to_execute, parallel_results):
                 tool_id = tc["id"]
                 if isinstance(result, Exception):
