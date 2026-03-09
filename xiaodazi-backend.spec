@@ -282,7 +282,6 @@ excludes = [
 
     # 其他传递依赖（运行时不需要）
     'pygments',        # 语法高亮（通过 rich/transformers 拉入）
-    'tqdm',            # 进度条（仅 CLI 用）
     'email_validator',
 
     # 其他不需要的标准库模块

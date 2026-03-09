@@ -180,11 +180,12 @@ async def download_gguf_model(
 
     try:
         from huggingface_hub import hf_hub_download
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
-            "huggingface-hub is required to download models.\n"
+            f"huggingface-hub is required to download models.\n"
+            f"Error details: {e}\n"
             "Install: pip install huggingface-hub"
-        )
+        ) from e
 
     def _do_download() -> str:
         return hf_hub_download(  # type: ignore[call-overload]

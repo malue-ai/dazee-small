@@ -1100,10 +1100,24 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // 应用退出时终止 sidecar（第二层防护，最可靠）
-            if let tauri::RunEvent::Exit = event {
-                eprintln!("[app] 应用退出，执行清理...");
-                kill_sidecar(app_handle);
+            match event {
+                // 应用退出时终止 sidecar（第二层防护，最可靠）
+                tauri::RunEvent::Exit => {
+                    eprintln!("[app] 应用退出，执行清理...");
+                    kill_sidecar(app_handle);
+                }
+                // macOS：点击 Dock 栏图标时唤醒隐藏的主窗口
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                    if !has_visible_windows {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                }
+                _ => {}
             }
         });
 }
