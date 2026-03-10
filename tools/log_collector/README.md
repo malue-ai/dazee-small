@@ -1,10 +1,24 @@
-# 小搭子日志收集器
+# 小搭子日志收集器（可选）
 
 从小搭子桌面应用的日志文件中提取指定日期的内容，上传到腾讯云 COS。通过系统计划任务每天自动执行。
 
+> **这是一个完全可选的运维工具**，不会自动启用。需要用户主动执行 `--install` 才会注册定时任务。
+
+## 安全说明
+
+本脚本是开源透明的，不包含任何后门或硬编码的服务器地址。以下是安全设计要点：
+
+- **零内置凭证**：源码和模板文件中不包含任何密钥、Token 或服务器地址。所有 COS 凭证由使用者自行配置，数据上传到使用者自己的 COS Bucket，开发者无法访问。
+- **默认关闭**：脚本不会自动运行或采集任何数据，必须由使用者主动执行 `--install` 注册定时任务后才会生效。
+- **完全可卸载**：随时通过 `--uninstall` 注销定时任务，彻底停止数据采集。
+- **可预览**：上传前可使用 `--dry-run` 查看将要上传的内容和目标路径，确认无误后再正式执行。
+- **仅读取应用日志**：脚本只读取小搭子自身生成的 `app.log` 和 `error.log`，不访问系统日志、浏览器数据、文件系统或任何其他应用数据。
+- **采集信息范围**：除日志内容外，仅采集基础设备信息（操作系统、主机名、随机生成的设备 ID）用于日志归类，不采集 IP 地址、MAC 地址、硬件序列号等可追踪标识。
+- **代码可审计**：整个脚本为单文件 Python 脚本（约 1000 行），逻辑简单清晰，欢迎审查。
+
 ## 前提条件
 
-- Python 3.10+（公司机器上已有）
+- Python 3.10+
 - 小搭子已在本机运行过（日志目录已生成）
 - 腾讯云 COS Bucket 已创建，有可用的 SecretId/SecretKey
 
@@ -22,10 +36,12 @@ macOS:   ~/tools/log_collector/
 ### 2. 安装依赖
 
 ```bash
-pip install cos-python-sdk-v5 pyyaml
+python -m pip install cos-python-sdk-v5 pyyaml
 ```
 
 ### 3. 配置 COS 凭证
+
+首次运行 `--install` 时会自动引导配置。也可手动配置：
 
 ```bash
 cp cos_config.yaml.example cos_config.yaml
@@ -60,7 +76,7 @@ python log_collector.py --install
 python log_collector.py [选项]
 
 选项:
-  --config PATH       COS 配置文件路径（默认：脚本同目录 cos_config.yaml）
+  --config PATH       COS 配置文件路径（默认：用户数据目录/config/cos_config.yaml）
   --user NAME         用户标识（覆盖配置文件中的 user）
   --log-dir PATH      日志目录（默认：自动探测）
   --date YYYY-MM-DD   目标日期（默认：今天）
