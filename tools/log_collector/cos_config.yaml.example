@@ -1,0 +1,24 @@
+# 小搭子日志收集器配置
+#
+# 配置文件存放位置（按平台）:
+#   Windows: %APPDATA%\com.zenflux.agent\config\cos_config.yaml
+#   macOS:   ~/Library/Application Support/com.zenflux.agent/config/cos_config.yaml
+#   Linux:   ~/.local/share/com.zenflux.agent/config/cos_config.yaml
+#
+# 使用方法：
+#   1. 首次运行 python log_collector.py 时会自动从本模板创建配置文件
+#      也可手动复制本文件到上述位置并重命名为 cos_config.yaml
+#   2. 填写下方 COS 凭证和 bucket 信息
+#   3. 运行: python log_collector.py --dry-run 验证
+
+# 腾讯云 COS 配置（必填）
+cos:
+  secret_id: ""
+  secret_key: ""
+  bucket: ""           # 格式: bucket-name-appid，如 xiaodazi-logs-1234567890
+  region: ""           # 如 ap-shanghai, ap-beijing, ap-guangzhou
+  key_prefix: "logs"   # COS 中的根路径前缀（默认 logs）
+
+# 当前机器使用者（可选）
+# 不填则使用系统用户名。也可通过命令行 --user 参数覆盖。
+user: ""
