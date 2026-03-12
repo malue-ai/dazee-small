@@ -80,6 +80,25 @@ LLM_AUTO_DETECT: List[Dict[str, Any]] = [
     },
 ]
 
+# ZenFlux provider → Mem0-compatible provider mapping.
+# Mem0 natively supports: openai, anthropic, google, ollama.
+# All other providers are OpenAI-compatible and need base_url remapping.
+_PROVIDER_TO_MEM0: Dict[str, Dict[str, Any]] = {
+    "openai":   {"mem0_provider": "openai",    "api_key_env": "OPENAI_API_KEY"},
+    "claude":   {"mem0_provider": "anthropic",  "api_key_env": "ANTHROPIC_API_KEY"},
+    "deepseek": {"mem0_provider": "openai",     "api_key_env": "DEEPSEEK_API_KEY",
+                 "base_url": "https://api.deepseek.com"},
+    "qwen":     {"mem0_provider": "openai",     "api_key_env": "DASHSCOPE_API_KEY"},
+    "gemini":   {"mem0_provider": "google",     "api_key_env": "GEMINI_API_KEY"},
+    "glm":      {"mem0_provider": "openai",     "api_key_env": "ZHIPUAI_API_KEY",
+                 "base_url": "https://open.bigmodel.cn/api/paas/v4"},
+    "minimax":  {"mem0_provider": "anthropic",  "api_key_env": "MINIMAX_API_KEY",
+                 "base_url": "https://api.minimaxi.com/anthropic"},
+    "kimi":     {"mem0_provider": "openai",     "api_key_env": "MOONSHOT_API_KEY",
+                 "base_url": "https://api.moonshot.cn/v1"},
+    "ollama":   {"mem0_provider": "ollama"},
+}
+
 
 def _resolve_base_url(env_key: str) -> Optional[str]:
     """
@@ -202,12 +221,10 @@ class LLMConfig:
     """
     LLM 配置（用于 Mem0 内部 fact extraction）
 
-    支持的模式：
-    - auto: 自动检测可用 API Key，按优先级选择 (推荐，默认)
-    - anthropic: Claude
-    - openai: GPT 系列
-    - gemini: Google Gemini
-    - ollama: 本地模型
+    解析优先级：
+    1. MEM0_LLM_PROVIDER 显式指定 → 按 _PROVIDER_TO_MEM0 映射
+    2. auto（默认）→ 跟随 config.yaml 的 agent.provider（通过 llm_profiles）
+    3. llm_profiles 未加载 → 扫描已有 API Key
     """
 
     provider: str = field(default_factory=lambda: os.getenv("MEM0_LLM_PROVIDER", "auto"))
@@ -228,7 +245,10 @@ class LLMConfig:
             self._resolve_explicit_provider()
 
     def _auto_detect(self) -> None:
-        """Auto-detect best LLM provider from available API keys."""
+        """Auto-detect from instance llm_profiles first, then scan API keys."""
+        if self._from_llm_profiles():
+            return
+
         for candidate in LLM_AUTO_DETECT:
             api_key = os.getenv(candidate["env_key"])
             if api_key:
@@ -247,20 +267,73 @@ class LLMConfig:
         _logger.warning("Mem0 LLM 自动检测: 未找到可用的 API Key，记忆提取不可用")
         if not self.model:
             self.model = "gpt-4o-mini"
-        self.provider = "openai"  # Fallback, will error on use
+        self.provider = "openai"
+
+    def _from_llm_profiles(self) -> bool:
+        """Derive LLM config from instance llm_profiles (follows config.yaml agent.provider)."""
+        try:
+            from config.llm_config.loader import get_current_profiles
+
+            profiles = get_current_profiles()
+            if not profiles:
+                return False
+
+            for _name, profile in profiles.items():
+                provider = profile.get("provider")
+                api_key_env = profile.get("api_key_env")
+                if not provider or not api_key_env:
+                    continue
+                api_key = os.getenv(api_key_env)
+                if not api_key:
+                    continue
+
+                return self._apply_provider_mapping(
+                    provider, api_key, api_key_env,
+                    model_hint=profile.get("model"),
+                    source="llm_profiles",
+                )
+
+            return False
+        except Exception as e:
+            _logger.debug(f"从 llm_profiles 读取失败: {e}")
+            return False
 
     def _resolve_explicit_provider(self) -> None:
-        """Resolve config for an explicitly set provider."""
-        if self.provider == "anthropic":
-            self.api_key = os.getenv("ANTHROPIC_API_KEY")
-        elif self.provider == "openai":
-            self.api_key = os.getenv("OPENAI_API_KEY")
-            if not self.base_url:
-                self.base_url = _resolve_base_url("OPENAI_API_KEY")
+        """Resolve config for an explicitly set provider via _PROVIDER_TO_MEM0."""
+        mapping = _PROVIDER_TO_MEM0.get(self.provider)
+        if mapping:
+            api_key_env = mapping.get("api_key_env", "")
+            api_key = os.getenv(api_key_env) if api_key_env else None
+            self._apply_provider_mapping(
+                self.provider, api_key, api_key_env, source="explicit"
+            )
         elif self.provider in ("google", "gemini"):
             self.api_key = os.getenv("GEMINI_API_KEY")
-        elif self.provider == "ollama":
-            self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    def _apply_provider_mapping(
+        self,
+        provider: str,
+        api_key: Optional[str],
+        api_key_env: str,
+        model_hint: Optional[str] = None,
+        source: str = "",
+    ) -> bool:
+        """Apply _PROVIDER_TO_MEM0 mapping to set provider/api_key/base_url."""
+        mapping = _PROVIDER_TO_MEM0.get(provider)
+        if not mapping:
+            return False
+
+        self.provider = mapping["mem0_provider"]
+        self.api_key = api_key
+        if not self.model and model_hint:
+            self.model = model_hint
+        self.base_url = mapping.get("base_url") or _resolve_base_url(api_key_env)
+
+        _logger.info(
+            f"Mem0 LLM ({source}): {provider} → {self.provider}, "
+            f"model={self.model}, base_url={self.base_url or 'default'}"
+        )
+        return True
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为 mem0 BaseLlmConfig 接受的字典格式。
@@ -268,13 +341,10 @@ class LLMConfig:
         mem0 使用 provider-specific 的 base_url 参数名：
         - openai → openai_base_url
         - ollama → ollama_base_url
-
-        注意：Anthropic 不允许同时设置 temperature 和 top_p，
-        这里只设置 temperature，让 Mem0 不传 top_p。
         """
         config = {
             "model": self.model,
-            "temperature": 0,  # 只设置 temperature，不设置 top_p
+            "temperature": 0,
         }
         if self.api_key:
             config["api_key"] = self.api_key
@@ -282,10 +352,8 @@ class LLMConfig:
             if self.provider == "ollama":
                 config["ollama_base_url"] = self.base_url
             else:
-                # openai / openai-compatible
                 config["openai_base_url"] = self.base_url
 
-        # Anthropic 不允许 temperature + top_p 同时设置
         if self.provider == "anthropic":
             config["temperature"] = 0.0
 
