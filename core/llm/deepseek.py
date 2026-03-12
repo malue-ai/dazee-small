@@ -31,7 +31,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 import httpx
 from openai import AsyncOpenAI
 
-from infra.resilience import with_retry
+from infra.resilience import with_retry, with_timeout
 from logger import get_logger
 
 from .adaptor import DeepSeekAdaptor
@@ -122,6 +122,9 @@ _THINKING_END_RE = re.compile(r"<\uff5c?end\u2581of\u2581thinking\uff5c?>")
 _THINKING_BEGIN_RE = re.compile(r"<\uff5c?begin\u2581of\u2581thinking\uff5c?>")
 # <think>...</think> wrapper used by some DeepSeek model variants
 _THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+from core.llm.tool_call_utils import repair_tool_arguments as _repair_tool_arguments
 
 
 def _strip_thinking_markers(text: str) -> tuple[str, str]:
@@ -372,7 +375,7 @@ class DeepSeekLLMService(BaseLLMService):
         Build DeepSeek-specific extra parameters.
 
         Thinking mode control:
-        - deepseek-reasoner: always produces reasoning, no extra param needed
+        - deepseek-reasoner: always produces reasoning; budget_tokens limits CoT length
         - deepseek-chat + enable_thinking: pass {"thinking": {"type": "enabled"}}
         """
         extra = {}
@@ -383,13 +386,16 @@ class DeepSeekLLMService(BaseLLMService):
             else getattr(self.config, "enable_thinking", False)
         )
 
-        # Only need explicit thinking param for non-reasoner models
-        if effective_thinking and not DeepSeekModelCapability.is_reasoner(self.config.model):
+        is_reasoner = DeepSeekModelCapability.is_reasoner(self.config.model)
+
+        if effective_thinking and not is_reasoner:
             extra["thinking"] = {"type": "enabled"}
-            # [V4 Ready] 如 V4 支持 thinking budget 控制：
-            # thinking_budget = getattr(self.config, "thinking_budget", None)
-            # if thinking_budget:
-            #     extra["thinking"]["budget_tokens"] = thinking_budget
+
+        thinking_budget = getattr(self.config, "thinking_budget", None)
+        if thinking_budget and (is_reasoner or effective_thinking):
+            if "thinking" not in extra:
+                extra["thinking"] = {"type": "enabled"}
+            extra["thinking"]["budget_tokens"] = thinking_budget
 
         # Structured output
         response_format = kwargs.get("response_format")
@@ -402,6 +408,7 @@ class DeepSeekLLMService(BaseLLMService):
 
         return extra
 
+    @with_timeout(timeout_type="llm")
     @with_retry(
         max_retries=3,
         base_delay=1.0,
@@ -823,11 +830,21 @@ class DeepSeekLLMService(BaseLLMService):
                                 }
                             )
                         except json.JSONDecodeError as e:
-                            logger.error(f"❌ 工具调用参数解析失败: {e}")
-                            logger.error(
-                                f"   原始 arguments: "
-                                f"{tc['arguments'][:200] if tc.get('arguments') else 'None'}"
-                            )
+                            raw = tc.get("arguments", "")
+                            repaired = _repair_tool_arguments(raw)
+                            if repaired is not None:
+                                formatted_tool_calls.append({
+                                    "id": tc["id"], "name": tc["name"],
+                                    "input": repaired, "type": "tool_use",
+                                })
+                                logger.warning(
+                                    f"工具调用参数 JSON 修复成功 (_repair_tool_arguments)"
+                                )
+                            else:
+                                logger.error(f"❌ 工具调用参数解析失败: {e}")
+                                logger.error(
+                                    f"   原始 arguments: {raw[:200] if raw else 'None'}"
+                                )
 
             # Strip thinking markers leaked into accumulated content
             accumulated_content, leaked = _strip_thinking_markers(accumulated_content)
@@ -853,6 +870,42 @@ class DeepSeekLLMService(BaseLLMService):
                 )
 
             logger.info(f"📥 DeepSeek 响应: stop_reason={stop_reason or 'stop'}")
+
+            # Stream integrity check: detect truncated responses
+            if stop_reason == "length":
+                logger.warning(
+                    "Response truncated by max_tokens: content=%d chars, "
+                    "thinking=%d chars. Consider increasing max_tokens or "
+                    "simplifying the request.",
+                    len(accumulated_content), len(accumulated_thinking),
+                )
+            elif (
+                not usage
+                and accumulated_content
+                and stop_reason not in ("tool_calls",)
+            ):
+                input_est = sum(
+                    self.count_tokens(
+                        m.get("content", "") if isinstance(m.get("content"), str)
+                        else str(m.get("content", ""))
+                    )
+                    for m in openai_messages
+                )
+                output_est = self.count_tokens(accumulated_content)
+                thinking_est = (
+                    self.count_tokens(accumulated_thinking)
+                    if accumulated_thinking else 0
+                )
+                usage = {
+                    "input_tokens": input_est,
+                    "output_tokens": output_est,
+                    "thinking_tokens": thinking_est,
+                }
+                logger.info(
+                    "Usage stats missing from stream, estimated locally: "
+                    "input~%d, output~%d, thinking~%d",
+                    input_est, output_est, thinking_est,
+                )
 
             # Normalize stop_reason: OpenAI "tool_calls" → Claude "tool_use"
             if stop_reason == "tool_calls" or (formatted_tool_calls and stop_reason == "stop"):
@@ -1019,7 +1072,18 @@ class DeepSeekLLMService(BaseLLMService):
         tool_calls = []
         if message.tool_calls:
             for tc in message.tool_calls:
-                input_dict = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                raw_args = tc.function.arguments or ""
+                try:
+                    input_dict = json.loads(raw_args, strict=False) if raw_args else {}
+                except json.JSONDecodeError:
+                    input_dict = _repair_tool_arguments(raw_args)
+                    if input_dict is not None:
+                        logger.warning("工具调用参数 JSON 修复成功 (non-stream)")
+                    else:
+                        logger.error(
+                            f"❌ 工具调用参数解析失败 (non-stream): {raw_args[:200]}"
+                        )
+                        input_dict = {}
                 tool_calls.append(
                     {
                         "id": tc.id,
