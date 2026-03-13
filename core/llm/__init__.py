@@ -246,12 +246,98 @@ def create_llm_service(
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 
-    # 桌面版简化：移除 fallbacks/ModelRouter，直接创建单个 LLM 服务
-    # 忽略 fallbacks 和 policy 参数（兼容旧配置）
-    kwargs.pop("fallbacks", None)
-    kwargs.pop("policy", None)
+    fallbacks_config = kwargs.pop("fallbacks", None)
+    policy = kwargs.pop("policy", None)
 
-    return _create_single_llm_service(provider, model, api_key, **kwargs)
+    primary_service = _create_single_llm_service(provider, model, api_key, **kwargs)
+
+    if fallbacks_config is False:
+        return primary_service
+
+    try:
+        from core.llm.router import ModelRouter, RouteTarget
+        from logger import get_logger as _get_logger
+        _log = _get_logger("llm.factory")
+
+        if fallbacks_config and fallbacks_config != "auto":
+            fb_list = fallbacks_config
+        else:
+            fb_list = _auto_discover_fallbacks(provider)
+
+        if not fb_list:
+            return primary_service
+
+        primary_target = RouteTarget(
+            name=f"{provider.value}/{model}",
+            service=primary_service,
+            provider=provider,
+            model=model,
+        )
+        fallback_targets = []
+        for fb in fb_list:
+            fb_provider = fb.get("provider")
+            fb_model = fb.get("model")
+            fb_api_key = fb.get("api_key")
+            fb_api_key_env = fb.get("api_key_env")
+            if fb_api_key_env and not fb_api_key:
+                fb_api_key = os.getenv(fb_api_key_env)
+            if not fb_api_key:
+                continue
+            try:
+                fb_service = _create_single_llm_service(
+                    LLMProvider(fb_provider), fb_model, fb_api_key,
+                )
+                fallback_targets.append(RouteTarget(
+                    name=f"{fb_provider}/{fb_model}",
+                    service=fb_service,
+                    provider=LLMProvider(fb_provider),
+                    model=fb_model or "",
+                ))
+            except Exception as e:
+                _log.debug(f"Fallback {fb_provider}/{fb_model} skip: {e}")
+
+        if fallback_targets:
+            _log.info(
+                f"ModelRouter: primary={provider.value}/{model}, "
+                f"auto-fallbacks={[t.name for t in fallback_targets]}"
+            )
+            return ModelRouter(
+                primary=primary_target,
+                fallbacks=fallback_targets,
+                policy=policy,
+            )
+    except ImportError:
+        pass
+
+    return primary_service
+
+
+def _auto_discover_fallbacks(primary_provider: LLMProvider) -> list:
+    """Auto-discover fallback providers by scanning configured API Keys.
+
+    Excludes the primary provider. Uses light-tier models to minimize cost.
+    Only includes providers whose API Key is actually set in environment.
+    """
+    from .defaults import DEFAULT_MODELS as _DEFAULTS
+
+    PROVIDER_FALLBACK_CANDIDATES = [
+        {"provider": "openai", "model": "gpt-4o-mini", "api_key_env": "OPENAI_API_KEY"},
+        {"provider": "claude", "model": "claude-haiku-4-5-20251001", "api_key_env": "ANTHROPIC_API_KEY"},
+        {"provider": "qwen", "model": "qwen-plus", "api_key_env": "DASHSCOPE_API_KEY"},
+        {"provider": "deepseek", "model": "deepseek-chat", "api_key_env": "DEEPSEEK_API_KEY"},  # light-tier
+        {"provider": "glm", "model": "glm-4.5-flash", "api_key_env": "ZHIPUAI_API_KEY"},
+        {"provider": "gemini", "model": "gemini-2.0-flash", "api_key_env": "GEMINI_API_KEY"},
+    ]
+
+    fallbacks = []
+    for candidate in PROVIDER_FALLBACK_CANDIDATES:
+        if candidate["provider"] == primary_provider.value:
+            continue
+        api_key = os.getenv(candidate["api_key_env"])
+        if api_key:
+            fallbacks.append(candidate)
+
+    return fallbacks
 
 
 # ============================================================

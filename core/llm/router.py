@@ -13,6 +13,7 @@ from logger import get_logger
 
 from .base import BaseLLMService, LLMProvider, LLMResponse, Message, ToolType
 from .health_monitor import LLMHealthMonitor, get_llm_health_monitor
+from .tool_binding_resolver import resolve_tools_for_target
 
 logger = get_logger("llm.router")
 
@@ -25,10 +26,12 @@ class RouterPolicy:
     Attributes:
         max_failures: 最大失败次数（超过即进入冷却）
         cooldown_seconds: 冷却时间（秒），可通过 LLM_ROUTER_COOLDOWN_SECONDS 环境变量覆盖
+        first_chunk_timeout: 流式首 chunk 超时（秒），超时即 fallback
     """
 
     max_failures: int = 2
-    cooldown_seconds: int = 600  # 默认 10 分钟（V7.11：从 1 小时改为 10 分钟）
+    cooldown_seconds: int = 600
+    first_chunk_timeout: float = 24.0
 
 
 def _resolve_policy(policy: Optional[Dict[str, Any]]) -> RouterPolicy:
@@ -46,6 +49,28 @@ def _resolve_policy(policy: Optional[Dict[str, Any]]) -> RouterPolicy:
         env_cooldown = os.getenv("LLM_ROUTER_COOLDOWN_SECONDS")
         if env_cooldown:
             resolved["cooldown_seconds"] = int(env_cooldown)
+
+    try:
+        import yaml as _yaml
+        from pathlib import Path as _Path
+        cfg_path = _Path(__file__).resolve().parents[2] / "config" / "resilience.yaml"
+        if cfg_path.exists():
+            with open(cfg_path, "r") as f:
+                _cfg = _yaml.safe_load(f) or {}
+            _timeout_cfg = _cfg.get("timeout") or {}
+        else:
+            _timeout_cfg = {}
+    except Exception:
+        _timeout_cfg = {}
+
+    if "first_chunk_timeout" not in resolved:
+        env_fct = os.getenv("LLM_FIRST_CHUNK_TIMEOUT")
+        if env_fct:
+            resolved["first_chunk_timeout"] = float(env_fct)
+        else:
+            fct = _timeout_cfg.get("first_chunk_timeout")
+            if fct is not None:
+                resolved["first_chunk_timeout"] = float(fct)
 
     return RouterPolicy(**resolved)
 
@@ -233,24 +258,33 @@ class ModelRouter(BaseLLMService):
         return available if available else [self.primary]
 
     def _filter_tools_for_provider(
-        self, tools: Optional[List[Union[ToolType, str, Dict]]], provider: LLMProvider
+        self, tools: Optional[List[Union[ToolType, str, Dict]]], target: RouteTarget
     ) -> Optional[List[Union[ToolType, str, Dict]]]:
         """
         针对不同提供商过滤工具
 
         Args:
             tools: 工具列表
-            provider: 目标提供商
+            target: 路由目标（提供商 + 模型）
 
         Returns:
             过滤后的工具列表
         """
         if not tools:
             return tools
-        if provider == LLMProvider.CLAUDE:
-            return tools
-        # 非 Claude：仅保留 dict 类型工具（避免 native tool 字符串）
-        return [tool for tool in tools if isinstance(tool, dict)]
+        try:
+            return resolve_tools_for_target(
+                tools=tools,
+                provider=target.provider,
+                model=target.model,
+            )
+        except Exception as e:
+            logger.warning(
+                f"工具绑定解析失败，回退到保守过滤: target={target.name}, error={e}"
+            )
+            if target.provider == LLMProvider.CLAUDE:
+                return tools
+            return [tool for tool in tools if isinstance(tool, dict)]
 
     async def probe(
         self, max_retries: int = 3, message: str = "ping", include_unhealthy: bool = False
@@ -356,7 +390,7 @@ class ModelRouter(BaseLLMService):
         for target in self._select_targets():
             start_time = time.time()
             try:
-                filtered_tools = self._filter_tools_for_provider(tools, target.provider)
+                filtered_tools = self._filter_tools_for_provider(tools, target)
                 response = await target.service.create_message_async(
                     messages=messages, system=system, tools=filtered_tools, **kwargs
                 )
@@ -391,16 +425,23 @@ class ModelRouter(BaseLLMService):
         **kwargs,
     ) -> AsyncIterator[LLMResponse]:
         """
-        创建消息（流式）
+        创建消息（流式），首 chunk 超时自动 fallback。
         """
+        import asyncio as _aio
+
+        default_fct = getattr(self.policy, "first_chunk_timeout", 24.0)
         last_error: Optional[Exception] = None
 
         for target in self._select_targets():
             yielded = False
             start_time = time.time()
+
+            target_cfg = getattr(target.service, "config", None)
+            fct = getattr(target_cfg, "first_chunk_timeout", None) or default_fct
+
             try:
-                filtered_tools = self._filter_tools_for_provider(tools, target.provider)
-                async for chunk in target.service.create_message_stream(
+                filtered_tools = self._filter_tools_for_provider(tools, target)
+                stream = target.service.create_message_stream(
                     messages=messages,
                     system=system,
                     tools=filtered_tools,
@@ -408,11 +449,34 @@ class ModelRouter(BaseLLMService):
                     on_content=on_content,
                     on_tool_call=on_tool_call,
                     **kwargs,
-                ):
-                    yielded = True
-                    # 🆕 覆盖 chunk.model 为实际使用的模型（用于准确计费）
+                )
+                aiter = stream.__aiter__()
+
+                try:
+                    first_chunk = await _aio.wait_for(
+                        aiter.__anext__(), timeout=fct,
+                    )
+                except _aio.TimeoutError:
+                    raise TimeoutError(
+                        f"First chunk timeout ({fct}s) "
+                        f"for {target.name}, falling back"
+                    )
+                except StopAsyncIteration:
+                    latency_ms = (time.time() - start_time) * 1000
+                    if self.health_monitor:
+                        self.health_monitor.record_success(target.name, latency_ms)
+                    self._record_success(target)
+                    self._last_selected = target.name
+                    return
+
+                yielded = True
+                first_chunk.model = target.service.config.model
+                yield first_chunk
+
+                async for chunk in aiter:
                     chunk.model = target.service.config.model
                     yield chunk
+
                 latency_ms = (time.time() - start_time) * 1000
                 if self.health_monitor:
                     self.health_monitor.record_success(target.name, latency_ms)
@@ -425,9 +489,12 @@ class ModelRouter(BaseLLMService):
                     self.health_monitor.record_failure(target.name, latency_ms, e)
                 self._record_failure(target, e)
                 last_error = e
-                # 已经开始输出时不切换，避免重复输出
                 if yielded:
                     raise
+                logger.warning(
+                    f"Stream fallback: {target.name} failed ({type(e).__name__}: {e}), "
+                    f"trying next target"
+                )
                 continue
 
         raise last_error if last_error else RuntimeError("模型流式调用失败：无可用目标")
