@@ -38,35 +38,18 @@ class LocalNodeBase(ABC):
         self,
         node_id: str = "local",
         display_name: str = "本地节点",
-        allowlist: Optional[List[str]] = None,
-        safe_bins: Optional[List[str]] = None,
+        **kwargs,
     ):
-        """
-        初始化本地节点
-
-        Args:
-            node_id: 节点 ID
-            display_name: 显示名称
-            allowlist: 命令白名单
-            safe_bins: 安全的可执行文件名
-        """
         self.node_id = node_id
         self.display_name = display_name
         self._initialized = False
 
-        # Shell 执行器的默认 cwd
-        # frozen 模式下 get_bundle_dir() 返回 _MEIPASS（含 .pyc 文件），
-        # 不能用作子进程 cwd，否则 python3 会加载到错误版本的 .pyc
         if is_frozen():
             default_cwd = os.path.expanduser("~")
         else:
             default_cwd = str(get_bundle_dir())
 
-        self.shell_executor = ShellExecutor(
-            allowlist=allowlist,
-            safe_bins=safe_bins,
-            default_cwd=default_cwd,
-        )
+        self.shell_executor = ShellExecutor(default_cwd=default_cwd)
 
         self.python_info: Dict[str, object] = {
             "available": False, "version": "", "path": "", "has_safe_path": False,
@@ -196,16 +179,34 @@ class LocalNodeBase(ABC):
         "is not recognized as an internal or external command",
     )
 
-    # Pattern for allowlist rejections — needs a different hint.
-    _ALLOWLIST_PATTERN = "命令不在白名单中"
-
     async def _handle_system_run(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        处理 system.run 命令
+        """Execute system.run command with denylist security.
 
-        执行 system.run 命令
+        Security tiers:
+        - Hard deny (denylist): blocked, not executed, hint to find alternative
+        - Risky (soft confirm): executed, but result includes hitl hint so
+          Agent asks user BEFORE next risky command
+        - Normal: executed, no hint
         """
         run_params = SystemRunParams.from_dict(params)
+
+        verdict, risk_reason = self.shell_executor.check_security(run_params.command)
+        if verdict == "confirm":
+            full_cmd = " ".join(run_params.command)
+            return {
+                "success": False,
+                "action": "run",
+                "node": self.node_id,
+                "error": f"Risky command needs user approval: {risk_reason}",
+                "_hint": (
+                    f"⚠️ 此命令存在安全风险：{risk_reason}\n"
+                    f"完整命令: {full_cmd}\n"
+                    f"潜在后果：可能导致数据丢失、系统状态变更或服务中断。\n"
+                    f"你必须立即调用 hitl 工具，向用户展示完整命令和风险说明，"
+                    f"询问是否同意执行。hitl 的 default_action 必须设为 'deny'，"
+                    f"这样用户不在时自动拒绝。用户明确同意后重试原命令。"
+                ),
+            }
 
         result = await self.shell_executor.execute(
             command=run_params.command,
@@ -216,21 +217,36 @@ class LocalNodeBase(ABC):
 
         payload = result.to_payload()
 
-        # Append actionable hint when a command is blocked or dependency is missing.
-        if not result.success:
+        elapsed_s = result.elapsed_ms / 1000.0
+        cmd_str = " ".join(run_params.command)
+        if result.success:
+            payload["_status_line"] = f"[exit:0 | {elapsed_s:.1f}s]"
+        else:
             combined = f"{result.stderr}\n{result.stdout}"
 
-            # Allowlist rejection — guide Agent to use whitelist_add
-            if self._ALLOWLIST_PATTERN in combined:
+            if "blocked by security policy" in combined:
                 payload["_hint"] = (
-                    "⚠️ 命令被白名单拦截！你必须立即调用 hitl 工具，"
-                    "询问用户是否同意将该命令加入白名单。"
-                    "用户同意后调用 nodes（action=whitelist_add, "
-                    "executables=[\"命令名\"]）加入白名单，然后重试原命令。"
-                    "禁止跳过 hitl 直接尝试其他方案。"
+                    "⛔ 此命令被安全策略硬拦截（不可逆破坏性操作），禁止执行。"
+                    "请寻找更安全的替代方案，不要尝试绕过。"
+                )
+            elif result.timed_out:
+                payload["_hint"] = (
+                    f"命令超时。Try: 增大 timeout_ms 或拆分为更小的步骤。"
+                    f"也可以用 nodes which {run_params.command[0]} 确认命令可用。"
+                )
+            elif result.exit_code == 127:
+                bin_name = run_params.command[0]
+                payload["_hint"] = (
+                    f"Command not found: {bin_name}. "
+                    f"Use: nodes which {bin_name} 检查是否可用。"
+                    f"如需安装，先用 hitl 征得用户同意。"
+                )
+            elif result.exit_code == 126:
+                payload["_hint"] = (
+                    f"Permission denied for: {cmd_str}. "
+                    f"检查文件权限或是否需要 sudo。"
                 )
             else:
-                # Dependency missing — guide Agent to use hitl + install
                 for pattern in self._DEPENDENCY_ERROR_PATTERNS:
                     if pattern in combined:
                         payload["_hint"] = (
@@ -241,6 +257,13 @@ class LocalNodeBase(ABC):
                             "禁止跳过 hitl 直接尝试其他方案。"
                         )
                         break
+
+            exit_label = f"exit:{result.exit_code}"
+            if result.timed_out:
+                exit_label = "exit:timeout"
+            stderr_brief = result.stderr.split("\n")[0][:80] if result.stderr else ""
+            suffix = f" | {stderr_brief}" if stderr_brief else ""
+            payload["_status_line"] = f"[{exit_label} | {elapsed_s:.1f}s{suffix}]"
 
         return payload
 

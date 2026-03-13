@@ -37,11 +37,16 @@ class NodeConfig:
     allowlist: List[str] = field(default_factory=list)
     safe_bins: List[str] = field(default_factory=list)
 
+    # 执行审批策略默认动作（来自 config/local_mode.yaml）
+    exec_default_action: str = "allow"
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "NodeConfig":
         """从字典创建配置"""
         local_config = data.get("local", {})
         security_config = local_config.get("security", {})
+
+        exec_default = cls._read_exec_default_action()
 
         return cls(
             enabled=data.get("enabled", True),
@@ -50,7 +55,23 @@ class NodeConfig:
             ask_on_miss=security_config.get("ask", "on-miss") == "on-miss",
             allowlist=local_config.get("allowlist", []),
             safe_bins=local_config.get("safe_bins", []),
+            exec_default_action=exec_default,
         )
+
+    @staticmethod
+    def _read_exec_default_action() -> str:
+        """Read exec_policy.default_action from config/local_mode.yaml."""
+        try:
+            import yaml
+            from pathlib import Path
+            path = Path("config/local_mode.yaml")
+            if path.exists():
+                with open(path) as f:
+                    raw = yaml.safe_load(f) or {}
+                return raw.get("exec_policy", {}).get("default_action", "allow")
+        except Exception:
+            pass
+        return "allow"
 
 
 class NodeManager:
@@ -116,6 +137,7 @@ class NodeManager:
             self.local_node = WindowsLocalNode(
                 allowlist=self.config.allowlist if self.config.allowlist else None,
                 safe_bins=self.config.safe_bins if self.config.safe_bins else None,
+                exec_default_action=self.config.exec_default_action,
             )
         elif platform == "linux":
             # TODO: LinuxLocalNode
@@ -247,30 +269,31 @@ class NodeManager:
             timeout_ms=timeout_ms,
         )
 
+    def add_to_denylist(
+        self,
+        patterns: List[str],
+        node_id: str = "local",
+    ) -> Dict[str, Any]:
+        """Add dangerous patterns to denylist at runtime."""
+        if node_id == "local" and self.local_node:
+            return self.local_node.shell_executor.add_to_denylist(patterns)
+        return {"error": f"Node unavailable: {node_id}"}
+
     def add_to_allowlist(
         self,
         executables: List[str],
         node_id: str = "local",
     ) -> Dict[str, Any]:
-        """
-        Extend command allowlist at runtime.
-
-        Args:
-            executables: Executable names or full paths to allow.
-            node_id: Target node ID.
-
-        Returns:
-            Summary dict.
-        """
+        """Legacy compat — delegates to shell_executor."""
         if node_id == "local" and self.local_node:
             return self.local_node.add_to_allowlist(executables)
-        return {"error": f"节点不可用: {node_id}"}
+        return {"error": f"Node unavailable: {node_id}"}
 
     def get_allowlist_info(self, node_id: str = "local") -> Dict[str, Any]:
-        """Get current allowlist state."""
+        """Return current security policy state."""
         if node_id == "local" and self.local_node:
             return self.local_node.get_allowlist_info()
-        return {"error": f"节点不可用: {node_id}"}
+        return {"error": f"Node unavailable: {node_id}"}
 
     async def notify(
         self,
@@ -310,7 +333,10 @@ def get_node_manager() -> NodeManager:
     """获取节点管理器单例"""
     global _node_manager
     if _node_manager is None:
-        _node_manager = NodeManager()
+        config = NodeConfig(
+            exec_default_action=NodeConfig._read_exec_default_action(),
+        )
+        _node_manager = NodeManager(config)
     return _node_manager
 
 
