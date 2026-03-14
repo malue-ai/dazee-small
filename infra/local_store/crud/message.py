@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.local_store.fts import delete_message_from_fts, sync_message_to_fts
@@ -208,17 +208,25 @@ async def list_messages(
     if before_cursor:
         cursor_msg = await session.get(LocalMessage, before_cursor)
         if cursor_msg:
-            query = query.where(LocalMessage.created_at < cursor_msg.created_at)
+            query = query.where(
+                or_(
+                    LocalMessage.created_at < cursor_msg.created_at,
+                    and_(
+                        LocalMessage.created_at == cursor_msg.created_at,
+                        LocalMessage.id < cursor_msg.id,
+                    ),
+                )
+            )
         # before_cursor: always query DESC to get the N messages
         # closest to the cursor, caller reverses for display order
-        query = query.order_by(LocalMessage.created_at.desc())
+        query = query.order_by(LocalMessage.created_at.desc(), LocalMessage.id.desc())
     else:
         if offset > 0:
             query = query.offset(offset)
         if order == "desc":
-            query = query.order_by(LocalMessage.created_at.desc())
+            query = query.order_by(LocalMessage.created_at.desc(), LocalMessage.id.desc())
         else:
-            query = query.order_by(LocalMessage.created_at.asc())
+            query = query.order_by(LocalMessage.created_at.asc(), LocalMessage.id.asc())
 
     query = query.limit(limit)
 

@@ -496,13 +496,17 @@ class ConversationService:
             if not conv:
                 raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
 
+            # before_cursor pagination must always query latest-first, then normalize
+            # to chronological order for the response payload.
+            query_order = "desc" if before_cursor else order
+
             # 多取 1 条用于判断 has_more
             messages = await local_crud.list_messages(
                 session=session,
                 conversation_id=conversation_id,
                 limit=limit + 1,
                 offset=offset if not before_cursor else 0,
-                order=order,
+                order=query_order,
                 before_cursor=before_cursor,
             )
 
@@ -528,9 +532,26 @@ class ConversationService:
                 for msg in messages
             ]
 
-            # next_cursor: oldest message ID in current batch,
-            # used by client to load even older messages
-            next_cursor = items[0].id if has_more and items else None
+            # next_cursor should always point to the oldest message in the current batch
+            # when cursor-based "load older" pagination is supported.
+            next_cursor: Optional[str] = None
+            if has_more and items:
+                if before_cursor:
+                    next_cursor = items[0].id
+                elif order == "desc":
+                    next_cursor = items[-1].id
+
+            if has_more and next_cursor is None:
+                logger.warning(
+                    "Cursor pagination has_more without next_cursor",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "order": order,
+                        "before_cursor": before_cursor,
+                        "limit": limit,
+                        "offset": offset,
+                    },
+                )
 
             # 构建 conversation_metadata
             conv_metadata = self._parse_metadata(conv.metadata_json)

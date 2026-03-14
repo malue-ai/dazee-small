@@ -65,6 +65,16 @@ export const useConversationStore = defineStore('conversation', () => {
   /** 是否有消息 */
   const hasMessages = computed(() => messages.value.length > 0)
 
+  /**
+   * Update cursor pagination state.
+   * Cursor pagination is only available when both has_more and next_cursor are present.
+   */
+  function updateCursorPagination(hasMoreFlag: boolean, cursor: string | null): void {
+    const canContinue = hasMoreFlag && Boolean(cursor)
+    hasMore.value = canContinue
+    nextCursor.value = canContinue ? cursor : null
+  }
+
   // ==================== 方法 ====================
 
   /**
@@ -154,12 +164,13 @@ export const useConversationStore = defineStore('conversation', () => {
     }
 
     try {
-      const result = await chatApi.getConversationMessages(conversationId, 100, 0, 'asc')
-      messagesMap.value[conversationId] = result.messages.map(processHistoryMessage)
-      
-      // 保存分页信息
-      hasMore.value = result.has_more
-      nextCursor.value = result.next_cursor
+      const result = await chatApi.getConversationMessages(conversationId, 100, 0, 'desc')
+      // Backend returns latest-first for initial page; reverse for chronological UI rendering.
+      const chronologicalMessages = [...result.messages].reverse()
+      messagesMap.value[conversationId] = chronologicalMessages.map(processHistoryMessage)
+
+      // Save pagination state. Missing cursor means "cannot continue by cursor".
+      updateCursorPagination(result.has_more, result.next_cursor)
       
       // 从 conversation_metadata 中提取 plan
       if (result.conversation_metadata?.plan) {
@@ -193,20 +204,17 @@ export const useConversationStore = defineStore('conversation', () => {
         nextCursor.value
       )
 
-      if (result.messages.length > 0) {
+      const newMessages = result.messages.map(processHistoryMessage)
+      if (newMessages.length > 0) {
         // 将新消息插入到列表开头
-        const newMessages = result.messages.map(processHistoryMessage)
         const currentMsgs = messagesMap.value[currentId.value] || []
         messagesMap.value[currentId.value] = [...newMessages, ...currentMsgs]
-        
-        // 更新分页信息
-        hasMore.value = result.has_more
-        nextCursor.value = result.next_cursor
-        
-        return true
       }
-      
-      return false
+
+      // Missing cursor should stop further "load more" attempts.
+      updateCursorPagination(result.has_more, result.next_cursor)
+
+      return newMessages.length > 0
     } catch (error) {
       console.error('❌ 加载更多消息失败:', error)
       return false
