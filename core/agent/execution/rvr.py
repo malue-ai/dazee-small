@@ -549,11 +549,16 @@ class RVRExecutor(BaseExecutor):
                 )
 
         # 更新消息历史
-        # 添加 assistant 消息（包含 tool_use）
-        assistant_content = getattr(response, "raw_content_blocks", None) or []
+        # 添加 assistant 消息（包含 tool_use + thinking）
+        assistant_content = (
+            getattr(response, "raw_content_blocks", None)
+            or getattr(response, "raw_content", None)
+            or []
+        )
         if not assistant_content and response.tool_calls:
-            # 构建 content blocks
             assistant_content = []
+            if response.thinking:
+                assistant_content.append({"type": "thinking", "thinking": response.thinking})
             if response.content:
                 assistant_content.append({"type": "text", "text": response.content})
             for tc in response.tool_calls:
@@ -790,14 +795,17 @@ class RVRExecutor(BaseExecutor):
                                 "⚠️ 强制 Plan: 拦截非 plan 工具调用，注入提醒重试"
                             )
 
-                            # Build assistant message (preserve LLM response)
                             assistant_content = (
-                                response.raw_content_blocks
-                                if hasattr(response, "raw_content_blocks")
-                                else []
+                                getattr(response, "raw_content_blocks", None)
+                                or getattr(response, "raw_content", None)
+                                or []
                             )
                             if not assistant_content and response.tool_calls:
                                 assistant_content = []
+                                if response.thinking:
+                                    assistant_content.append(
+                                        {"type": "thinking", "thinking": response.thinking}
+                                    )
                                 if response.content:
                                     assistant_content.append(
                                         {"type": "text", "text": response.content}
@@ -955,9 +963,17 @@ class RVRExecutor(BaseExecutor):
                             "⚠️ 强制 Plan (非流式): 拦截非 plan 工具调用，注入提醒重试"
                         )
 
-                        assistant_content = getattr(response, "raw_content_blocks", None) or []
+                        assistant_content = (
+                            getattr(response, "raw_content_blocks", None)
+                            or getattr(response, "raw_content", None)
+                            or []
+                        )
                         if not assistant_content and response.tool_calls:
                             assistant_content = []
+                            if response.thinking:
+                                assistant_content.append(
+                                    {"type": "thinking", "thinking": response.thinking}
+                                )
                             if response.content:
                                 assistant_content.append(
                                     {"type": "text", "text": response.content}

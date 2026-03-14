@@ -1295,46 +1295,46 @@ class DeepSeekAdaptor(OpenAIAdaptor):
         For assistant messages that contain ``{"type": "thinking", ...}``
         blocks, extract the thinking text and attach it as
         ``reasoning_content`` on the resulting OpenAI-format assistant
-        message.  All other conversion logic is inherited from
-        ``OpenAIAdaptor``.
+        message.
+
+        DeepSeek Reasoner requires ALL assistant messages to carry
+        ``reasoning_content`` (even empty string), otherwise the API
+        returns 400.  This method always injects the field for
+        assistant messages regardless of whether thinking blocks exist.
         """
-        content = msg.content
-
-        # Only special handling for assistant messages with list content
-        if not (isinstance(content, list) and msg.role == "assistant"):
+        if msg.role != "assistant":
             return super()._convert_message(msg)
 
-        # Separate thinking blocks from the rest
         thinking_text = ""
-        non_thinking_blocks = []
+        content = msg.content
+        message_for_convert = msg
 
-        for block in content:
-            if isinstance(block, dict) and block.get("type") in (
-                "thinking",
-                "redacted_thinking",
-            ):
-                thinking_text += block.get("thinking", "")
-            else:
-                non_thinking_blocks.append(block)
+        if isinstance(content, list):
+            non_thinking_blocks = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") in (
+                    "thinking",
+                    "redacted_thinking",
+                ):
+                    thinking_text += block.get("thinking", "")
+                else:
+                    non_thinking_blocks.append(block)
 
-        if not thinking_text:
-            # No thinking blocks – delegate entirely to parent
-            return super()._convert_message(msg)
+            message_for_convert = Message(
+                role=msg.role,
+                content=(
+                    non_thinking_blocks
+                    if non_thinking_blocks
+                    else [{"type": "text", "text": ""}]
+                ),
+            )
 
-        # Build a Message without thinking blocks so the parent logic
-        # handles text / tool_use / tool_result normally.
-        modified_msg = Message(
-            role=msg.role,
-            content=non_thinking_blocks if non_thinking_blocks else [{"type": "text", "text": ""}],
-        )
-        result = super()._convert_message(modified_msg)
+        result = super()._convert_message(message_for_convert)
 
-        # Inject reasoning_content into the assistant message dict(s)
         if isinstance(result, list):
-            for r in result:
-                if isinstance(r, dict) and r.get("role") == "assistant":
-                    r["reasoning_content"] = thinking_text
-                    break
+            for item in result:
+                if isinstance(item, dict) and item.get("role") == "assistant":
+                    item["reasoning_content"] = thinking_text
         elif isinstance(result, dict) and result.get("role") == "assistant":
             result["reasoning_content"] = thinking_text
 
