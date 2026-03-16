@@ -1288,6 +1288,41 @@ class DeepSeekAdaptor(OpenAIAdaptor):
       safe to always include it.
     """
 
+    @staticmethod
+    def _downgrade_unsupported_multimodal_blocks(
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> tuple[Union[str, List[Dict[str, Any]]], int]:
+        """Convert unsupported multimodal blocks to plain text placeholders."""
+        if not isinstance(content, list):
+            return content, 0
+
+        converted_blocks: List[Dict[str, Any]] = []
+        downgraded_count = 0
+
+        for block in content:
+            if not isinstance(block, dict):
+                converted_blocks.append({"type": "text", "text": str(block)})
+                continue
+
+            block_type = block.get("type", "")
+            if block_type == "image":
+                downgraded_count += 1
+                converted_blocks.append(
+                    {"type": "text", "text": "[图片输入已省略：当前模型仅支持文本输入]"}
+                )
+                continue
+
+            if block_type == "input_audio":
+                downgraded_count += 1
+                converted_blocks.append(
+                    {"type": "text", "text": "[音频输入已省略：当前模型仅支持文本输入]"}
+                )
+                continue
+
+            converted_blocks.append(block)
+
+        return converted_blocks, downgraded_count
+
     def _convert_message(self, msg: Message) -> Union[Dict, List[Dict]]:
         """
         Override to convert thinking blocks → reasoning_content.
@@ -1302,11 +1337,22 @@ class DeepSeekAdaptor(OpenAIAdaptor):
         returns 400.  This method always injects the field for
         assistant messages regardless of whether thinking blocks exist.
         """
+        converted_content, downgraded_count = self._downgrade_unsupported_multimodal_blocks(
+            msg.content
+        )
+        if downgraded_count > 0:
+            logger.warning(
+                "DeepSeek adaptor downgraded unsupported multimodal blocks: "
+                f"count={downgraded_count}, role={msg.role}"
+            )
+
         if msg.role != "assistant":
-            return super()._convert_message(msg)
+            if converted_content is msg.content:
+                return super()._convert_message(msg)
+            return super()._convert_message(Message(role=msg.role, content=converted_content))
 
         thinking_text = ""
-        content = msg.content
+        content = converted_content
         message_for_convert = msg
 
         if isinstance(content, list):
