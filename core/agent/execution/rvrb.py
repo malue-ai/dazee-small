@@ -1744,6 +1744,8 @@ class RVRBExecutor(RVRExecutor):
 
             if not is_error:
                 state.record_execution(f"tool:{tool_name}", True, result_content)
+                if self._backtrack_manager:
+                    self._backtrack_manager.reset_category_streaks(session_id)
             else:
                 error = Exception(
                     (result_info.error_msg if result_info else None)
@@ -1941,6 +1943,8 @@ class RVRBExecutor(RVRExecutor):
 
             if not is_error:
                 state.record_execution(f"tool:{tool_name}", True, result_content)
+                if self._backtrack_manager:
+                    self._backtrack_manager.reset_category_streaks(session_id)
             else:
                 error = Exception(
                     (result_info.error_msg if result_info else None)

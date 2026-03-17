@@ -67,6 +67,7 @@ class TokenAuditRecord(BaseModel):
     # 安全标记
     is_anomaly: bool = Field(False, description="是否为异常消耗")
     anomaly_reason: Optional[str] = Field(None, description="异常原因")
+    should_warn_user: bool = Field(False, description="是否应向用户发送告警提醒")
 
     # 扩展上下文追踪
     is_extended_context: bool = Field(False, description="是否使用了扩展窗口")
@@ -264,6 +265,7 @@ class TokenAuditor:
             query_hash=query_hash,
             is_anomaly=is_anomaly,
             anomaly_reason=anomaly_reason,
+            should_warn_user=is_anomaly and is_session_cumulative,
         )
 
         # 存储

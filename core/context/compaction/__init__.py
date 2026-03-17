@@ -856,14 +856,26 @@ def trim_by_token_budget(
 
     if preserve_tool_results and last_start_idx > preserve_first_messages:
         middle_budget = remaining_budget - last_tokens
+        _middle_indices: set = set()
 
         for i in range(preserve_first_messages, last_start_idx):
             msg = messages[i]
             if _has_tool_result(msg):
-                msg_token = message_tokens[i]
-                if middle_tokens + msg_token <= middle_budget:
-                    middle_part.append(msg)
-                    middle_tokens += msg_token
+                pair_cost = message_tokens[i]
+                pair_msgs = [(i, msg)]
+                # Keep the preceding assistant message (tool_use) as an
+                # atomic pair so ensure_tool_pairs has less to repair.
+                if i > preserve_first_messages and i - 1 not in _middle_indices:
+                    prev = messages[i - 1]
+                    if prev.get("role") == "assistant":
+                        pair_cost += message_tokens[i - 1]
+                        pair_msgs.insert(0, (i - 1, prev))
+                if middle_tokens + pair_cost <= middle_budget:
+                    for idx, m in pair_msgs:
+                        if idx not in _middle_indices:
+                            middle_part.append(m)
+                            _middle_indices.add(idx)
+                    middle_tokens += pair_cost
 
     # 7. 组合结果
     result = first_part + middle_part + last_part

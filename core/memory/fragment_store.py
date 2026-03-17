@@ -12,6 +12,7 @@ import json
 import os
 from dataclasses import asdict
 from datetime import datetime, timedelta
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text as sa_text
@@ -20,6 +21,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from logger import get_logger
 
 logger = get_logger("memory.fragment_store")
+
+
+def _to_jsonable(value: Any) -> Any:
+    """Recursively convert common non-JSON types to JSON-safe values."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_jsonable(v) for v in value]
+    return value
+
+
+def _safe_json_dumps(payload: Any) -> str:
+    """Serialize payload to JSON with best-effort fallback for unknown objects."""
+    return json.dumps(_to_jsonable(payload), ensure_ascii=False, default=str)
 
 
 class FragmentStore:
@@ -81,9 +100,13 @@ class FragmentStore:
         ):
             val = getattr(fragment, field_name, None)
             if val is not None:
-                hints[field_name] = asdict(val)
+                hints[field_name] = _to_jsonable(asdict(val))
 
-        metadata = fragment.metadata if isinstance(fragment.metadata, dict) else {}
+        metadata = (
+            _to_jsonable(fragment.metadata)
+            if isinstance(fragment.metadata, dict)
+            else {}
+        )
 
         async with self._get_session() as session:
             await session.execute(
@@ -102,8 +125,8 @@ class FragmentStore:
                     "session_id": fragment.session_id,
                     "timestamp": fragment.timestamp.isoformat(),
                     "confidence": fragment.confidence,
-                    "hints_json": json.dumps(hints, ensure_ascii=False),
-                    "metadata_json": json.dumps(metadata, ensure_ascii=False),
+                    "hints_json": _safe_json_dumps(hints),
+                    "metadata_json": _safe_json_dumps(metadata),
                     "created_at": fragment.created_at.isoformat(),
                 },
             )
