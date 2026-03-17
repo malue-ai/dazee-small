@@ -109,6 +109,7 @@ class BacktrackManager:
 
         self._backtrack_history: Dict[str, List[BacktrackResult]] = {}
         self._last_error_fingerprints: Dict[str, str] = {}
+        self._error_category_streaks: Dict[str, Dict[str, int]] = {}
 
     async def evaluate_and_decide(
         self, ctx: BacktrackContext, use_llm: bool = True
@@ -198,6 +199,33 @@ class BacktrackManager:
                 f"✅ 回溯决策完成(熔断): decision=backtrack, "
                 f"backtrack_type={escalated_type.value}, confidence=0.90"
             )
+            return result
+
+        # Phase 3.5: Same error *category* repeating N times in a row.
+        # Catches cases where LLM tweaks parameters slightly but hits the
+        # same fundamental error class (e.g. CODE_SYNTAX_ERROR 14 times).
+        _MAX_CATEGORY_STREAK = 3
+        _cat_key = ctx.error.category.value
+        _cat_streaks = self._error_category_streaks.setdefault(ctx.session_id, {})
+        _cat_streaks[_cat_key] = _cat_streaks.get(_cat_key, 0) + 1
+
+        if _cat_streaks[_cat_key] >= _MAX_CATEGORY_STREAK:
+            logger.warning(
+                "Error category '%s' hit %d times in a row — escalating",
+                _cat_key, _cat_streaks[_cat_key],
+            )
+            _cat_streaks[_cat_key] = 0
+            result = BacktrackResult(
+                decision=BacktrackDecision.ESCALATE,
+                backtrack_type=BacktrackType.NO_BACKTRACK,
+                action={"ask_user": True},
+                reason=(
+                    f"同类错误 ({_cat_key}) 连续 {_MAX_CATEGORY_STREAK} 次失败，"
+                    "param_adjust 无效，需要用户介入或换策略"
+                ),
+                confidence=0.9,
+            )
+            self._record_backtrack(ctx.session_id, result)
             return result
 
         # Phase 4: 决策短路 — 高确定性场景跳过 LLM 评估
@@ -435,6 +463,15 @@ class BacktrackManager:
         """清除会话历史"""
         self._backtrack_history.pop(session_id, None)
         self._last_error_fingerprints.pop(session_id, None)
+
+    def reset_category_streaks(self, session_id: str) -> None:
+        """Reset error category streak counters for a session.
+
+        Call this when a tool execution succeeds so that the
+        consecutive-same-category escalation counter starts fresh.
+        """
+        if session_id in self._error_category_streaks:
+            self._error_category_streaks[session_id].clear()
 
     @staticmethod
     def _compute_error_fingerprint(error: ClassifiedError) -> str:

@@ -1091,7 +1091,7 @@ class ChatService:
                         history_messages.append({"role": db_msg.role, "content": content})
 
                     from core.llm.adaptor import ClaudeAdaptor
-                    history_messages = ClaudeAdaptor.ensure_tool_pairs(history_messages)
+                    history_messages = ClaudeAdaptor.prepare_messages_from_db(history_messages)
 
                     logger.info(
                         "历史消息已加载",
