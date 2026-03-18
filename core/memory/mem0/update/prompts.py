@@ -39,6 +39,13 @@ Focus on information that remains useful in **future conversations** (cross-sess
 - AI 助手的属性或回复内容
 - 已在指令中完成的一次性操作
 
+## Critical Rule: Distinguish User Identity from Third-Party Mentions
+
+Identity facts (name, nickname) are ONLY about the speaking user themselves:
+- "称呼: 老陈" → User's own nickname (self-reported) → Extract as user identity
+- "提到老陈" → A third party mentioned in conversation → Extract as relationship, NOT user identity
+- "老陈说要加紧" → Someone else named 老陈 → Extract as "用户的同事/上级老陈", NOT user identity
+
 ## Extraction Rules
 
 - 每个 fact 独立、完整、可独立检索
@@ -49,8 +56,8 @@ Focus on information that remains useful in **future conversations** (cross-sess
 
 ## Examples
 
-Input: "称呼: 良哥\n常用 Python + Pandas\n不要用 plotly\n正在分析销售数据"
-Output: ["用户称呼良哥", "用户常用 Python 和 Pandas", "用户不喜欢 plotly"]
+Input: "称呼: 老陈\n常用 Python + Pandas\n不要用 plotly\n正在分析销售数据"
+Output: ["用户称呼老陈", "用户常用 Python 和 Pandas", "用户不喜欢 plotly"]
 (Note: "正在分析销售数据" is a current-task instruction, not extracted)
 
 Input: "老板刚才在晨会上说，这周必须把永辉超市的合同签下来，不然季度KPI完不成"
@@ -58,6 +65,14 @@ Output: ["本周必须签署永辉超市合同，否则影响季度KPI", "老板
 
 Input: "每周三要写周报，真是烦人"
 Output: ["用户每周三需要写周报", "用户对写周报感到厌烦"]
+
+Input: "帮我问下老王报价多少"
+Output: ["用户的联系人中有老王"]
+(Note: "老王" is a third party, NOT the user's own name/nickname)
+
+Input: "老王说下周要开项目评审会"
+Output: ["老王通知下周有项目评审会"]
+(Note: "老王" is someone else relaying information, NOT the user)
 
 Return the extracted facts as a JSON list of strings.
 """

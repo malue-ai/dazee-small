@@ -151,8 +151,8 @@ class ToolHint:
 class IdentityHint:
     """用户身份与个人信息线索"""
 
-    name: Optional[str] = None  # 姓名（如：李良、张三）
-    nickname: Optional[str] = None  # 希望被称呼的方式（如：良哥、老王）
+    name: Optional[str] = None  # 姓名
+    nickname: Optional[str] = None  # 用户自报的称呼方式
     role: Optional[str] = None  # 职业角色（如：产品经理、前端开发）
     company: Optional[str] = None  # 公司/团队/组织
     location: Optional[str] = None  # 所在地/时区
