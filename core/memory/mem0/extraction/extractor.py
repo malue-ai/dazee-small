@@ -203,10 +203,10 @@ long_term_memories: [] → 纯任务操作，无持久用户特征
 </example>
 
 <example>
-对话: [user] "你可以叫我小美" [assistant] "好的小美！"
+对话: [user] "你可以叫我小明" [assistant] "好的小明！叫我小搭子就行"
 long_term_memories:
-  ✅ {{"content": "称呼: 小美", "category": "identity"}} → 用户主动自报
-  ❌ {{"content": "昵称: 智能助手", "category": "identity"}} → AI 助手的自称，不是用户的
+  ✅ {{"content": "称呼: 小明", "category": "identity"}} → 用户的称呼
+  ❌ {{"content": "昵称: 小搭子", "category": "identity"}} → 这是 AI 助手的名字，不是用户的
 </example>
 
 <example>
