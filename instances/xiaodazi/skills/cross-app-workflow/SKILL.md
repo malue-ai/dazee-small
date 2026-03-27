@@ -1,6 +1,6 @@
 ---
 name: cross-app-workflow
-description: Chain multiple local apps and skills into complex multi-step workflows. Orchestrate file operations, document generation, email, and app automation into seamless pipelines.
+description: "Orchestrates multi-step workflows chaining local apps and skills into end-to-end pipelines. Use when a user request spans multiple tools — e.g. extracting email attachments, analyzing data, generating reports, and sending replies in one flow."
 metadata:
   xiaodazi:
     dependency_level: builtin
@@ -11,80 +11,67 @@ metadata:
 
 # 跨应用工作流
 
-将多个本地应用和 Skill 串联成复杂的多步骤工作流，完成端到端的自动化任务。
+编排型 Skill — 指导 Agent 将多个 Skill 串联成端到端自动化任务。本身不执行具体操作。
 
-## 使用场景
+## 工作流编排步骤
 
-- 用户说「把邮件里的附件提取出来，分析 Excel，生成报告，再回复邮件」
-- 用户说「从这 5 个 PDF 里提取数据，汇总到 Excel，做个图表」
-- 用户说「把会议纪要整理成行动项，加到日历，通知参会者」
-- 用户说「分析这个文件夹的数据，生成 PPT，保存到桌面」
+1. **分析目标** → 识别用户请求中所有子任务
+2. **映射 Skill** → 每个子任务匹配最佳 Skill（见下方模板）
+3. **执行并传递** → 上一步输出作为下一步输入，中间文件存 `~/Desktop/xiaodazi_workflow/`
+4. **错误恢复** → 失败时切换替代 Skill 或通知用户
 
-## 执行方式
+## 常见工作流模板
 
-这是一个**编排型 Skill**，本身不执行具体操作，而是指导 Agent 如何将多个 Skill 串联使用。
-
-### 工作流编排原则
-
-1. **理解完整目标**：分析用户请求，识别需要的所有步骤
-2. **拆解任务链**：将目标分解为有序的子任务
-3. **选择合适 Skill**：每个子任务匹配最佳 Skill
-4. **传递中间结果**：上一步的输出作为下一步的输入
-5. **错误恢复**：某步失败时尝试替代方案
-
-### 常见工作流模板
-
-#### 数据分析 → 报告生成
+### 数据分析 → 报告
 
 ```
-Step 1: [excel-analyzer] 读取并分析数据文件
-Step 2: [LLM] 基于分析结果生成洞察和结论
-Step 3: [elegant-reports / word-processor] 生成格式化报告
+Step 1: [excel-analyzer] 读取并分析数据 → 输出: analysis.json
+Step 2: [LLM] 生成洞察和结论 → 输出: insights.md
+Step 3: [elegant-reports] 生成格式化报告 → 输出: report.docx
 Step 4: [file-manager] 保存到用户指定位置
 ```
 
-#### 邮件处理 → 任务分发
+### 邮件处理 → 任务分发
 
 ```
-Step 1: [himalaya / outlook-cli] 读取邮件内容和附件
-Step 2: [LLM] 提取关键信息和行动项
-Step 3: [meeting-notes-to-action-items] 结构化行动项
-Step 4: [apple-calendar / outlook-cli] 创建日程提醒
-Step 5: [himalaya / outlook-cli] 起草并发送回复
+Step 1: [himalaya / outlook-cli] 读取邮件 + 附件 → 输出: email_content + attachments
+Step 2: [meeting-notes-to-action-items] 结构化行动项 → 输出: action_items.md
+Step 3: [apple-calendar] 创建日程提醒
+Step 4: [himalaya / outlook-cli] 起草并发送回复（需 HITL 确认）
 ```
 
-#### 内容创作 → 多平台分发
+### 内容创作 → 多平台分发
 
 ```
-Step 1: [writing-assistant] 撰写长文
-Step 2: [humanizer] 去 AI 味润色
-Step 3: [content-reformatter] 适配各平台格式
-Step 4: [file-manager] 保存各版本到对应文件夹
+Step 1: [writing-assistant] 撰写长文 → 输出: draft.md
+Step 2: [humanizer] 润色去 AI 味 → 输出: polished.md
+Step 3: [content-reformatter] 适配各平台 → 输出: weixin.md, twitter.md, ...
+Step 4: [file-manager] 保存各版本
 ```
 
-#### 文献调研 → 报告
+## 错误恢复示例
 
 ```
-Step 1: [paper-search / arxiv-search] 搜索相关论文
-Step 2: [deep-doc-reader] 深度阅读关键论文
-Step 3: [literature-reviewer] 对比分析多篇文献
-Step 4: [word-processor] 生成文献综述报告
+Step 2 失败: [excel-analyzer] 无法解析 .xlsx（文件损坏）
+→ 替代方案: 用 Python pandas 直接读取: pd.read_excel("file.xlsx", engine="openpyxl")
+→ 如果仍失败: 通知用户「文件可能损坏，请检查是否可以在 Excel 中打开」
+→ 继续: 用替代方案输出继续 Step 3
 ```
 
-### 中间结果管理
+## 中间结果管理
 
-- 每步产生的文件保存到 `~/Desktop/xiaodazi_workflow/` 临时目录
+- 中间文件统一保存到 `~/Desktop/xiaodazi_workflow/`，按步骤编号命名
+- 大数据结果写入文件（不放入上下文），仅传递摘要给下一步
 - 工作流完成后提醒用户检查中间文件是否需要保留
-- 大数据中间结果写入文件，不全部放入上下文
 
 ## 安全规则
 
-- **每步执行前展示计划**：让用户了解接下来的操作
-- **敏感操作需确认**：发送邮件、删除文件等需用 HITL 确认
-- **错误不静默跳过**：某步失败时通知用户并提供替代方案
+- **执行前展示完整计划**：列出所有步骤，让用户确认再开始
+- **敏感操作 HITL 确认**：发送邮件、删除文件前必须确认
+- **失败时通知用户**：不静默跳过，提供替代方案让用户选择
 
 ## 输出规范
 
-- 开始前展示完整工作流计划（步骤列表）
-- 每步完成后报告进度
-- 全部完成后给出总结：执行了哪些操作、生成了哪些文件
+- 开始前展示步骤计划（编号列表 + 对应 Skill）
+- 每步完成后报告: `✅ Step N 完成 — 输出: <文件名>`
+- 全部完成后总结: 执行了哪些操作、生成了哪些文件、中间文件路径
