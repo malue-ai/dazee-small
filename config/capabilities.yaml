@@ -29,6 +29,38 @@ tool_classification:
   categories:
     # 文档生成能力由 xiaodazi Skills 提供，不使用 Pre-built Skills
 
+# ==================== 模型强绑定工具（配置驱动）====================
+#
+# 用于把“逻辑工具名”映射为 provider/model 强绑定的原生工具 schema。
+# 目标：模型版本升级时，通过 YAML 配置而不是改 Python 代码。
+#
+# 字段说明：
+# - server_tool_type: provider 原生工具 type（如 web_search_20260209）
+# - server_tool_name: 工具名（通常与逻辑名一致）
+# - model_exact: 精确匹配模型名（可选）
+# - model_prefix: 前缀匹配模型名（可选，推荐用于大版本自动兼容）
+#
+native_tool_bindings:
+  claude:
+    web_search:
+      server_tool_type: web_search_20260209
+      server_tool_name: web_search
+      model_exact:
+        - claude-sonnet-4-6
+        - claude-opus-4-6
+      model_prefix:
+        - claude-sonnet-4-
+        - claude-opus-4-
+    web_fetch:
+      server_tool_type: web_fetch_20260209
+      server_tool_name: web_fetch
+      model_exact:
+        - claude-sonnet-4-6
+        - claude-opus-4-6
+      model_prefix:
+        - claude-sonnet-4-
+        - claude-opus-4-
+
 # ==================== 能力类别定义 ====================
 #
 # 📌 小搭子能力分类（精简版）
