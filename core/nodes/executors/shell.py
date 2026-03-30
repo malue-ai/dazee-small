@@ -55,89 +55,116 @@ class ShellExecutor(BaseExecutor):
     # 最大输出大小（字节）
     MAX_OUTPUT_BYTES: int = 200000
 
+    HARD_DENY_PATTERNS: List[str] = [
+        "rm -rf /",
+        "rm -rf /*",
+        ":(){ :|:& };:",
+        "> /dev/sda",
+        "dd if=/dev/zero of=/dev/",
+        "chmod -R 777 /",
+    ]
+
+    HARD_DENY_BINS: Set[str] = {
+        "mkfs", "fdisk", "parted",
+    }
+
+    SOFT_CONFIRM_PATTERNS: List[str] = [
+        "rm -rf",
+        "rm -r ",
+        "shutdown",
+        "reboot",
+        "halt",
+        "init 0",
+        "init 6",
+        "chown -R",
+        "chmod -R",
+        "diskutil erase",
+    ]
+
+    SOFT_CONFIRM_BINS: Set[str] = {
+        "shutdown", "reboot", "halt",
+        "systemctl", "launchctl",
+    }
+
     def __init__(
         self,
+        default_cwd: Optional[str] = None,
+        # Legacy params — accepted but ignored
         allowlist: Optional[List[str]] = None,
         safe_bins: Optional[List[str]] = None,
-        default_cwd: Optional[str] = None,
+        denylist: Optional[List[str]] = None,
+        denied_bins: Optional[Set[str]] = None,
     ):
-        """
-        初始化 Shell 执行器
-
-        Args:
-            allowlist: 命令白名单（完整路径）
-            safe_bins: 安全的可执行文件名（无需审批）
-            default_cwd: 默认工作目录
-        """
-        self.allowlist = set(allowlist) if allowlist else None
-        self.safe_bins = set(safe_bins) if safe_bins else set()
         self.default_cwd = default_cwd or os.path.expanduser("~")
 
-        # Windows: build lowercase sets for case-insensitive matching
-        if _IS_WIN32:
-            self._allowlist_lower: Optional[Set[str]] = (
-                {self._normalize_win_path(p) for p in self.allowlist}
-                if self.allowlist
-                else None
-            )
-            self._safe_bins_lower: Set[str] = {
-                self._strip_win_ext(b.lower()) for b in self.safe_bins
-            }
-        else:
-            self._allowlist_lower = None
-            self._safe_bins_lower = set()
+    # ==================== Security Policy ====================
 
-    # ==================== Allowlist Management ====================
-
-    def add_to_allowlist(self, executables: List[str]) -> Dict[str, Any]:
-        """
-        Runtime extension of the allowlist.
-
-        Accepts both full paths (/opt/homebrew/bin/brew) and bare names (brew).
-        Full paths are added to self.allowlist; bare names to self.safe_bins.
-
-        Args:
-            executables: List of executable names or full paths to allow.
+    def check_security(self, command: List[str]) -> tuple[str, Optional[str]]:
+        """Three-tier security check.
 
         Returns:
-            Summary dict with counts of added items.
+            ("allow", None)          — safe to execute
+            ("deny", reason)         — hard block, do not execute
+            ("confirm", reason)      — risky, Agent must use hitl to ask user
         """
-        if self.allowlist is None:
-            # No allowlist configured → all commands are already allowed.
-            return {"added_paths": 0, "added_bins": 0, "note": "allowlist disabled, no-op"}
+        if not command:
+            return ("deny", "empty command")
 
-        added_paths = 0
-        added_bins = 0
+        bin_name = os.path.basename(command[0]).lower()
+        full_cmd = " ".join(command)
 
+        if bin_name in {b.lower() for b in self.HARD_DENY_BINS}:
+            return ("deny", f"Blocked: {bin_name} is a destructive system tool")
+
+        for pattern in self.HARD_DENY_PATTERNS:
+            if pattern in full_cmd:
+                return ("deny", f"Blocked: matches destructive pattern '{pattern}'")
+
+        if bin_name in {b.lower() for b in self.SOFT_CONFIRM_BINS}:
+            return ("confirm", f"'{bin_name}' is a potentially risky command")
+
+        for pattern in self.SOFT_CONFIRM_PATTERNS:
+            if pattern in full_cmd:
+                return ("confirm", f"Command contains risky pattern '{pattern}'")
+
+        return ("allow", None)
+
+    def add_to_denylist(self, patterns: List[str]) -> Dict[str, Any]:
+        """Add patterns to hard-deny list at runtime."""
+        added = 0
+        for p in patterns:
+            p = p.strip()
+            if not p:
+                continue
+            if " " not in p and "/" not in p:
+                self.HARD_DENY_BINS.add(p)
+            else:
+                self.HARD_DENY_PATTERNS.append(p)
+            added += 1
+        return {"added": added}
+
+    def add_to_allowlist(self, executables: List[str]) -> Dict[str, Any]:
+        """Legacy compat — remove items from deny/confirm lists."""
+        removed = 0
         for exe in executables:
             exe = exe.strip()
             if not exe:
                 continue
-
-            if "/" in exe or "\\" in exe:
-                # Full path
-                if exe not in self.allowlist:
-                    self.allowlist.add(exe)
-                    added_paths += 1
-                    logger.info(f"白名单新增路径: {exe}")
-            else:
-                # Bare executable name
-                if exe not in self.safe_bins:
-                    self.safe_bins.add(exe)
-                    added_bins += 1
-                    logger.info(f"白名单新增命令: {exe}")
-
-        return {"added_paths": added_paths, "added_bins": added_bins}
+            base = os.path.basename(exe).lower()
+            for s in (self.HARD_DENY_BINS, self.SOFT_CONFIRM_BINS):
+                if base in {b.lower() for b in s}:
+                    s.discard(base)
+                    removed += 1
+        return {"removed": removed}
 
     def get_allowlist_info(self) -> Dict[str, Any]:
-        """
-        Return current allowlist state for debugging / introspection.
-        """
+        """Return current security policy state."""
         return {
-            "enabled": self.allowlist is not None,
-            "allowlist_count": len(self.allowlist) if self.allowlist else 0,
-            "safe_bins_count": len(self.safe_bins),
-            "safe_bins": sorted(self.safe_bins) if self.safe_bins else [],
+            "mode": "denylist (default-open)",
+            "hard_deny_bins": sorted(self.HARD_DENY_BINS),
+            "hard_deny_patterns": self.HARD_DENY_PATTERNS,
+            "soft_confirm_bins": sorted(self.SOFT_CONFIRM_BINS),
+            "soft_confirm_patterns": self.SOFT_CONFIRM_PATTERNS,
         }
 
     # ==================== Environment Sanitization ====================
@@ -188,52 +215,7 @@ class ShellExecutor(BaseExecutor):
 
         return command
 
-    # ==================== Allowlist & Command Resolution ====================
-
-    def _check_allowlist(self, command: List[str]) -> bool:
-        """
-        检查命令是否在白名单中
-
-        Windows: 大小写无关 + 去掉 .exe/.cmd 扩展名后匹配
-        安全白名单匹配逻辑
-
-        Args:
-            command: 命令列表
-
-        Returns:
-            是否允许执行
-        """
-        if not self.allowlist:
-            return True
-
-        if not command:
-            return False
-
-        executable = command[0]
-
-        if _IS_WIN32:
-            # Case-insensitive full-path check
-            if (
-                self._allowlist_lower
-                and self._normalize_win_path(executable) in self._allowlist_lower
-            ):
-                return True
-
-            # Case-insensitive safe_bin check (strip .exe/.cmd extension)
-            bin_name = os.path.basename(executable)
-            stripped = self._strip_win_ext(bin_name.lower())
-            if stripped in self._safe_bins_lower:
-                return True
-        else:
-            # Unix: exact match
-            if executable in self.allowlist:
-                return True
-
-            bin_name = os.path.basename(executable)
-            if bin_name in self.safe_bins:
-                return True
-
-        return False
+    # (security check is in check_security() above)
 
     @staticmethod
     def _resolve_win_command(command: List[str]) -> List[str]:
@@ -414,16 +396,13 @@ class ShellExecutor(BaseExecutor):
         if _IS_WIN32:
             command = self._resolve_win_command(command)
 
-        # 白名单检查
-        if not self._check_allowlist(command):
-            bin_name = os.path.basename(command[0])
+        verdict, reason = self.check_security(command)
+        if verdict == "deny":
             return ShellResult(
                 success=False,
                 stderr=(
-                    f"命令不在白名单中: {command[0]}。"
-                    f"请先使用 hitl 工具询问用户是否同意将 {bin_name} 加入白名单，"
-                    f"用户同意后使用 nodes whitelist_add --executables [\"{bin_name}\"] "
-                    f"将其加入白名单，然后重试。"
+                    f"Command blocked by security policy: {reason}. "
+                    f"Use: nodes security_info to view current policy."
                 ),
                 exit_code=-1,
             )
@@ -454,18 +433,25 @@ class ShellExecutor(BaseExecutor):
             )
         except FileNotFoundError as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
+            bin_name = command[0] if command else "unknown"
             return ShellResult(
                 success=False,
-                stderr=f"命令未找到: {e}",
-                exit_code=-1,
+                stderr=(
+                    f"Command not found: {e}. "
+                    f"Use: nodes which {bin_name} to check availability."
+                ),
+                exit_code=127,
                 elapsed_ms=elapsed_ms,
             )
         except PermissionError as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
             return ShellResult(
                 success=False,
-                stderr=f"权限不足: {e}",
-                exit_code=-1,
+                stderr=(
+                    f"Permission denied: {e}. "
+                    f"Check file permissions or use open_system_preferences."
+                ),
+                exit_code=126,
                 elapsed_ms=elapsed_ms,
             )
         except Exception as e:
@@ -473,7 +459,7 @@ class ShellExecutor(BaseExecutor):
             logger.error(f"执行命令失败: {e}", exc_info=True)
             return ShellResult(
                 success=False,
-                stderr=f"执行失败: {str(e)}",
+                stderr=f"Execution failed: {str(e)}",
                 exit_code=-1,
                 elapsed_ms=elapsed_ms,
             )
@@ -565,7 +551,10 @@ class ShellExecutor(BaseExecutor):
             logger.warning(f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms")
             return ShellResult(
                 success=False,
-                stderr=f"命令执行超时 ({timeout_s}s)",
+                stderr=(
+                    f"Command timed out after {timeout_s}s. "
+                    f"Try: increase timeout_ms or break into smaller steps."
+                ),
                 exit_code=-1,
                 timed_out=True,
                 elapsed_ms=elapsed_ms,
@@ -635,17 +624,24 @@ class ShellExecutor(BaseExecutor):
             logger.warning(f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms")
             return ShellResult(
                 success=False,
-                stderr=f"命令执行超时 ({timeout_s}s)",
+                stderr=(
+                    f"Command timed out after {timeout_s}s. "
+                    f"Try: increase timeout_ms or break into smaller steps."
+                ),
                 exit_code=-1,
                 timed_out=True,
                 elapsed_ms=elapsed_ms,
             )
         except FileNotFoundError as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
+            bin_name = command[0] if command else "unknown"
             return ShellResult(
                 success=False,
-                stderr=f"命令未找到: {e}",
-                exit_code=-1,
+                stderr=(
+                    f"Command not found: {e}. "
+                    f"Use: nodes which {bin_name} to check availability."
+                ),
+                exit_code=127,
                 elapsed_ms=elapsed_ms,
             )
         except Exception as e:
@@ -653,7 +649,7 @@ class ShellExecutor(BaseExecutor):
             logger.error(f"线程池执行命令失败: {e}", exc_info=True)
             return ShellResult(
                 success=False,
-                stderr=f"执行失败: {str(e)}",
+                stderr=f"Execution failed: {str(e)}",
                 exit_code=-1,
                 elapsed_ms=elapsed_ms,
             )
